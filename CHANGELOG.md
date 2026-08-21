@@ -3,6 +3,332 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.903] — three defects a real port found — 2026-08-21
+
+Porting task-tracker — a 0.9.x board API with 36 source files, m2m
+labels and assignees, an audit feed and three grouped aggregates — to
+1.0 turned up three defects in the compiler. Each is fixed with the
+corpus case that would have caught it.
+
+### A grouped column could not be aliased
+
+```jwc
+group by T.column_id, C.name
+as { column_id: T.column_id, column_name: C.name, total: count(T.id) }
+```
+
+`E0531: column_name is neither aggregated nor grouped` — against a
+column that is plainly in the `group by`. `group by` collects the column
+name from either spelling, bare or qualified, but the alias map that
+maps a projection alias back to its column read only the bare one. So
+`as { name: C.name }` passed by coincidence (the alias equals the column
+name) and `as { column_name: C.name }` did not.
+
+### A record could not be written to a `jsonb` column
+
+types.md §5.6 says a `jsonb` value written from code takes any `Record`,
+array, scalar or `Raw` — it is the one column type whose shape is not
+the schema's business. The lattice did not have that rule, so an audit
+payload could only be written as a pre-encoded string.
+
+### The native backend refused `=?` and `page`
+
+Both are lowered now.
+
+**`=?`** — which columns an `update` sets is a run-time fact, so every
+combination is compiled and a mask picks one. Two optional assignments
+is four statements; the cap is eight (256), which is far past anything a
+PATCH endpoint writes. The all-absent combination sets nothing and falls
+back to selecting the row as it stands, exactly as `exec::run_update`
+does. Each value is evaluated once, before the branch: an `=?` whose
+value calls `date.now()` must not be called to test for presence and
+again to bind.
+
+**`page`** — the cursor codec, the envelope and the HMAC are transcribed
+from `cursor.rs` and `exec::page_envelope`. `server { cursor_secret }`
+is emitted as the *expression*, not the value `jwc build` happened to
+read: it is almost always `env("CURSOR_SECRET")`, and baking that in
+would sign every deployment's cursors with the builder's secret.
+
+### `...` spread in an `update`, and `with { … }`
+
+Both were refused; both are lowered now, and with them all three
+applications in the ecosystem — jwc-shortener, MyWallet and task-tracker
+— build natively and answer `jwc serve` byte for byte.
+
+**The spread.** Which columns `set ...$req` writes is the fields the
+value actually carries. *Which fields it could carry* is the source's
+declared type, and the AST says that outright in the two places a spread
+source comes from: a typed function parameter, and
+`let x = request.body() as C`. No type inference — codegen reads the
+declaration and enumerates from there, the same mask the `=?` case uses.
+
+The presence test is different, though, and it matters: `=?` skips when
+the value is null, a spread skips when the key is **absent**. types.md
+§6.5 keeps the two apart and §9.2 relies on it — a body that sends
+`"note": null` clears the column, one that omits `note` leaves it. So
+the prelude grew `jwc_has_field`, which `jwc_get_field` cannot answer
+because it returns null for both.
+
+**`with { … }`** replaces a header of the same name rather than appending
+(routing.md §6.2). A builder has already stamped `content-type`, and two
+of them is a malformed message (RFC 9110 §8.3) that clients resolve
+inconsistently. `content_type` is its own field on the response object
+and `jwc_to_response` reads it before the header map, so a
+`with { "Content-Type": … }` that only landed in the map would lose to
+the builder's — it is copied across.
+
+### Also in the native backend
+
+- `jwt.sign(claims, secret, ttl_minutes)` — the prelude had the 0.9
+  two-argument form, which silently dropped the TTL.
+- `context.<key>` and `@param` were emitted as bare `&str` where the
+  built-in wanted a `V`.
+
+## [0.9.902] — the native build answers what `jwc serve` answers — 2026-08-21
+
+0.9.901 brought the native AOT backend back but covered only the
+database-free tier: routes, control flow, expressions, and the built-ins
+the restored prelude implements. Everything else was refused by name.
+This closes the rest of it, and the acceptance test is not "it compiles"
+— it is that the generated binary and `jwc serve` return **byte-identical**
+responses, header for header, over a program that exercises every piece.
+
+### What the pass now lowers
+
+| | 0.9.901 | 0.9.902 |
+|---|---|---|
+| `select` | ✅ | ✅ |
+| `insert` / `update` / `delete` | ❌ | ✅ |
+| `transaction { }` | ❌ | ✅ |
+| `middleware`, `requires`, `provides`, `after { }` | ❌ | ✅ |
+| `service` | ❌ | ✅ |
+| `throw`, `or throw`, postfix `catch` | ❌ | ✅ |
+| `request.body() as <Class>` | ❌ | ✅ |
+| typed path parameters | ❌ | ✅ |
+| `/healthz`, `/readyz`, `/metrics` | ❌ | ✅ |
+| `view` | ❌ | ❌ |
+| `page after $c size $n` | ❌ | ❌ |
+| `...` spread in a write, `=?` | ❌ | ❌ |
+
+The last three are still refused by name, and the message says which
+construct and that `jwc serve` runs it. A binary that quietly dropped a
+query would be a far worse outcome than one that will not build.
+
+### Errors are a `Result`, not a panic
+
+A JWC `throw` now travels the way Rust travels errors: a generated
+function returns `Result<V, JwcThrown>` and every call site propagates
+with `?`. The alternative — unwinding across `.await` and catching at the
+route boundary — needs `UnwindSafe` futures and poisons whatever lock or
+pooled connection was held at the point of the throw.
+
+Panics stay what they were: `Abort::Fault`, the 500. They are now caught
+at the route boundary, so a fault answers 500 instead of dropping the
+connection — the one failure a client cannot tell apart from the server
+being gone.
+
+### Where the two backends had drifted
+
+Restoring the 0.9 prelude verbatim was the right call for 5,030 lines of
+working runtime, but it carried 0.9's answers to questions 1.0 answers
+differently. Each of these was a wire-visible difference between `jwc
+serve` and the binary built from the same source:
+
+- Every JSON response was `application/json`; the interpreter emits
+  `application/json; charset=utf-8`. **Every** response differed.
+- An unmatched path returned a four-key envelope, and a known path under
+  the wrong verb returned 405 with `Allow`. 1.0 returns
+  `{"error":"not found"}` and 404 for both.
+- `notFound("gone")` served the four bytes `gone` as `text/plain`;
+  the interpreter serves `{"error":"gone"}`.
+- `created(json($row))` wrapped the response object as a body instead of
+  re-statusing it, so the body was the marker object and the status 200.
+- `noContent()` announced `text/plain; charset=utf-8` on a 204.
+- `/metrics` reported two gauges under different `HELP` text and omitted
+  `jwc_db_pool_max_size`, `jwc_db_pool_waiting` and `jwc_routes`.
+- `internalError()` took an argument and echoed it.
+
+All of them now come from one place per question, and the differential
+run is what says so.
+
+### The parts that had no native half at all
+
+- **Typed path parameters.** `{id: bigint}` was matched as text and the
+  type discarded, so `/notes/abc` reached the query layer and became a
+  500. routing.md §3.2 makes it a 400 *before* middleware, with a body
+  naming the parameter and the type — which is what it is now.
+- **`request.route()`** returned the request path, so a rate-limit key
+  bucketed by every distinct id instead of by route.
+- **Class validation.** `validate.rs` is now mirrored in the prelude and
+  driven by a table emitted from the same `ClassSym`s the checker built.
+  A rule the checker accepted is a rule the binary enforces; a second,
+  hand-written description of a class is what let `pattern(r"^https?://")`
+  accept `javascript:` in an earlier backend.
+- **Constraint violations.** A unique violation panicked into a 500.
+  errors.md §6 makes a constraint carrying a message a declared error —
+  `Conflict` for 23505, `BadRequest` for a check or not-null — and one
+  without a message stays a fault.
+
+### One bug worth naming
+
+Every INSERT bound `null` for every column. The builder marks each INSERT
+parameter `Bind::Expr` over a placeholder expression and
+`exec::run_insert` supplies the values positionally, bypassing
+`bind_params` entirely; deriving them from the placeholder — which is
+`ExprKind::Null` — bound null for each. Postgres reported it as a
+not-null violation on a column the program had plainly set.
+
+### What running the real application found
+
+The differential above uses a program written to exercise the tier. Then
+jwc-shortener — 10 routes, three HTML pages, an SVG, Swagger, Redis rate
+limiting — was built and diffed the same way, and found three more:
+
+- **`crypto.token`, `string.of`, `string.slice`, `string.strip_prefix`,
+  `date.hours`.** The restored prelude predates the 1.0 vocabulary, so it
+  had no counterpart for the built-ins 1.0 introduced. `jwc build` refused
+  on the first one and named it, which is the right failure — but it is
+  still a refusal. All of `builtins.md` §2–§8 is now implemented, except
+  `date.add`, which `exec_call.rs` has no arm for either: `jwc serve` does
+  not run that one, and the message says so.
+- **`redis.*`.** 1.0 spells the Redis surface as a built-in namespace with
+  `get`/`set`/`del`/`incr`/`expire`/`rate_limit`/`enabled`. The prelude had
+  the 0.9 `redis_*` names, no `rate_limit`, and answered rather than
+  faulting when no server was configured — which would let a rate limiter
+  allow everything.
+- **The router took the first match, not the most specific.** The
+  interpreter scores candidates by literal-segment count. jwc-shortener
+  declares `/{code}` for its redirects beside `/docs`, `/openapi.json`,
+  `/robots.txt`, `/sitemap.xml` and `/og.svg`; the native binary gave all
+  five to the redirect handler and answered 404.
+- **`env(name)` answered `""` for an unset variable, not null.** `??` only
+  fires on null, so `env("PUBLIC_BASE_URL") ?? "https://1kb.uz"` produced
+  the empty string and the short links came out as `/abc1234` with no host.
+
+### Which prelude a program gets
+
+Read off the prelude sources rather than a hand-kept list: codegen records
+every prelude function the program reached and asks each prelude file
+whether it defines it. A crate with no `pattern` rule anywhere does not
+compile the regex engine; one with no query does not compile
+tokio-postgres.
+
+## [0.9.901] — `as "…"` was unusable — 2026-08-21
+
+Two defects, both found porting MyWallet — a JWC backend written against
+0.9.x — to the 1.0 vocabulary. Both are on `as "physical_name"`, which
+exists so a program can keep the names a database already has, and which
+is therefore the first thing a port off an older version reaches for.
+MyWallet's four tables are `user`, `wallet`, `category` and `transaction`.
+
+### A foreign key could not name a renamed table
+
+The target's physical name was derived from the **reference** —
+`references App.public.Users` → `users` — instead of from the target,
+which had renamed itself to `user`. So the key did not resolve, and the
+diagnostic named a table the source never wrote:
+
+```
+error[E0422]: `public.users` is not a declared table
+   = help: every foreign key target must be declared in this program
+```
+
+against a program that declares exactly that table. Resolution now happens
+after every table is known, keyed on the declared name.
+
+jwc-shortener did not show this: it uses `as "…"` on both its tables and
+neither is a foreign-key target.
+
+### `RETURNING` did not quote a reserved physical name
+
+`RETURNING` exposes the target under its own name, and the projection was
+built against it unquoted:
+
+```sql
+INSERT INTO public."user" (…) RETURNING json_build_object('id', user.id)::text
+                                                          ^^^^ the USER function
+ERROR:  syntax error at or near "."
+```
+
+`user` there is the SQL `USER` function and the parser stops at the dot.
+Every read path already went through `quote_ident`; only this one did not,
+so the failure needed a write, a `RETURNING` projection and a reserved
+physical name all at once — which is an ordinary combination in a ported
+schema, and which made `POST /auth/register` a 500 that type-checked
+clean.
+
+Both are covered by `tests/reserved_names`, which drives insert, update
+and delete against a real Postgres through a table named `user` that
+another table points at.
+
+## [0.9.901] — the native backend comes back — 2026-08-21
+
+### What was deleted, and by whom
+
+The v0.25.0 cutover (`60cc971`) removed 73 source files, and among them the
+whole native AOT backend: 5,149 lines of codegen and 5,030 of prelude, plus
+the background queue, the in-process cache, WebSocket/SSE and the mail
+sender. The ROADMAP section that authorised it was written the day before
+in the same hand. Neither the plan nor the deletion was put to the
+maintainer, and neither was the maintainer's to discover afterwards.
+
+The stated reason was that a second implementation of the query compiler
+would have to move in lockstep with the first. **That reason does not
+survive the 1.0 front-end.** `query_sql` already lowers a query to a SQL
+string and a parameter list at compile time, so codegen embeds the very
+string the interpreter sends: there is no second query compiler, and no
+query semantics that can drift.
+
+The roadmap also promised `jwc build --native` would answer `E0910` naming
+the reason and the release it returns in. It did not: `build` was not a
+subcommand at all, so the answer was clap's `unrecognized subcommand`.
+
+### `jwc build` is back
+
+* **The prelude returns unchanged** — 5,030 lines across base, db, crypto,
+  redis, ws and http. It references no AST type, so it needed no port.
+* **The codegen is new**, written against the 1.0 AST. The old one named
+  `RouteDecl` with a bare path, `MountDecl`, `ModelKind` and `validate
+  body`; none of those exist now.
+* `jwc build --emit-rust` writes the generated source and stops, so what
+  cargo is about to compile can be read first.
+
+Verified end to end: a program with routes, a free function, `??`, a `for`
+loop with `continue`, and `string.upper` generates Rust, compiles to a
+42 MB binary, serves HTTP, and answers **byte-for-byte what `jwc serve`
+answers** on every route.
+
+### `serve(port)` means the same thing on both backends
+
+The first cut of the generated `main` read `PORT` from the environment.
+The interpreter evaluates `main` and takes the argument of `serve(…)`
+(config.md §3.2.2), so a program that hardcodes its port would have been
+served on two different ports depending on the backend. The generated
+`main` now runs the program's own `main`, and `serve(n)` records the port.
+
+### Coverage, stated rather than implied
+
+This pass lowers the database-free tier: routes, control flow,
+expressions, and the built-ins the prelude implements. Tables, views,
+services, middleware, queries, `transaction`, `with { }`, postfix `catch`
+and `request.body() as C` are **refused by name**, with the construct
+printed and a pointer to `jwc serve`, which runs the whole language. A
+native binary that silently dropped a query would be a far worse outcome
+than one that will not build.
+
+The 1.0 built-ins the prelude predates — `string.of`, `array.sum`,
+`date.*`, `crypto.token`, `content`, `redirect` and the rest — are listed
+in `PRELUDE_GAPS` and refused individually by name. That list is a
+worklist, not a shrug.
+
+### Still to come back
+
+`queue.rs` (1,352 lines), `cache.rs` (177), `email.rs` (180),
+`log_writer.rs` (466), `swagger.rs` (661), `templates.rs` (416) and the
+package resolver, lockfile and registry client (~830). All of it is in git
+at `60cc971^` and none of it is lost.
+
 ## [0.9.9] — porting a real app to 1.0 — 2026-08-21
 
 Seven defects, all found by porting jwc-shortener — a service that has been
