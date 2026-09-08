@@ -3486,3 +3486,59 @@ fn set_header_replaces_and_add_header_appends_on_both_backends() {
         "`with {{ }}` keeps its replace semantics"
     );
 }
+
+/// A fault's detail reaches the log, and the caller gets `internal_error` —
+/// on both backends, and `JWC_DEBUG_ERRORS` moves both.
+///
+/// Three things were wrong at once. `jwc serve` never read the variable:
+/// it is in the config registry, `jwc config` prints it, the generated
+/// crate honoured it, and the one backend a developer is running when they
+/// reach for it ignored it. The generated crate answered a fault with a
+/// sentence of English where `jwc serve` answered `internal_error`, so the
+/// two were distinguishable from outside. And `jwc_thrown_response` sent
+/// the message of an `internal_error` **verbatim, with the flag off** —
+/// `mail.send` against an unconfigured relay named every SMTP variable to
+/// the caller, and the transport arm below it hands over whatever the
+/// relay said, which is where the host, the username and the rejection
+/// text live. errors §63, routing §203 and security §134 all fix that
+/// answer at `{"error":"internal_error"}` with the detail in the log.
+#[test]
+fn a_fault_says_internal_error_and_nothing_else_on_both_backends() {
+    let serve = include_str!("../src/serve.rs");
+    assert!(
+        serve.contains(r#"std::env::var("JWC_DEBUG_ERRORS")"#),
+        "`jwc serve` must actually read the switch it documents"
+    );
+    assert!(
+        serve.contains("let detail = if debug_errors() {"),
+        "and branch the fault body on it"
+    );
+
+    let base = include_str!("../src/native/prelude/base.rs.in");
+    assert!(
+        base.contains("fn jwc_debug_errors() -> bool {"),
+        "the generated crate needs the same switch behind one reader"
+    );
+    assert!(
+        base.contains(r#"if t.error == "internal_error" {"#),
+        "an undeclared failure must be redacted where it becomes a response, \
+         not at each raise site"
+    );
+    assert!(
+        !base.contains("Internal server error. Check the server log"),
+        "and must not invent a body the interpreter does not send"
+    );
+
+    // Every other way the interpreter reaches a 500 says the same word, so
+    // the redacting branch is the whole set and not one of several bodies.
+    assert_eq!(
+        serve.matches(r#"Response::message(500, "internal_error")"#).count(),
+        3,
+        "the interpreter's other 500s must keep answering `internal_error`"
+    );
+    let exec_call = include_str!("../src/exec_call.rs");
+    assert!(
+        exec_call.contains(r#""internalError" => self.respond_message(500, "internal_error")"#),
+        "and so must the builder an author calls by hand"
+    );
+}

@@ -715,17 +715,30 @@ async fn jwc_bind_dual_stack(addr: std::net::SocketAddr) -> std::io::Result<TcpL
 /// The detail is logged rather than returned, so SQL text and Rust type
 /// names don't reach the caller. `JWC_DEBUG_ERRORS=1` puts it back, same
 /// switch and same values the interpreter honours.
+/// `JWC_DEBUG_ERRORS`, read once. Same truthy set as `engine::parse_bool_flag`
+/// and the same switch `jwc serve` reads, so a program answers the same way
+/// however it was compiled.
+fn jwc_debug_errors() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("JWC_DEBUG_ERRORS")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false)
+    })
+}
+
 #[cold]
 #[inline(never)]
 fn jwc_uncaught_error_response(msg: String) -> V {
     eprintln!("[jwc] uncaught error in handler: {}", msg);
-    let debug = std::env::var("JWC_DEBUG_ERRORS")
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false);
-    let detail = if debug {
+    let detail = if jwc_debug_errors() {
         msg
     } else {
-        "Internal server error. Check the server log for the matching x-request-id.".to_string()
+        // errors §63 / routing §203 / security §134 — one fixed body. It
+        // used to be a sentence of English here and `internal_error` under
+        // `jwc serve`, so a client could tell the two backends apart from
+        // the outside.
+        "internal_error".to_string()
     };
     // Field order matches `http_error::envelope`: error, status, code.
     let mut body = String::from("{\"error\":");
@@ -1767,6 +1780,32 @@ impl JwcThrown {
 fn jwc_thrown_response(t: JwcThrown) -> V {
     if let Some(body) = t.body {
         return make_response(t.status, body, JWC_JSON_CT);
+    }
+    // `internal_error` is the runtime's own name for a failure the program
+    // never declared, so its message is a diagnostic and not something an
+    // author wrote for a caller to read. errors §63, routing §203 and
+    // security §134 all fix that answer at `{"error":"internal_error"}`
+    // with the detail going to the log — and this backend sent the detail
+    // instead, with `JWC_DEBUG_ERRORS` off and no way to turn it off.
+    // `mail.send` on an unconfigured relay named every SMTP variable to
+    // the caller; the transport-error arm below it hands over whatever the
+    // relay said, which is where the host, the username and the rejection
+    // reason live.
+    //
+    // Redacting here rather than at the three raise sites is the point: the
+    // next `internal_error` anyone adds is covered without remembering to.
+    if t.error == "internal_error" {
+        eprintln!("[fault] {}", t.message);
+        let detail = if jwc_debug_errors() {
+            t.message
+        } else {
+            "internal_error".to_string()
+        };
+        return make_response(
+            t.status,
+            format!("{{\"error\":{}}}", jwc_json_string(&detail)),
+            JWC_JSON_CT,
+        );
     }
     // Written rather than routed through `JwcObj`, which is an `FxHashMap`:
     // a one-key document has no order to lose, but the next reader would

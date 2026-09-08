@@ -1439,11 +1439,45 @@ async fn run_after_chain(
     }
 }
 
+/// `JWC_DEBUG_ERRORS`, read once — a per-fault `std::env::var` would be one
+/// syscall on the path that is already having a bad day.
+///
+/// Same truthy set as `engine::parse_bool_flag`, and the generated crate
+/// reads the same switch through `jwc_debug_errors()`: the answer to a
+/// fault must not depend on which backend built the program.
+fn debug_errors() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("JWC_DEBUG_ERRORS")
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
 async fn handle_error(program: &Program, vm: &mut Vm<'_>, abort: Abort) -> Response {
     let thrown = match abort {
         Abort::Fault(e) => {
+            // The detail goes to the log, never to the caller (security
+            // §134) — it carries SQL text, Rust type names and whatever a
+            // relay or a driver put in its error string.
+            //
+            // `JWC_DEBUG_ERRORS` is the documented way to put it back for
+            // local work. It was in the config registry, `jwc config` printed
+            // it, and the generated crate honoured it — and `jwc serve`, the
+            // backend a developer is actually running when they reach for
+            // it, never read the variable at all.
+            let detail = if debug_errors() {
+                e.to_string()
+            } else {
+                "internal_error".to_string()
+            };
             eprintln!("[fault] {e}");
-            return Response::message(500, "internal_error");
+            return Response::message(500, &detail);
         }
         Abort::Thrown(t) => t,
     };

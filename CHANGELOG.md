@@ -3,7 +3,39 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.9.949] — `set_header` set nothing; `add_header` added once — 2026-09-08
+## [0.9.949] — headers, and a fault that told the caller too much — 2026-09-08
+
+### Fixed
+
+- **A fault's detail reached the client on the native backend, with
+  `JWC_DEBUG_ERRORS` off.** `jwc_thrown_response` sent the message of an
+  `internal_error` verbatim, so `mail.send` against an unconfigured relay
+  answered the caller with the names of every `JWC_SMTP_*` variable, and
+  the transport arm below it handed over whatever the relay said — where
+  the host, the account and the rejection reason live. errors §63,
+  routing §203 and security §6.3 all fix that answer at
+  `{"error":"internal_error"}` with the detail in the log. Redaction now
+  happens where a raise becomes a response rather than at each raise site,
+  so the next `internal_error` anyone adds is covered without being
+  remembered.
+
+- **`JWC_DEBUG_ERRORS` did nothing under `jwc serve`.** It is in the config
+  registry, `jwc config` prints it, and the generated crate honoured it —
+  and the backend a developer is actually running when they reach for it
+  never read the variable. The switch now moves both backends, off the same
+  truthy set, read once.
+
+- **The two backends sent different bodies for the same fault.** `jwc build`
+  answered with a sentence of English ("Internal server error. Check the
+  server log…") where `jwc serve` answered `internal_error`, so a client
+  could tell which backend it was talking to from the outside. Both now
+  send `{"error":"internal_error"}`, and both send the full detail when the
+  switch is on.
+
+Measured on one route that faults, over both backends, in both modes:
+identical bodies, and the detail in the log either way.
+
+### Also fixed — `set_header` set nothing; `add_header` added once
 
 Both header verbs an `after` block has were wrong, in opposite directions,
 one on each backend — so a single measurement of one two-line middleware

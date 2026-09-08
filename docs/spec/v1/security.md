@@ -134,6 +134,21 @@ leaving it to be discovered in production.
 `{"error": "internal_error"}` and the detail goes to the log with the
 request id.
 
+6.3.1 `JWC_DEBUG_ERRORS=1` puts the detail in the body instead, for local
+work. It is the only switch that does, both backends read it, and it
+defaults off — a deployment that has not set it cannot be talked into
+disclosing a fault by anything a request can carry.
+
+6.3.2 The same rule covers a raise the runtime makes on the program's
+behalf under the reserved name `internal_error` — an unconfigured mail
+relay, a transport failure — and not only a panic. Redaction happens where
+a raise becomes a response, so the rule holds for the next such raise
+without it being remembered. Until 0.9.949 it held for neither on the
+native backend: `mail.send` against an unconfigured relay listed every
+`JWC_SMTP_*` variable to the caller, and the transport arm returned the
+relay's own rejection text, which is where the host, the account and the
+reason live.
+
 6.4 **Cookies, and what this does and does not do about CSRF.**
 
 This section used to say CSRF was out of scope because "the API is
