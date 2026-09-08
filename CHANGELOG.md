@@ -3,6 +3,39 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.950] — a dead peer kept its slot — 2026-09-08
+
+### Added
+
+- **`server { socket_keepalive }`** — a keepalive ping on quiet WebSocket
+  connections, default `"30s"`, `"0s"` to disable. Both backends;
+  `JWC_SOCKET_KEEPALIVE` overrides it in a native build.
+
+### Fixed
+
+- **`max_sockets` could not reclaim a connection that was open but dead.**
+  A cap on how many connections may be open bounds nothing about how long
+  a dead one stays open: `socket.recv()` waits with no timeout, so a peer
+  that vanished without a FIN — a lid closed, a NAT entry expired, a cable
+  pulled — held its slot until the kernel gave up on the TCP connection,
+  which for an idle socket is never. The cap then worked against the
+  server, refusing live clients on behalf of peers that no longer existed.
+  routing.md §9.5 described this gap in as many words and left it for a
+  later version.
+
+  A quiet connection is now pinged every interval; if the next tick finds
+  that ping still unanswered, the peer is gone and the connection is
+  dropped, returning its slot. Any frame counts as the answer, not only a
+  pong, so a busy socket is never disturbed.
+
+Measured on both backends with a 2s interval, against a peer that
+completes the handshake and then never writes another byte: `ping` at 2s,
+`close` at 4s. With `max_sockets = 2`, two such peers filled the cap and a
+third upgrade got **503**; once the deadline passed, the same upgrade
+succeeded. A peer that answered its pings was still connected after five
+of them. With the ping disabled, the same dead peer was never touched —
+which is what the escape hatch is for.
+
 ## [0.9.949] — headers, and a fault that told the caller too much — 2026-09-08
 
 ### Fixed

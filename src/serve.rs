@@ -258,6 +258,11 @@ pub(crate) fn read_server_config(s: &ServerDecl) -> ServerConfig {
                     c.header_timeout = d;
                 }
             }
+            "socket_keepalive" => {
+                if let Some(d) = config_duration(&a.value) {
+                    c.socket_keepalive = d;
+                }
+            }
             "trusted_proxies" => {
                 if let ExprKind::Array(items) = &*a.value.kind {
                     c.trusted_proxies = items
@@ -1208,9 +1213,61 @@ async fn drive_socket(
         open = flush(&mut socket, out).await;
     }
 
+    // routing.md §9.5 — a ping is what tells a quiet peer from a gone one.
+    //
+    // `max_sockets` bounds how many connections may be open. Nothing
+    // bounded how long a dead one stayed open: `socket.recv()` waits with
+    // no timeout, so a peer that vanished without a FIN held its slot
+    // until the kernel gave up on the TCP connection, which for an idle
+    // socket with no keepalive of its own is never. The cap then works
+    // against the server — live clients get 503 on behalf of peers that
+    // no longer exist.
+    //
+    // The deadline is one interval, checked at the next tick: a peer that
+    // has not answered the outstanding ping by then is gone. That puts the
+    // reclaim between one and two intervals after the peer dies, which is
+    // the price of not running a second timer per connection.
+    let ping_every = program.server.socket_keepalive;
+    let ping_on = !ping_every.is_zero();
+    // `interval` panics on a zero period. A `select!` branch guarded false
+    // is never polled, so this placeholder is never read — it exists so
+    // the loop body stays one copy instead of two.
+    let mut tick = tokio::time::interval(if ping_on {
+        ping_every
+    } else {
+        std::time::Duration::from_secs(60)
+    });
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick of an `interval` completes immediately.
+    tick.tick().await;
+
     if open {
-        while let Some(msg) = socket.recv().await {
+        let mut awaiting_pong = false;
+        loop {
+            let msg = tokio::select! {
+                // Polled first: a socket with traffic on it should be
+                // reading that traffic, not deciding whether to ping.
+                biased;
+                m = socket.recv() => m,
+                _ = tick.tick(), if ping_on => {
+                    if awaiting_pong {
+                        // The previous tick's ping went unanswered for a
+                        // whole interval. Returning here drops the socket
+                        // and, with it, the `SocketSlot` the upgrade took.
+                        break;
+                    }
+                    if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
+                    awaiting_pong = true;
+                    continue;
+                }
+            };
+            let Some(msg) = msg else { break };
             let Ok(msg) = msg else { break };
+            // Any frame is proof of life, not just the pong: a peer that
+            // is talking has answered the question the ping asks.
+            awaiting_pong = false;
             match msg {
                 Message::Text(t) => {
                     let Some((binder, body)) = &handlers.on_message else {
@@ -1238,7 +1295,8 @@ async fn drive_socket(
                 // peer never sent.
                 Message::Binary(_) => break,
                 Message::Close(_) => break,
-                // axum answers pings itself.
+                // axum answers an inbound ping itself; a pong is the
+                // answer to ours and needs nothing beyond the reset above.
                 Message::Ping(_) | Message::Pong(_) => {}
             }
         }

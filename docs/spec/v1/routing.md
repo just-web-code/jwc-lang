@@ -505,13 +505,33 @@ closes them.
 With the cap, the same 190 attempts fill it, the rest get 503, and HTTP
 keeps answering 200.
 
-What the cap does **not** do: it does not reclaim a connection that is
-open but dead. `socket.recv()` waits with no timeout, so a peer that has
-gone away silently holds its slot until the TCP connection breaks. A
-server-initiated ping with a pong deadline is what distinguishes "quiet"
-from "gone", and 1.0 does not send one — an attacker who holds slots open
-still denies *sockets* to everyone else, and the cap's guarantee is only
-that **HTTP survives it**. Set `max_sockets` with that in mind.
+### 9.5.1 Reclaiming a dead connection
+
+A cap on how many connections may be open is only half of it. Nothing
+bounded how long a **dead** one stayed open: `socket.recv()` waits with no
+timeout, so a peer that went away without a FIN — a lid closed, a NAT
+entry expired, a cable pulled — held its slot until the kernel gave up on
+the TCP connection, which for an idle socket is never. The cap then worked
+against the server, refusing live clients on behalf of peers that no
+longer existed.
+
+`server { socket_keepalive }` is the answer, and it is on by default at
+**30s**. Every interval a quiet connection gets a **ping**; if the next
+tick arrives with that ping still unanswered, the peer is gone and the
+connection is dropped — returning its slot. Any frame at all counts as the
+answer, not only a pong: a peer that is talking has already answered the
+question the ping asks.
+
+So a dead peer is reclaimed between one and two intervals after it dies.
+That range, rather than a single number, is the cost of one timer per
+connection instead of two.
+
+`socket_keepalive = "0s"` disables the ping, and means what `0` means for
+`max_sockets`: the deployment has something else doing this. Measured with
+a 2s interval, on both backends, against a peer that completes the
+handshake and then never speaks: `ping` at 2s, `close` at 4s, and the slot
+back — a third upgrade that got **503** while the cap was full succeeds
+once the deadline passes. A peer that answers its pings is not disturbed.
 
 ### 9.6 What is not here
 

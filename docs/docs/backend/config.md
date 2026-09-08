@@ -80,6 +80,7 @@ does not have, or miss one it does.
 | `JWC_LOG_FORMAT` | `text` | Access-log shape: `text` or `json`. Read only when JWC_REQUEST_LOG is on. |
 | `JWC_MAX_BODY_BYTES` | `2097152` | Request body cap (bytes); 0 disables. |
 | `JWC_MAX_SOCKETS` | `server { max_sockets }, else half the descriptor limit` | Concurrent WebSocket connections; 0 disables the cap. Native builds only — `jwc serve` reads `server { max_sockets }`. |
+| `JWC_SOCKET_KEEPALIVE` | `server { socket_keepalive }, else 30` | Seconds between keepalive pings on a quiet WebSocket, and the deadline for the pong. `0` disables it, leaving a dead peer holding its `max_sockets` slot. Native builds only — `jwc serve` reads `server { socket_keepalive }`. |
 | `JWC_SHUTDOWN_TIMEOUT` | `5` | Graceful shutdown budget before force-exit. |
 | `JWC_DEBUG_ERRORS` | `0` | Return the full error text on a 500 instead of a generic message. Local debugging only. |
 | `JWC_CORS_ORIGINS` | — | Comma-separated allowed origins, or `*`. Empty disables CORS. |

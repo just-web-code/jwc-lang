@@ -3134,6 +3134,16 @@ fn jwc_max_sockets() -> usize {
         .unwrap_or(JWC_SOURCE_MAX_SOCKETS)
 }
 
+/// How often a quiet socket is pinged, and how long its pong may take.
+/// Same precedence as the two above, and `0` disables the ping.
+fn jwc_socket_keepalive() -> std::time::Duration {
+    let secs = std::env::var("JWC_SOCKET_KEEPALIVE")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(JWC_SOURCE_SOCKET_KEEPALIVE_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
 /// Open WebSocket connections, against `jwc_max_sockets()`.
 static JWC_OPEN_SOCKETS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);

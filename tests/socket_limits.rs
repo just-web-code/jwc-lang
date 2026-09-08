@@ -273,3 +273,175 @@ async fn http_ping(port: u16) -> bool {
         _ => false,
     }
 }
+
+/// A dead peer does not keep its slot.
+///
+/// `max_sockets` bounds how many connections may be open. Nothing bounded
+/// how long a **dead** one stayed open: `socket.recv()` waits with no
+/// timeout, so a peer that vanished without a FIN — a lid closed, a NAT
+/// entry expired — held its slot until the kernel gave up on the TCP
+/// connection, which for an idle socket is never. The cap then worked
+/// against the server, refusing live clients on behalf of peers that no
+/// longer existed. routing.md §9.5 said so in as many words and left it
+/// for a later version; this is that version.
+///
+/// The peers here are the honest shape of the problem: they complete the
+/// handshake and then never write another byte, pong included.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_that_stops_answering_loses_its_slot() {
+    let src = r#"
+server {
+    max_sockets = 2;
+    socket_keepalive = "1s";
+}
+
+routes "/" {
+    route GET "ping" { return content("text/plain", "pong"); }
+    socket "ws" {
+        on message (text) {
+            socket.send("echo");
+        }
+    }
+}
+"#;
+    let port = boot(src).await;
+
+    let mut held = Vec::new();
+    for _ in 0..2 {
+        held.push(idle_upgrade(port).await.expect("the cap has room"));
+    }
+    let status = idle_upgrade(port).await.expect_err("the cap is full");
+    assert!(
+        status.contains("503"),
+        "an over-cap upgrade must be a readable 503, got: {status}"
+    );
+
+    // The server pings a quiet connection. Nothing answers, and at the
+    // next tick the peer is gone and the slot comes back. Before this
+    // change the loop below ran to its end every time.
+    let mut waited = 0;
+    loop {
+        if idle_upgrade(port).await.is_ok() {
+            break;
+        }
+        assert!(
+            waited < 60,
+            "a peer that answered nothing for six seconds still held its \
+             slot — the ping is not reclaiming"
+        );
+        waited += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(
+        waited > 0,
+        "the slot came back before a single deadline could pass, so this \
+         test is measuring something other than the reclaim"
+    );
+
+    // The peers were dropped, not the listener.
+    assert!(http_ping(port).await, "HTTP must be unaffected");
+    drop(held);
+}
+
+/// And a peer that answers is left alone.
+///
+/// The reclaim is worth nothing if it also drops live connections — a
+/// socket held open for hours with no traffic is the normal case for a
+/// notification feed, which is exactly what a ping is for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_that_answers_the_ping_is_left_alone() {
+    let src = r#"
+server {
+    socket_keepalive = "1s";
+}
+
+routes "/" {
+    socket "ws" {
+        on message (text) {
+            socket.send("echo");
+        }
+    }
+}
+"#;
+    let port = boot(src).await;
+    let mut s = idle_upgrade(port).await.expect("upgrade");
+
+    // Four intervals: twice the deadline that removes a silent peer.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+    let mut pinged = 0;
+    let mut closed = false;
+    while std::time::Instant::now() < deadline {
+        let mut buf = [0u8; 256];
+        let read = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            s.read(&mut buf),
+        )
+        .await;
+        let n = match read {
+            Err(_) => continue,
+            Ok(Ok(0)) | Ok(Err(_)) => {
+                closed = true;
+                break;
+            }
+            Ok(Ok(n)) => n,
+        };
+        let mut i = 0;
+        while i + 1 < n {
+            let (op, len) = (buf[i] & 0x0f, (buf[i + 1] & 0x7f) as usize);
+            if op == 0x9 {
+                pinged += 1;
+                // The pong is the whole point of this test.
+                if s.write_all(&pong_frame(&buf[i + 2..(i + 2 + len).min(n)]))
+                    .await
+                    .is_err()
+                {
+                    closed = true;
+                }
+            } else if op == 0x8 {
+                closed = true;
+            }
+            i += 2 + len;
+        }
+        if closed {
+            break;
+        }
+    }
+
+    assert!(pinged >= 2, "the server must ping a quiet socket, saw {pinged}");
+    assert!(
+        !closed,
+        "a peer that answered {pinged} pings was closed anyway — the \
+         deadline is dropping live connections"
+    );
+}
+
+/// A masked client pong carrying the ping's payload back (RFC 6455 §5.5.3).
+fn pong_frame(payload: &[u8]) -> Vec<u8> {
+    let mask = [0x21u8, 0x09, 0x7c, 0x44];
+    let mut f = vec![0x8au8, 0x80 | payload.len() as u8];
+    f.extend_from_slice(&mask);
+    f.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+    f
+}
+
+/// Load a source, start a server on a free port, wait for it to answer.
+async fn boot(src: &str) -> u16 {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("a.jwc"), src).expect("write");
+    let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
+    let program = Arc::new(jwc::serve::load(&ws).unwrap_or_else(|e| panic!("{e}")));
+
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = probe.local_addr().expect("addr").port();
+    drop(probe);
+    tokio::spawn(async move {
+        let _ = jwc::serve::serve(program, port).await;
+    });
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    port
+}

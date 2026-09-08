@@ -105,9 +105,52 @@ async fn jwc_drive_socket(
         open = flush(&mut socket, out).await;
     }
 
+    // routing.md §9.5 — the same ping `serve.rs::drive_socket` sends, on
+    // the same interval, for the same reason: `jwc_max_sockets()` bounds
+    // how many connections may be open, and nothing bounded how long a
+    // dead one stayed open. A peer that vanished without a FIN held its
+    // slot until the kernel gave up on the TCP connection — for an idle
+    // socket, never — so the cap ended up refusing live clients on behalf
+    // of peers that no longer existed.
+    let ping_every = jwc_socket_keepalive();
+    let ping_on = !ping_every.is_zero();
+    // `interval` panics on a zero period; a `select!` branch guarded false
+    // is never polled, so this placeholder is never read.
+    let mut tick = tokio::time::interval(if ping_on {
+        ping_every
+    } else {
+        std::time::Duration::from_secs(60)
+    });
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // An `interval`'s first tick completes immediately.
+    tick.tick().await;
+
     if open {
-        while let Some(msg) = socket.recv().await {
+        let mut awaiting_pong = false;
+        loop {
+            let msg = tokio::select! {
+                // A socket with traffic on it should be reading that
+                // traffic, not deciding whether to ping.
+                biased;
+                m = socket.recv() => m,
+                _ = tick.tick(), if ping_on => {
+                    if awaiting_pong {
+                        // A whole interval with the ping unanswered.
+                        // Returning drops the socket and the
+                        // `JwcSocketSlot` the upgrade took with it.
+                        break;
+                    }
+                    if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
+                    awaiting_pong = true;
+                    continue;
+                }
+            };
+            let Some(msg) = msg else { break };
             let Ok(msg) = msg else { break };
+            // Any frame is proof of life, not just the pong.
+            awaiting_pong = false;
             match msg {
                 Message::Text(t) => {
                     let Some(f) = fns.on_message else {
@@ -127,6 +170,8 @@ async fn jwc_drive_socket(
                 // through `from_utf8_lossy` would hand the handler a
                 // string the peer never sent.
                 Message::Binary(_) | Message::Close(_) => break,
+                // axum answers an inbound ping itself; a pong is the
+                // answer to ours and needs nothing beyond the reset above.
                 Message::Ping(_) | Message::Pong(_) => {}
             }
         }

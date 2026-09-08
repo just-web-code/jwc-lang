@@ -90,6 +90,38 @@ error in, and closing is the only signal the protocol has.
 | `after` blocks, after a successful upgrade | do not run: they observe a response, and the response was the `101` |
 | `after` blocks, when middleware answers | run, in reverse order, for every middleware that started — the client got an ordinary response, and a rejected upgrade is what an access log is for |
 
+## How many, and how long
+
+Two `server { }` keys bound sockets, and they answer different questions.
+
+| Key | Default | What it does |
+|---|---|---|
+| `max_sockets` | half the descriptor limit, clamped to [64, 4096] | past it the upgrade is `503`, answered before the handshake so the descriptor is never spent |
+| `socket_keepalive` | `"30s"` | pings a quiet connection; a peer that has not answered by the next tick is dropped and its slot returned |
+
+The second exists because the first is not enough on its own. A cap on how
+many connections may be open says nothing about how long a **dead** one
+stays open — `socket.recv()` waits with no timeout, so a peer that
+disappeared without closing (a lid shut, a NAT entry expired, a cable
+pulled) held its slot until the kernel gave up on the TCP connection,
+which for an idle socket is never. The cap then works against you: live
+clients get `503` on behalf of peers that no longer exist.
+
+Any frame counts as the answer, not only a pong — a peer that is talking
+has answered the question the ping asks — so a busy connection is never at
+risk. A dead one is reclaimed between one and two intervals after it dies.
+
+```jwc
+server {
+    max_sockets = 5000;
+    socket_keepalive = "45s";   -- "0s" turns the ping off
+}
+```
+
+Turn it off only when something else is doing the same job — a load
+balancer that drops idle connections on its own timer, say. With no ping
+and no such proxy, a dead peer keeps its slot for the life of the process.
+
 ## Tooling
 
 `jwc routes` prints sockets as `WS`:

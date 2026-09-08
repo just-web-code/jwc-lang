@@ -232,6 +232,15 @@ pub const REGISTRY: &[EnvVar] = &[
               Native builds only — `jwc serve` reads `server { max_sockets }`.",
     },
     EnvVar {
+        name: "JWC_SOCKET_KEEPALIVE",
+        parse_kind: ParseKind::DurationSecs,
+        default: "server { socket_keepalive }, else 30",
+        doc: "Seconds between keepalive pings on a quiet WebSocket, and the \
+              deadline for the pong. `0` disables it, leaving a dead peer \
+              holding its `max_sockets` slot. Native builds only — \
+              `jwc serve` reads `server { socket_keepalive }`.",
+    },
+    EnvVar {
         name: "JWC_SHUTDOWN_TIMEOUT",
         parse_kind: ParseKind::DurationSecs,
         default: "5",

@@ -529,8 +529,11 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // falls back to, instead of a constant nobody wrote.
     out.push_str(&format!(
         "\nconst JWC_SOURCE_MAX_BODY_BYTES: usize = {};\n\
-         const JWC_SOURCE_MAX_SOCKETS: usize = {};\n",
-        server.max_body_bytes, server.max_sockets
+         const JWC_SOURCE_MAX_SOCKETS: usize = {};\n\
+         const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n",
+        server.max_body_bytes,
+        server.max_sockets,
+        server.socket_keepalive.as_secs()
     ));
     emit_constraint_messages(&mut out, &built.model);
     emit_cursor_secret(&mut out, ws);

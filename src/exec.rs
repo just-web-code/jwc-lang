@@ -187,6 +187,19 @@ pub struct ServerConfig {
     /// dribbles headers one byte at a time never reaches the handler the
     /// whole-request timer guards.
     pub header_timeout: std::time::Duration,
+    /// How often a quiet socket is pinged, and how long its pong may take
+    /// (config.md §3.2, routing.md §9.5).
+    ///
+    /// `max_sockets` bounds how many connections may be open; without a
+    /// ping nothing bounds how long a **dead** one stays open. A peer that
+    /// vanishes without a FIN — a lid closed, a NAT entry expired, a cable
+    /// pulled — leaves `socket.recv()` waiting forever, and the slot it
+    /// holds is never returned. The cap then leaks downward: the server
+    /// refuses live clients on behalf of peers that no longer exist.
+    ///
+    /// `0` disables the ping, and means what `0` means for `max_sockets`:
+    /// the deployment has something else doing this.
+    pub socket_keepalive: std::time::Duration,
 }
 
 /// Where the listener's certificate and key are read from. Both are
@@ -271,6 +284,7 @@ impl Default for ServerConfig {
             tls: None,
             tls_declared: false,
             header_timeout: std::time::Duration::from_secs(10),
+            socket_keepalive: std::time::Duration::from_secs(30),
         }
     }
 }
