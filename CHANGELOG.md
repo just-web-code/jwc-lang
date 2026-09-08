@@ -3,6 +3,42 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.949] — `set_header` set nothing; `add_header` added once — 2026-09-08
+
+Both header verbs an `after` block has were wrong, in opposite directions,
+one on each backend — so a single measurement of one two-line middleware
+disagreed with itself twice.
+
+### Fixed
+
+- **`response.set_header` appended instead of replacing (interpreter).**
+  `exec_call.rs` matched `"response.set_header" | "response.add_header"` in
+  one arm and pushed onto the header bag, so `set` was `add`. A route that
+  set `Cache-Control` after middleware had already set it answered with the
+  header **twice**, and a client picking the first one got the value the
+  author had meant to override. The two names are now told apart before
+  queueing, and `set_header` drops the earlier write of the same name.
+
+- **`response.add_header` kept only the last value (native).**
+  The builtin itself was right — it pushed. `jwc_response_with_headers`
+  then merged the whole bag into the response object's `headers` **map**,
+  where one name holds one value, so every repeat collapsed. Two
+  `add_header("X-Add", …)` calls sent one header under `jwc build` and two
+  under `jwc serve`; a `Set-Cookie` written from an `after` block was lost
+  outright. `after` headers now travel in a list of their own, the way
+  `cookie(...)` already did, and reach the wire with their order and their
+  repeats intact.
+
+Measured with a two-`set` two-`add` `after` block over both backends: the
+answers are now byte-identical, and `x-add` appears twice on each.
+
+The rule the two halves broke is stated for the security headers in config
+§3.9.4 — the backends may not hold separate opinions about the header
+table. It is now stated for these two as well (middleware §5.4.1–§5.4.3),
+because neither `set_header` nor `add_header` had a normative sentence
+saying what it does; the names were the only specification, and the code
+disagreed with them on both sides.
+
 ## [0.9.948] — `raw()` holds; the ring around it did not — 2026-08-28
 
 `raw()` itself is sound and was attacked to establish that. Six payloads

@@ -3437,3 +3437,52 @@ fn a_mount_outranks_a_slot_route_on_both_backends() {
         "the empty-mount stub must match the real signature"
     );
 }
+
+/// `set_header` replaces, `add_header` appends — on both backends.
+///
+/// Neither half held. The interpreter matched the two names in one arm and
+/// pushed, so `set_header` appended: a route that set `Cache-Control` after
+/// middleware had already set it answered with the header twice. The native
+/// prelude got that half right and lost the other one — `add_header` pushed
+/// onto the request bag correctly, and then `jwc_response_with_headers`
+/// merged the bag into the response's `headers` **map**, where two entries
+/// of one name cannot both exist. Measured against a two-`set` two-`add`
+/// `after` block: `jwc serve` sent `x-add` twice and `jwc build` once.
+///
+/// That is the failure mode config §3.9.4 rules out by name — the two
+/// backends are not allowed separate opinions about the header table — and
+/// it is why `Set-Cookie` already travels in a list of its own. `after`
+/// headers now travel in the same shape, for the same reason.
+#[test]
+fn set_header_replaces_and_add_header_appends_on_both_backends() {
+    let exec_call = include_str!("../src/exec_call.rs");
+    assert!(
+        exec_call.contains(r#"if path == "response.set_header" {"#),
+        "the interpreter must tell the two builtins apart before queueing"
+    );
+    assert!(
+        exec_call.contains(".retain(|(k, _)| k.to_ascii_lowercase() != lower);"),
+        "and `set_header` must drop the earlier write of the same name"
+    );
+
+    let base = include_str!("../src/native/prelude/base.rs.in");
+    assert!(
+        base.contains(r#"const HTTP_AFTER_HEADERS: &str = "__jwc_after_headers";"#),
+        "the generated crate needs a repeat-capable home for `after` headers"
+    );
+    assert!(
+        base.contains("m.insert(HTTP_AFTER_HEADERS.to_string(), V::Array(Arc::new(queued)));"),
+        "`jwc_response_with_headers` must queue rather than insert into the map"
+    );
+    assert!(
+        base.contains("if let Some(V::Array(list)) = m.get(HTTP_AFTER_HEADERS) {"),
+        "and the wire conversion must drain that list onto the response"
+    );
+
+    // The map is still the right home for `with { }`, which is replace-only
+    // because a JSON object cannot express a repeat in the first place.
+    assert!(
+        base.contains("/// **Replace**, not append. A builder has already stamped `content-type`,"),
+        "`with {{ }}` keeps its replace semantics"
+    );
+}

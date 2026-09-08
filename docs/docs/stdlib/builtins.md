@@ -167,6 +167,12 @@ From inside an `after` block: `response.status()`,
 `response.duration_ms()`, `response.duration_us()`,
 `response.set_header(k, v)`, `response.add_header(k, v)`.
 
+`set_header` replaces — after it, the name carries one value, whatever a
+builder or a `with { }` had put there. `add_header` appends, so `Vary`,
+`Link` and `Set-Cookie` can repeat the way HTTP allows and a `with { }`
+map cannot express. Both win over the builder's value, and both backends
+send the same list in the same order.
+
 ## HTTP
 
 Calling another service.

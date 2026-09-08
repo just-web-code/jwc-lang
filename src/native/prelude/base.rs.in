@@ -1700,6 +1700,14 @@ const HTTP_RESPONSE_MARKER: &str = "__http_response";
 /// in the map, because `Set-Cookie` repeats and a map key does not.
 const HTTP_COOKIE_LIST: &str = "__jwc_set_cookies";
 
+/// Where an `after` block's headers land. Also not the map, and for the
+/// same reason one step further out: `response.add_header` exists so that
+/// `Vary`, `Link` and `Set-Cookie` can repeat, and merging its output into
+/// `headers` collapsed every repeat to the last write. `jwc serve` pushes
+/// onto a `Vec` and kept them, so the two backends answered differently —
+/// two `x-add` lines interpreted, one compiled.
+const HTTP_AFTER_HEADERS: &str = "__jwc_after_headers";
+
 /// Every JSON response the interpreter emits carries the charset
 /// (`exec.rs:228`, `exec_call.rs:631`, `Response::json`). One constant so
 /// the two backends cannot drift apart on it again.
@@ -2226,14 +2234,31 @@ fn jwc_response_with_headers(resp: V, add: Vec<(String, String)>) -> V {
             return other;
         }
     };
+    // An `after` header wins over whatever the builder stamped (config
+    // §3.9.3), so its name comes out of the map — but it goes into the
+    // repeat list, not back into the map, or `add_header` would collapse.
     let mut headers = match m.get("headers") {
         Some(V::Object(h)) => (**h).clone(),
         _ => JwcObj::default(),
     };
+    let mut queued: Vec<V> = match m.get(HTTP_AFTER_HEADERS) {
+        Some(V::Array(a)) => (**a).clone(),
+        _ => Vec::new(),
+    };
     for (k, v) in add {
-        headers.insert(k, v_str(v));
+        let lower = k.to_ascii_lowercase();
+        let shadowed: Vec<String> = headers
+            .keys()
+            .filter(|h| h.to_ascii_lowercase() == lower)
+            .cloned()
+            .collect();
+        for s in shadowed {
+            headers.remove(&s);
+        }
+        queued.push(V::Array(Arc::new(vec![v_str(k), v_str(v)])));
     }
     m.insert("headers".to_string(), v_obj(headers));
+    m.insert(HTTP_AFTER_HEADERS.to_string(), V::Array(Arc::new(queued)));
     v_obj(m)
 }
 
@@ -2626,6 +2651,18 @@ fn jwc_to_response(v: V) -> (u16, String, String, Vec<(String, String)>) {
             if let Some(V::Array(list)) = m.get(HTTP_COOKIE_LIST) {
                 for c in list.iter() {
                     headers.push(("set-cookie".to_string(), body_string(c.clone())));
+                }
+            }
+            // The `after` chain's own headers, in the order it wrote them
+            // and with repeats intact. Last, so an `after` block decorates
+            // what the builder produced rather than being overwritten by it.
+            if let Some(V::Array(list)) = m.get(HTTP_AFTER_HEADERS) {
+                for pair in list.iter() {
+                    if let V::Array(kv) = pair {
+                        if let (Some(k), Some(v)) = (kv.first(), kv.get(1)) {
+                            headers.push((body_string(k.clone()), body_string(v.clone())));
+                        }
+                    }
                 }
             }
             return (status, body, ct, headers);

@@ -889,8 +889,29 @@ impl<'a> Vm<'a> {
             "response.duration_ms" => {
                 Value::Bigint((self.response_micros.unwrap_or(0) / 1_000) as i64)
             }
+            // `set` replaces, `add` appends. One arm handled both by
+            // pushing, so `set_header` appended too — and a route that set
+            // `Cache-Control` after middleware had already set it answered
+            // with the header twice under `jwc serve` and once under
+            // `jwc build`. The native prelude had it right
+            // (`jwc_b_response_set_header` retains-then-pushes), which is
+            // the shape config §3.9.4 says cannot happen: the two backends
+            // are not allowed separate opinions about the header table.
+            //
+            // `set_header("Set-Cookie", …)` drops the earlier cookies on
+            // purpose — unlike `with { }`, where a JSON object cannot
+            // express a repeat and appending is the only non-lossy read,
+            // here the author has `add_header` to say "append" with.
             "response.set_header" | "response.add_header" => {
-                self.extra_headers.push((s(0), s(1)));
+                let name = s(0);
+                if !name.is_empty() {
+                    if path == "response.set_header" {
+                        let lower = name.to_ascii_lowercase();
+                        self.extra_headers
+                            .retain(|(k, _)| k.to_ascii_lowercase() != lower);
+                    }
+                    self.extra_headers.push((name, s(1)));
+                }
                 Value::Null
             }
 

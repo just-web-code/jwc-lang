@@ -158,6 +158,24 @@ produce a response; `return <expr>;` in an `after` block is `E0810`.
 the status or the body: an audit hook that can rewrite a 200 into a 500 is
 not a hook.
 
+5.4.1 The two differ, and the difference is the whole reason both exist.
+`set_header` **replaces**: the name it names carries one value on the
+answer, whether the value came from a response builder, from `with { }`, or
+from an earlier `set_header` in the same block. `add_header` **appends**,
+leaving every earlier value in place — it is how `Vary`, `Link` and
+`Set-Cookie` repeat, which they are allowed to (RFC 9110 §5.3) and which
+`with { }` cannot express because a JSON object has one slot per key.
+
+5.4.2 An `after` header wins over the builder's, in both forms: an author
+who wrote one in the block that runs last meant it for that answer.
+
+5.4.3 Both backends send the same headers in the same order. The invariant
+is the one config §3.9.4 states for the security headers, and it held on
+neither side until 0.9.949: `jwc serve` appended for `set_header` too, so a
+second write sent the header twice; `jwc build` merged an `after` block's
+headers into a map, so `add_header` kept only the last of a repeat and a
+`Set-Cookie` written there was lost outright.
+
 5.5 **The raise set of an `after` block must be empty** (errors §3, E7).
 An `after` block that can throw is `E0811`, because there is no outer handler
 left — the response has already been decided. Writes inside `after` must

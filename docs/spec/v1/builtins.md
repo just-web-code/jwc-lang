@@ -241,8 +241,8 @@ not brute-forceable and is the standard construction.
 | `request.id()` | `text` | per-request id, also in every log line |
 | `response.status()` | `int` | `after` only |
 | `response.duration_ms()` / `response.duration_us()` | `bigint` | `after` only; whole request, middleware included |
-| `response.set_header(k, v)` | `Void` | `after` only |
-| `response.add_header(k, v)` | `Void` | `after` only |
+| `response.set_header(k, v)` | `Void` | `after` only; **replaces** every earlier value of `k` (middleware §5.4.1) |
+| `response.add_header(k, v)` | `Void` | `after` only; **appends**, for the names that repeat — `Vary`, `Link`, `Set-Cookie` |
 | `context.<key>` | declared type | middleware §6 |
 | `context.<key>?` | `T?` | middleware §6.3 |
 
