@@ -20,7 +20,6 @@ This tree is what jwc.1kb.uz serves. `docusaurus.config.ts` points at it.
 | `reference/language.md` | the whole language on one page, with the reasons — for a person and for an agent |
 | `reference/ai-agent-guide.md` | the same ground compressed to tables, for a context window |
 | `reference/error-codes.md` | every diagnostic, generated from the spec's tables |
-| `reference/not-in-1-0.md` | what 1.0 does not have, and what to do instead |
 
 ## The rules this tree is held to
 

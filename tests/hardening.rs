@@ -1120,68 +1120,6 @@ fn the_install_page_lists_the_platforms_the_release_actually_builds() {
     );
 }
 
-/// "What 1.0 does not have" against what 1.0 has.
-///
-/// That page listed background jobs, WebSocket, an in-process cache and
-/// outbound email as not declarable. All four had been implemented — the
-/// page was telling anyone deciding whether to adopt JWC that it could not
-/// do things it does. A capability page that lags the compiler argues
-/// against its own product.
-///
-/// Both sides are in this repository: the parser's declaration keywords
-/// and the checker's namespace list are the ground truth.
-#[test]
-fn the_capability_page_does_not_deny_what_the_compiler_accepts() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let page =
-        std::fs::read_to_string(root.join("docs/docs/reference/not-in-1-0.md")).expect("page");
-
-    // Everything above "## What it does have" is the absent list.
-    let absent = page
-        .split("## What it does have")
-        .next()
-        .expect("the page should still have a section naming what it lacks");
-
-    let parser = std::fs::read_to_string(root.join("src/parser.rs")).expect("parser.rs");
-    let keywords: Vec<String> = parser
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix('"'))
-        .filter_map(|l| l.split_once("\" => Decl::"))
-        .map(|(k, _)| k.to_string())
-        .collect();
-    assert!(keywords.len() > 10, "found only {keywords:?}");
-
-    for kw in &keywords {
-        assert!(
-            !absent.contains(&format!("`{kw}`")),
-            "`{kw}` is a declaration the parser accepts, and the page lists it as absent"
-        );
-    }
-
-    let check = std::fs::read_to_string(root.join("src/check.rs")).expect("check.rs");
-    let namespaces = check
-        .split("fn is_namespace")
-        .nth(1)
-        .and_then(|s| s.split_once('}'))
-        .map(|(body, _)| body.to_string())
-        .expect("is_namespace");
-    for ns in ["cache", "mail", "socket", "redis"] {
-        if !namespaces.contains(&format!("\"{ns}\"")) {
-            continue;
-        }
-        assert!(
-            !absent.contains(&format!("`{ns}.")),
-            "`{ns}.*` is a namespace the checker resolves, and the page lists it as absent"
-        );
-    }
-}
-
-/// Every `jwc` subcommand appears in both CLI references.
-///
-/// The README's table presented itself as the CLI and was missing seven of
-/// twenty-two, including `jwc new` — the entry point — and `jwc build`,
-/// the native backend. A reader who trusted it did not learn the compiler
-/// could scaffold a project.
 #[test]
 fn both_cli_references_name_every_subcommand() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

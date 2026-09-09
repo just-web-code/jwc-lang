@@ -133,7 +133,6 @@ the constraint. Routes do not build error responses by hand.
 | [Deployment](./deployment/index.md) | Docker, the native build, probes |
 | [Security](./security) | What the language enforces, and what it does not |
 | [The language](./reference/language) | The whole language on one page, with the reasons |
-| [What 1.0 does not have](./reference/not-in-1-0) | The dated omissions, and what to do instead |
 
 ## Status
 
