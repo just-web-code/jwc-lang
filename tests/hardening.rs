@@ -2129,7 +2129,15 @@ fn the_documented_install_version_is_this_version() {
             }
             // The line either names this version, or names none at all
             // (`JWC_VERSION` used as a variable, or a `vX.Y.Z` shape).
-            let names_a_version = t.contains("0.9.") || t.contains("v0.9.");
+            //
+            // Read from the line, not from a hardcoded `0.9.` prefix: the
+            // guard was written when every version began with those four
+            // characters, so the 1.0 bump would have made every pin stop
+            // matching and the test stop testing — silently, on the one
+            // release where a stale install command costs the most.
+            let names_a_version = t
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .any(|w| w.split('.').filter(|s| !s.is_empty()).count() >= 3);
             if !names_a_version {
                 continue;
             }

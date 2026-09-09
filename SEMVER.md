@@ -3,10 +3,40 @@
 JWC versions follow [Semantic Versioning 2.0.0](https://semver.org).
 Until v1.0 this document is the contract; at v1.0 it becomes binding.
 
-> **Stable surface as of 0.9.7** — the v1 language, specified in
+> **Stable surface as of 1.0.0-rc.1** — the v1 language, specified in
 > [`docs/spec/v1/`](docs/spec/v1/). The 0.9.x grammar and its front-end
 > were removed at v0.25.0; the surface described here is the one this
 > compiler implements, not the one 0.9.x binaries implement.
+
+## What `1.0.0-rc.1` means
+
+The syntax is **frozen for review, not yet by promise.** Everything in
+`docs/spec/v1/` is what 1.0.0 intends to be, and a change to it between
+here and 1.0.0 is a change this candidate exists to provoke.
+
+So, concretely, until 1.0.0 final:
+
+- A breaking change may still land, and ships with a `BREAKING:` line in
+  `CHANGELOG.md` like any other. After 1.0.0 it takes a major bump.
+- `rc.N → rc.N+1` carries whatever review turned up. There is no promise
+  that an `rc.1` program compiles under `rc.2`; there is a promise that
+  the reason is written down.
+- The deferrals in [`docs/spec/v1/DEFERRED.md`](docs/spec/v1/DEFERRED.md)
+  are decisions, not omissions waiting to be filled before 1.0.0. Each
+  states what 1.0 does instead.
+
+What is **not** provisional: the wire behaviour of a program that
+compiles. `jwc serve` and `jwc build` are held to byte-identical
+responses over the same source, and that is a property, not a goal — the
+suites assert it, and a divergence is a defect at any version number.
+
+### Why a candidate rather than 1.0.0
+
+Three reviews the release criteria name have not happened: a DBA reading
+the generated DDL, a backend engineer writing against the language cold,
+and a security pass. None of them is code, and none can be done by the
+people who wrote the thing. Publishing a candidate is how they get
+something to review.
 
 ---
 

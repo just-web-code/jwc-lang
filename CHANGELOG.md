@@ -3,6 +3,57 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.1] — freeze candidate — 2026-09-09
+
+The v1 language, frozen for review. Nine releases (v0.20.0–v0.29.0) built
+it from a specification written first; this is the point where it goes out
+to be read by people who did not write it.
+
+### What the release criteria asked for
+
+| Criterion | |
+|---|---|
+| Full conformance corpus, blocking in CI | 33 suites, 552 tests, every one of them run by `ci.yml` |
+| Pilot: one real project ported off `saas/`, measured | jwc-shortener — 799 parse errors at the start, now byte-identical answers on both backends |
+| Pilot compiles with no `raw` escape hatch | zero `raw(` in the ported source |
+| `docs/` complete for the new language, old docs archived | `docs/archive-0.9/` |
+| `CHANGELOG.md` and the SemVer policy updated for 1.0 | this entry, and `SEMVER.md`'s new "What `1.0.0-rc.1` means" |
+| External audit — DBA, backend engineer, security | **not done**, and not doable by the authors |
+
+That last row is why this is `rc.1` and not `1.0.0`. The criterion reads
+"0 open P0/P1 audit findings", which is satisfied only in the sense that no
+audit has run. Publishing a candidate is how one gets something to audit.
+
+### Fixed on the way here
+
+The last stretch was defect work, and the pattern was the same one every
+time: two implementations of one contract, each tested against its own
+idea of the other.
+
+- `response.set_header` appended instead of replacing under `jwc serve`,
+  and `add_header` kept only the last value under `jwc build`. Both header
+  verbs, wrong in opposite directions, one on each backend.
+- A fault's detail reached the client on the native backend with
+  `JWC_DEBUG_ERRORS` off — `mail.send` against an unconfigured relay named
+  every `JWC_SMTP_*` variable to the caller. And `jwc serve` never read
+  that switch at all.
+- `max_sockets` could not reclaim a dead peer: `socket.recv()` waits with
+  no timeout, so a peer that vanished without a FIN held its slot forever.
+  `server { socket_keepalive }` answers it.
+- Nothing bounded a job payload or the queue depth. Twenty requests put
+  20 MB of durable rows into `_jwc_jobs`, on the database the application
+  itself runs on.
+- A v1 project could not adopt a database that already existed —
+  `jwc migrate baseline` now does.
+
+### Known, and deliberate
+
+- Server-Sent Events are absent (`DEFERRED-19`). A `socket` or long-polling.
+- Everything else in `DEFERRED.md` is a decision with a stated alternative,
+  not a gap left open.
+- Reconciling constraint names on an adopted database is hand-written SQL;
+  `migrate verify` is the checklist (migrations §12.4).
+
 ## [0.9.952] — `jwc migrate baseline` — 2026-09-09
 
 Found by the rc.1 pilot port: a v1 project could not adopt a database that
