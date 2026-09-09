@@ -98,26 +98,102 @@ pub async fn ensure_tables() -> Result<(), DbError> {
     Ok(())
 }
 
+/// What a refused `dispatch` was refused for. Both are the program being
+/// stopped, not the client being wrong, so both read as a fault.
+#[derive(Debug)]
+pub enum Refused {
+    /// The payload is bigger than `job_max_payload`.
+    Payload { bytes: usize, limit: usize },
+    /// `job_queue_limit` jobs are already waiting.
+    QueueFull { limit: usize },
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refused::Payload { bytes, limit } => write!(
+                f,
+                "dispatch payload is {bytes} bytes, over the {limit}-byte \
+                 `server {{ job_max_payload }}`. A job takes ids and scalars \
+                 (jobs.md §1.1) — pass the id and read the row in the handler, \
+                 where it is current"
+            ),
+            Refused::QueueFull { limit } => write!(
+                f,
+                "the job queue is full: {limit} jobs are already waiting \
+                 (`server {{ job_queue_limit }}`). Nothing was enqueued, and \
+                 the transaction rolls back. `jwc_jobs_pending` on /metrics is \
+                 what watches this; more workers, or a bigger limit, is the fix"
+            ),
+        }
+    }
+}
+
 /// Enqueue. `payload` is a JSON object; `delay_secs` defers the first run.
+///
+/// Two limits are enforced here rather than at the call sites, because
+/// there are two call sites — this backend and the generated one — and a
+/// bound that holds in only one of them is not a bound.
+///
+/// **A refusal is never silent.** §3.2 argues that a queue which can lose
+/// a job invisibly has no guarantee anyone can build on; dropping an
+/// enqueue quietly at the limit would be that same loss, moved to a
+/// different line. `Err` here rolls the request's transaction back, so a
+/// caller that was told the work was accepted was told the truth.
 pub async fn enqueue(
     name: &str,
     payload: &str,
     max_attempts: i64,
     delay_secs: i64,
-) -> Result<(), DbError> {
-    crate::db::run(
+    max_payload: usize,
+    queue_limit: usize,
+) -> Result<Result<(), Refused>, DbError> {
+    // Checked before the statement: an oversized payload should not travel
+    // to the server to be rejected there.
+    if max_payload > 0 && payload.len() > max_payload {
+        return Ok(Err(Refused::Payload {
+            bytes: payload.len(),
+            limit: max_payload,
+        }));
+    }
+
+    // The depth test rides *inside* the insert so it is atomic with it:
+    // counting first and inserting second lets two requests both see room
+    // and both take it. `OFFSET n LIMIT 1` stops after n+1 index entries
+    // rather than counting the table, which matters on the path every
+    // dispatch takes.
+    //
+    // `limit - 1` because the question is whether a row already sits at
+    // that offset — with the limit itself, `job_queue_limit = 5` admitted
+    // a sixth. `GREATEST(…, 0)` because Postgres evaluates the operand
+    // even when the `= 0` arm has already decided the `OR`, and a negative
+    // `OFFSET` is an error rather than a no-op.
+    //
+    // `0` is no limit, as it is for `max_sockets` and `max_body_bytes`.
+    let inserted = crate::db::run(
         "INSERT INTO public._jwc_jobs (name, payload, max_attempts, run_at) \
-         VALUES ($1, $2::text::jsonb, $3::text::int, now() + make_interval(secs => $4::text::double precision))",
+         SELECT $1, $2::text::jsonb, $3::text::int, \
+                now() + make_interval(secs => $4::text::double precision) \
+         WHERE $5::text::bigint = 0 \
+            OR NOT EXISTS (SELECT 1 FROM public._jwc_jobs \
+                           OFFSET GREATEST($5::text::bigint - 1, 0) LIMIT 1) \
+         RETURNING id::text",
         &[
             Some(name.to_string()),
             Some(payload.to_string()),
             Some(max_attempts.to_string()),
             Some(delay_secs.max(0).to_string()),
+            Some(queue_limit.to_string()),
         ],
-        Shape::None,
+        Shape::First,
     )
-    .await
-    .map(|_| ())
+    .await?;
+
+    // No row back means the `WHERE` was false: the queue is at its limit.
+    Ok(match inserted {
+        Some(_) => Ok(()),
+        None => Err(Refused::QueueFull { limit: queue_limit }),
+    })
 }
 
 /// Claim the next ready job, or `None`.

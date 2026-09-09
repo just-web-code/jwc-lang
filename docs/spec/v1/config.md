@@ -97,6 +97,8 @@ default.
 |---|---|---|---|
 | `max_sockets` | `int` | half the process's descriptor limit, clamped to [64, 4096] | over → 503 before the handshake (routing §9.5) |
 | `socket_keepalive` | duration | `30s` | ping interval and pong deadline on a quiet socket; `0s` disables (routing §9.5.1) |
+| `job_max_payload` | `int` | 65536 | biggest `dispatch` payload in bytes; over → fault (jobs §3.7) |
+| `job_queue_limit` | `int` | 10000 | jobs that may be waiting; at it → `dispatch` is refused (jobs §3.7) |
 | `max_body_bytes` | `int` | 1048576 | over → 413 before middleware (routing §5.1); also caps a socket message and frame (routing §9.4) |
 | `request_timeout` | duration | `30s` | whole request |
 | `header_timeout` | duration | `10s` | request line + headers |

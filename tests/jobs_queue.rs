@@ -80,9 +80,10 @@ async fn a_dispatched_job_is_claimed_once_and_deleted_on_success() {
     let url = skip_unless_db!("a_dispatched_job_is_claimed_once_and_deleted_on_success");
     let client = setup(&url).await;
 
-    jobs::enqueue("Welcome", r#"{"account_id":"7"}"#, 3, 0)
+    jobs::enqueue("Welcome", r#"{"account_id":"7"}"#, 3, 0, 0, 0)
         .await
-        .expect("enqueue");
+        .expect("enqueue")
+        .expect("this phase runs with both bounds off");
     assert_eq!(pending(&client).await, 1);
 
     let claim = jobs::claim().await.expect("claim").expect("a ready job");
@@ -105,7 +106,8 @@ async fn a_failed_job_comes_back_after_its_backoff() {
     let url = skip_unless_db!("a_failed_job_comes_back_after_its_backoff");
     let client = setup(&url).await;
 
-    jobs::enqueue("Retry", "{}", 5, 0).await.expect("enqueue");
+    jobs::enqueue("Retry", "{}", 5, 0, 0, 0).await.expect("enqueue")
+        .expect("this phase runs with both bounds off");
     let first = jobs::claim().await.expect("claim").expect("ready");
     jobs::fail(&first, 60, "boom").await.expect("fail");
 
@@ -133,9 +135,10 @@ async fn the_attempt_that_exhausts_retries_is_dead_lettered() {
     let url = skip_unless_db!("the_attempt_that_exhausts_retries_is_dead_lettered");
     let client = setup(&url).await;
 
-    jobs::enqueue("Doomed", r#"{"why":"testing"}"#, 2, 0)
+    jobs::enqueue("Doomed", r#"{"why":"testing"}"#, 2, 0, 0, 0)
         .await
-        .expect("enqueue");
+        .expect("enqueue")
+        .expect("this phase runs with both bounds off");
 
     for expected in 1..=2 {
         client
@@ -175,9 +178,10 @@ async fn two_claims_take_two_different_jobs() {
     let client = setup(&url).await;
 
     for i in 0..3 {
-        jobs::enqueue("Spread", &format!(r#"{{"i":{i}}}"#), 3, 0)
+        jobs::enqueue("Spread", &format!(r#"{{"i":{i}}}"#), 3, 0, 0, 0)
             .await
-            .expect("enqueue");
+            .expect("enqueue")
+        .expect("this phase runs with both bounds off");
     }
 
     let a = jobs::claim().await.expect("a").expect("ready");
@@ -200,9 +204,10 @@ async fn a_delayed_job_is_not_claimable_yet() {
     let url = skip_unless_db!("a_delayed_job_is_not_claimable_yet");
     let client = setup(&url).await;
 
-    jobs::enqueue("Later", "{}", 3, 3_600)
+    jobs::enqueue("Later", "{}", 3, 3_600, 0, 0)
         .await
-        .expect("enqueue");
+        .expect("enqueue")
+        .expect("this phase runs with both bounds off");
     assert_eq!(pending(&client).await, 1);
     assert!(
         jobs::claim().await.expect("claim").is_none(),
@@ -214,8 +219,10 @@ async fn depths_report_both_tables() {
     let url = skip_unless_db!("depths_report_both_tables");
     setup(&url).await;
 
-    jobs::enqueue("A", "{}", 1, 0).await.expect("enqueue");
-    jobs::enqueue("B", "{}", 1, 0).await.expect("enqueue");
+    jobs::enqueue("A", "{}", 1, 0, 0, 0).await.expect("enqueue")
+        .expect("this phase runs with both bounds off");
+    jobs::enqueue("B", "{}", 1, 0, 0, 0).await.expect("enqueue")
+        .expect("this phase runs with both bounds off");
     let claim = jobs::claim().await.expect("claim").expect("ready");
     jobs::fail(&claim, 0, "dead on the first attempt")
         .await
@@ -231,6 +238,99 @@ async fn depths_report_both_tables() {
     assert!(text.contains("jwc_jobs_dead_total"), "{text}");
 }
 
+
+/// A payload over `job_max_payload` is refused, and writes nothing.
+///
+/// A job payload is built from request data and then sits in a table.
+/// `max_body_bytes` bounds the request; nothing bounded what a handler
+/// carried out of one into the queue. Measured at the 1 MB default body
+/// cap against a queue with no workers: twenty requests put 20 MB of
+/// incompressible payload into `_jwc_jobs`, durably, and a full database
+/// is every table failing rather than only this one.
+async fn a_payload_over_the_limit_is_refused() {
+    let url = skip_unless_db!("a_payload_over_the_limit_is_refused");
+    let client = setup(&url).await;
+
+    let big = format!(r#"{{"blob":"{}"}}"#, "x".repeat(5000));
+    let refused = jobs::enqueue("Ingest", &big, 3, 0, 1024, 0)
+        .await
+        .expect("the statement itself must not error");
+    match refused {
+        Err(jobs::Refused::Payload { bytes, limit }) => {
+            assert_eq!(limit, 1024);
+            assert_eq!(bytes, big.len());
+        }
+        other => panic!("an over-limit payload was not refused: {other:?}"),
+    }
+    assert_eq!(
+        pending(&client).await,
+        0,
+        "a refused dispatch still wrote a row"
+    );
+
+    // The bound is a bound, not a ban: under it, the same call works.
+    jobs::enqueue("Ingest", r#"{"blob":"small"}"#, 3, 0, 1024, 0)
+        .await
+        .expect("enqueue")
+        .expect("a payload under the limit must be accepted");
+    assert_eq!(pending(&client).await, 1);
+
+    // `0` is no limit, the way it is for `max_sockets`.
+    jobs::enqueue("Ingest", &big, 3, 0, 0, 0)
+        .await
+        .expect("enqueue")
+        .expect("`0` must disable the payload bound");
+    assert_eq!(pending(&client).await, 2);
+}
+
+/// `job_queue_limit` admits exactly that many, and recovers as it drains.
+///
+/// §2.2 refuses `dispatch` from a job body because a job that dispatches
+/// jobs has no bound on the work it creates. A request path with no bound
+/// has the same failure more slowly, and the queue is a table on the
+/// database the application itself runs on.
+async fn the_queue_depth_is_bounded() {
+    let url = skip_unless_db!("the_queue_depth_is_bounded");
+    let client = setup(&url).await;
+
+    for i in 0..5 {
+        jobs::enqueue("Fill", "{}", 1, 0, 0, 5)
+            .await
+            .expect("enqueue")
+            .unwrap_or_else(|e| panic!("job {i} was refused below the limit: {e}"));
+    }
+    assert_eq!(
+        pending(&client).await,
+        5,
+        "the limit must admit exactly its own number — it admitted six \
+         while the depth test used `OFFSET limit` instead of `limit - 1`"
+    );
+
+    for _ in 0..3 {
+        match jobs::enqueue("Fill", "{}", 1, 0, 0, 5).await.expect("enqueue") {
+            Err(jobs::Refused::QueueFull { limit }) => assert_eq!(limit, 5),
+            other => panic!("a dispatch past the limit was accepted: {other:?}"),
+        }
+    }
+    assert_eq!(pending(&client).await, 5, "a refusal still wrote a row");
+
+    // Draining makes room again: the limit is a ceiling, not a fuse.
+    let claim = jobs::claim().await.expect("claim").expect("ready");
+    jobs::succeed(claim.id).await.expect("succeed");
+    jobs::enqueue("Fill", "{}", 1, 0, 0, 5)
+        .await
+        .expect("enqueue")
+        .expect("a drained slot must be reusable");
+    assert_eq!(pending(&client).await, 5);
+
+    // And `0` means no limit here too.
+    jobs::enqueue("Fill", "{}", 1, 0, 0, 0)
+        .await
+        .expect("enqueue")
+        .expect("`0` must disable the depth bound");
+    assert_eq!(pending(&client).await, 6);
+}
+
 /// The whole suite, on one runtime — see the note on `skip_unless_db!`.
 #[tokio::test]
 async fn the_durable_queue() {
@@ -241,4 +341,6 @@ async fn the_durable_queue() {
     two_claims_take_two_different_jobs().await;
     a_delayed_job_is_not_claimable_yet().await;
     depths_report_both_tables().await;
+    a_payload_over_the_limit_is_refused().await;
+    the_queue_depth_is_bounded().await;
 }

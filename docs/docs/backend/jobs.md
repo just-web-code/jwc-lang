@@ -105,6 +105,37 @@ The payload is kept precisely so you can fix the handler and replay it.
 
 A program that declares no `job` starts no workers and creates no tables.
 
+## What bounds the queue
+
+| `server { }` key | Default | |
+|---|---|---|
+| `job_max_payload` | 65536 | biggest payload one `dispatch` may write, in bytes of JSON |
+| `job_queue_limit` | 10000 | how many jobs may be waiting before `dispatch` is refused |
+
+```jwc
+server {
+    job_max_payload = 16384;
+    job_queue_limit = 50000;   -- 0 on either turns that bound off
+}
+```
+
+These exist because a job payload is built from request data and then
+**sits in a table**. `max_body_bytes` bounds the request and bounds
+nothing about what your handler carries out of one into the queue.
+Measured at the 1 MB default body cap, with nothing draining: twenty
+requests put 20 MB of incompressible payload into `_jwc_jobs`. That
+storage is durable and shared with every other table you have.
+
+Past either bound the `dispatch` **fails** — a fault, logged, with the
+ordinary `internal_error` going back to the caller, and the request's
+transaction rolled back. It is deliberately not a silent drop: a queue
+that can lose a job without telling anyone is the thing this design rules
+out, and dropping one at a limit would be the same loss on a different
+line.
+
+If you are hitting `job_queue_limit`, `jwc_jobs_pending` was rising before
+you did. More workers usually beats a bigger number.
+
 ## The tables are the runtime's
 
 `public._jwc_jobs` and `public._jwc_jobs_dead` are created at boot, like

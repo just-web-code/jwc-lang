@@ -530,10 +530,14 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     out.push_str(&format!(
         "\nconst JWC_SOURCE_MAX_BODY_BYTES: usize = {};\n\
          const JWC_SOURCE_MAX_SOCKETS: usize = {};\n\
-         const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n",
+         const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n\
+         const JWC_SOURCE_JOB_MAX_PAYLOAD: usize = {};\n\
+         const JWC_SOURCE_JOB_QUEUE_LIMIT: usize = {};\n",
         server.max_body_bytes,
         server.max_sockets,
-        server.socket_keepalive.as_secs()
+        server.socket_keepalive.as_secs(),
+        server.job_max_payload,
+        server.job_queue_limit
     ));
     emit_constraint_messages(&mut out, &built.model);
     emit_cursor_secret(&mut out, ws);

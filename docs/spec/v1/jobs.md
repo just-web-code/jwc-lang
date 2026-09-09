@@ -96,6 +96,8 @@ that.
 bound on the work it creates, and the failure mode is a queue that fills
 faster than it drains with nothing in the source that looks wrong.
 
+A request can fill it too, just more slowly, which is what §3.7 bounds.
+
 ---
 
 ## 3. The queue
@@ -164,6 +166,36 @@ A program that declares no `job` starts no workers and creates no tables.
 `jwc_jobs_pending`, `jwc_jobs_dead` (gauges), and
 `jwc_jobs_processed_total`, `jwc_jobs_failed_total`, `jwc_jobs_dead_total`
 (counters). Absent when the program has no jobs.
+
+### 3.7 What bounds it
+
+| `server { }` key | Default | |
+|---|---|---|
+| `job_max_payload` | 65536 | biggest payload one `dispatch` may write, in bytes of JSON |
+| `job_queue_limit` | 10000 | how many jobs may be waiting before `dispatch` is refused |
+
+`0` disables either, meaning what it means for `max_sockets` and
+`max_body_bytes`: the deployment has something else doing this.
+
+A job payload is built from request data and then **sits in a table**.
+`max_body_bytes` bounds the request; until 0.9.951 nothing bounded what a
+handler carried out of one into the queue, and nothing bounded how many
+rows accumulated. Measured at the 1 MB default body cap, against a queue
+with no workers draining it: twenty requests put **20 MB** of
+incompressible payload into `_jwc_jobs`. That storage is durable and
+shared — the database filling is every table failing, not only this one,
+and §2.2 already refuses `dispatch` from a job body on exactly this
+argument while leaving the request path open.
+
+Both refusals are **faults**, and neither is silent. Nothing in the source
+raised them, so no `catch` can name them; the detail goes to the log and
+the caller gets the ordinary `internal_error` (security §6.3). The
+enqueue's transaction rolls back with the request's, which is the point:
+§3.2 rules out a queue that can lose a job invisibly, and quietly dropping
+an enqueue at the limit is that same loss written on a different line.
+
+The depth test runs **inside** the insert. Counting first and inserting
+second lets two requests both see room and both take it.
 
 ---
 

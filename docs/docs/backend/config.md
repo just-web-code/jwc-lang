@@ -100,6 +100,8 @@ does not have, or miss one it does.
 | `JWC_SERVICE_NAME` | `jwc` | `service.name` on exported traces. |
 | `JWC_REGISTRY` | — | Package registry base URL; empty uses the default registry. |
 | `JWC_REQUEST_BODY` | `null` | Native builds only: what `request.body()` answers outside a request. |
+| `JWC_JOB_MAX_PAYLOAD` | `server { job_max_payload }, else 65536` | Biggest `dispatch` payload, in bytes of JSON. `0` disables the bound. Native builds only — `jwc serve` reads `server { job_max_payload }`. |
+| `JWC_JOB_QUEUE_LIMIT` | `server { job_queue_limit }, else 10000` | How many jobs may be waiting before `dispatch` is refused. `0` disables the bound. Native builds only — `jwc serve` reads `server { job_queue_limit }`. |
 | `JWC_JOB_WORKERS` | `2` | Worker tasks polling the job queue. 0 = none in this process; another deployment of the same sources drains it. |
 | `JWC_JOB_POLL_MS` | `1000` | How often a worker polls an empty queue, in milliseconds. |
 | `JWC_SMTP_HOST` | — | SMTP server hostname. |

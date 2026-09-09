@@ -263,6 +263,16 @@ pub(crate) fn read_server_config(s: &ServerDecl) -> ServerConfig {
                     c.socket_keepalive = d;
                 }
             }
+            "job_max_payload" => {
+                if let ExprKind::Int(n) = &*a.value.kind {
+                    c.job_max_payload = n.parse().unwrap_or(c.job_max_payload);
+                }
+            }
+            "job_queue_limit" => {
+                if let ExprKind::Int(n) = &*a.value.kind {
+                    c.job_queue_limit = n.parse().unwrap_or(c.job_queue_limit);
+                }
+            }
             "trusted_proxies" => {
                 if let ExprKind::Array(items) = &*a.value.kind {
                     c.trusted_proxies = items

@@ -3,6 +3,45 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.951] — the queue had no ceiling — 2026-09-09
+
+### Added
+
+- **`server { job_max_payload }`** (default 65536) and **`server
+  { job_queue_limit }`** (default 10000), with `JWC_JOB_MAX_PAYLOAD` and
+  `JWC_JOB_QUEUE_LIMIT` overriding them in a native build. `0` disables
+  either, as it does for `max_sockets` and `max_body_bytes`.
+
+### Fixed
+
+- **Nothing bounded what a `dispatch` could write, or how much of it.**
+  A job payload is built from request data and then *sits in a table*.
+  `max_body_bytes` bounds the request and bounded nothing about what a
+  handler carried out of one into the queue, and no limit existed on how
+  many rows accumulated. Measured against a queue with no workers
+  draining it, at the 1 MB default body cap: **twenty requests put 20 MB**
+  of incompressible payload into `_jwc_jobs`. That storage is durable and
+  shared with every other table — a full database is every query failing,
+  not only the jobs.
+
+  jobs.md §2.2 already refuses `dispatch` from inside a job body on
+  exactly this argument ("no bound on the work it creates") and left the
+  request path open.
+
+  Both refusals are faults: the detail goes to the log, the caller gets
+  the ordinary `internal_error`, and the request's transaction rolls back.
+  Deliberately not a silent drop — §3.2 rules out a queue that can lose a
+  job invisibly, and dropping an enqueue at a limit is that same loss on a
+  different line. The depth test runs **inside** the insert, because
+  counting first and inserting second lets two requests both see room and
+  both take it.
+
+Measured on both backends: a 1 MB payload refused with **zero** rows
+written where twenty of them had written 20 MB; `job_queue_limit = 5`
+admitting exactly five, refusing the sixth, and accepting again as the
+queue drained. Two phases in `jobs_queue`, both of which fail without the
+change — one on the payload, one on the ceiling being off by one.
+
 ## [0.9.950] — a dead peer kept its slot — 2026-09-08
 
 ### Added

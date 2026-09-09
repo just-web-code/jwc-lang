@@ -50,19 +50,76 @@ async fn jwc_jobs_ensure_tables() -> Result<(), String> {
     Ok(())
 }
 
+/// The biggest payload one `dispatch` may write. Same precedence as the
+/// other source-carried limits, and `0` is no limit.
+fn jwc_job_max_payload() -> usize {
+    std::env::var("JWC_JOB_MAX_PAYLOAD")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(JWC_SOURCE_JOB_MAX_PAYLOAD)
+}
+
+/// How many jobs may be waiting before a `dispatch` is refused.
+fn jwc_job_queue_limit() -> usize {
+    std::env::var("JWC_JOB_QUEUE_LIMIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(JWC_SOURCE_JOB_QUEUE_LIMIT)
+}
+
+/// Enqueue, with the two bounds `jobs::enqueue` applies on the other
+/// backend — same limits, same wording, same refusal.
+///
+/// A job payload is built from request data and then sits in a table.
+/// `max_body_bytes` bounds the request and bounded nothing about what a
+/// handler carried out of one into the queue; measured at the 1 MB default
+/// body cap, twenty requests put 20 MB of incompressible payload into
+/// `_jwc_jobs`, durably. Neither refusal is silent: the caller's
+/// transaction rolls back, because a queue that can lose a job invisibly
+/// is the thing jobs.md §3.2 exists to rule out.
 async fn jwc_job_enqueue(name: &str, payload: String, max_attempts: i64) -> Result<(), String> {
-    jwc_db_try_exec(
+    let max_payload = jwc_job_max_payload();
+    if max_payload > 0 && payload.len() > max_payload {
+        return Err(format!(
+            "dispatch payload is {} bytes, over the {max_payload}-byte \
+             `server {{ job_max_payload }}`. A job takes ids and scalars \
+             (jobs.md §1.1) — pass the id and read the row in the handler, \
+             where it is current",
+            payload.len()
+        ));
+    }
+
+    // The depth test rides inside the insert so it is atomic with it, and
+    // `OFFSET limit - 1 LIMIT 1` stops after that many index entries
+    // instead of counting the table on a path every dispatch takes.
+    let limit = jwc_job_queue_limit();
+    let rows = jwc_db_try_query(
         "INSERT INTO public._jwc_jobs (name, payload, max_attempts, run_at) \
-         VALUES ($1, $2::text::jsonb, $3::text::int, now())",
+         SELECT $1, $2::text::jsonb, $3::text::int, now() \
+         WHERE $4::text::bigint = 0 \
+            OR NOT EXISTS (SELECT 1 FROM public._jwc_jobs \
+                           OFFSET GREATEST($4::text::bigint - 1, 0) LIMIT 1) \
+         RETURNING id::text",
         vec![
             Box::new(Some(name.to_string())),
             Box::new(Some(payload)),
             Box::new(Some(max_attempts.to_string())),
+            Box::new(Some(limit.to_string())),
         ],
     )
     .await
-    .map(|_| ())
-    .map_err(|e| format!("{e}"))
+    .map_err(|e| format!("{e}"))?;
+
+    // No row back means the `WHERE` was false: the queue is at its limit.
+    if rows.is_empty() {
+        return Err(format!(
+            "the job queue is full: {limit} jobs are already waiting \
+             (`server {{ job_queue_limit }}`). Nothing was enqueued, and the \
+             transaction rolls back. `jwc_jobs_pending` on /metrics is what \
+             watches this; more workers, or a bigger limit, is the fix"
+        ));
+    }
+    Ok(())
 }
 
 async fn jwc_job_claim() -> Result<Option<JwcClaim>, String> {

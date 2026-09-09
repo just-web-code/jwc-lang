@@ -368,6 +368,22 @@ pub const REGISTRY: &[EnvVar] = &[
     // come from one place, and `every_env_var_the_code_reads_is_registered`
     // keeps them there.
     EnvVar {
+        name: "JWC_JOB_MAX_PAYLOAD",
+        parse_kind: ParseKind::U32,
+        default: "server { job_max_payload }, else 65536",
+        doc: "Biggest `dispatch` payload, in bytes of JSON. `0` disables the \
+              bound. Native builds only — `jwc serve` reads \
+              `server { job_max_payload }`.",
+    },
+    EnvVar {
+        name: "JWC_JOB_QUEUE_LIMIT",
+        parse_kind: ParseKind::U32,
+        default: "server { job_queue_limit }, else 10000",
+        doc: "How many jobs may be waiting before `dispatch` is refused. `0` \
+              disables the bound. Native builds only — `jwc serve` reads \
+              `server { job_queue_limit }`.",
+    },
+    EnvVar {
         name: "JWC_JOB_WORKERS",
         parse_kind: ParseKind::Usize,
         default: "2",

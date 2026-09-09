@@ -32,11 +32,11 @@ jwc --version
 ### Pinning a version
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.sh | JWC_VERSION=v0.9.950 bash
+curl -fsSL https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.sh | JWC_VERSION=v0.9.951 bash
 ```
 
 ```powershell
-$env:JWC_VERSION = 'v0.9.950'
+$env:JWC_VERSION = 'v0.9.951'
 iwr -useb https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.ps1 | iex
 ```
 

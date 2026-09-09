@@ -200,6 +200,23 @@ pub struct ServerConfig {
     /// `0` disables the ping, and means what `0` means for `max_sockets`:
     /// the deployment has something else doing this.
     pub socket_keepalive: std::time::Duration,
+    /// The biggest payload one `dispatch` may write, in bytes of JSON
+    /// (config.md §3.2, jobs.md §3.7).
+    ///
+    /// A job payload is built from request data and written to a table it
+    /// then sits in. `max_body_bytes` bounds the request; nothing bounded
+    /// what a handler could carry out of one into the queue. Measured at
+    /// the 1 MB default body cap: twenty requests put **20 MB** of
+    /// incompressible payload into `_jwc_jobs`, durably, and the database
+    /// filling is every table failing, not just this one.
+    pub job_max_payload: usize,
+    /// How many jobs may be waiting before a `dispatch` is refused
+    /// (config.md §3.2, jobs.md §3.7).
+    ///
+    /// A queue that fills faster than it drains has no natural ceiling —
+    /// §2.2 refuses `dispatch` from a job body for exactly this reason,
+    /// and then left the request path unbounded.
+    pub job_queue_limit: usize,
 }
 
 /// Where the listener's certificate and key are read from. Both are
@@ -285,6 +302,10 @@ impl Default for ServerConfig {
             tls_declared: false,
             header_timeout: std::time::Duration::from_secs(10),
             socket_keepalive: std::time::Duration::from_secs(30),
+            // 64 kB is generous for the ids and scalars §1.1 asks for, and
+            // small enough that a table's worth of them is not a disk.
+            job_max_payload: 65_536,
+            job_queue_limit: 10_000,
         }
     }
 }
@@ -633,9 +654,24 @@ impl<'a> Vm<'a> {
                 }
                 let payload = crate::jobs::payload_of(&values);
                 let retries = decl.retries.unwrap_or(5);
-                crate::jobs::enqueue(&job.name, &payload, retries, 0)
-                    .await
-                    .map_err(crate::exec::map_db_error)?;
+                let queued = crate::jobs::enqueue(
+                    &job.name,
+                    &payload,
+                    retries,
+                    0,
+                    self.program.server.job_max_payload,
+                    self.program.server.job_queue_limit,
+                )
+                .await
+                .map_err(crate::exec::map_db_error)?;
+                // A refusal is a fault, not a declared error: no `throw` in
+                // the source produced it, so no `catch` can name it, and
+                // there is nothing for a handler to do about it but fail.
+                // The detail goes to the log; the caller gets the ordinary
+                // `internal_error` (security.md §6.3).
+                if let Err(refused) = queued {
+                    return Err(Abort::Fault(anyhow::anyhow!("{refused}")));
+                }
                 Ok(Flow::Normal)
             }
             Stmt::Let { name, value, .. } => {
