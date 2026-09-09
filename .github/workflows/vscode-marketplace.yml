@@ -13,6 +13,12 @@ name: Publish VS Code extension
 #
 # Both publishes are guarded so a missing secret degrades to "package the
 # .vsix and upload as a GitHub Release artefact" rather than failing the run.
+#
+# A pre-release tag degrades the same way. The VS Marketplace takes
+# `major.minor.patch` and nothing else: `vsce publish` on `1.0.0-rc.1`
+# answers "The VS Marketplace doesn't support prerelease versions" and
+# exits 1. The .vsix is still built and attached to the GitHub Release,
+# which is how a candidate is meant to be installed.
 
 on:
   push:
@@ -113,6 +119,12 @@ jobs:
             echo "Manual run; using existing version v${VERSION}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # A SemVer pre-release part is what the Marketplace refuses, so
+          # the tag decides whether that publish runs at all.
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Package .vsix
         run: |
@@ -128,11 +140,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to VS Code Marketplace
-        if: env.VSCE_PAT != ''
+        if: env.VSCE_PAT != '' && steps.ver.outputs.prerelease == 'false'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           npx --yes @vscode/vsce@latest publish --no-yarn --pat "$VSCE_PAT"
+
+      - name: Skip the Marketplace (pre-release version)
+        if: steps.ver.outputs.prerelease == 'true'
+        run: |
+          echo "::notice ::${{ steps.ver.outputs.version }} is a pre-release version, which the VS Marketplace does not accept. The .vsix is packaged and attached to the GitHub Release; the next tag without a pre-release part publishes it."
 
       - name: Publish to OpenVSX (best effort)
         if: env.OVSX_PAT != ''
