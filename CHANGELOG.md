@@ -3,6 +3,30 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.2] — freeze candidate — 2026-09-09
+
+The same freeze candidate, built for every platform it claims.
+
+`v1.0.0-rc.1` has six archives and no `x86_64-windows` one. The release
+job for that target stopped at three `E0433`s: `default_max_sockets`
+calls `libc::getrlimit`, and `libc` is declared under
+`[target.'cfg(unix)'.dependencies]`, so on Windows there is no such crate
+to resolve. `install.sh`'s Windows path pointed at an asset that was not
+there.
+
+The call is behind `#[cfg(unix)]`. Off unix the default is 512 — the same
+number a unix host whose `getrlimit` refuses to answer gets — and routing
+§9.5, config §3, `backend/sockets.md` and the `JWC_MAX_SOCKETS` registry
+row say so.
+
+`cargo fmt --all -- --check` also failed, on seven files. It is the first
+step of the `check` job, so clippy, the build and every no-DB suite in
+that job were skipped rather than run. The reflow is whitespace only.
+
+Both jobs run on pull requests and on pushes to `main`. The commits
+behind rc.1 reached `main` by fast-forward, so neither job saw them until
+they were already there.
+
 ## [1.0.0-rc.1] — freeze candidate — 2026-09-09
 
 The v1 language, frozen for review. Nine releases (v0.20.0–v0.29.0) built

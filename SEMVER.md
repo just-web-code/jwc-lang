@@ -8,7 +8,7 @@ Until v1.0 this document is the contract; at v1.0 it becomes binding.
 > were removed at v0.25.0; the surface described here is the one this
 > compiler implements, not the one 0.9.x binaries implement.
 
-## What `1.0.0-rc.1` means
+## What `1.0.0-rc.2` means
 
 The syntax is **frozen for review, not yet by promise.** Everything in
 `docs/spec/v1/` is what 1.0.0 intends to be, and a change to it between
@@ -134,7 +134,7 @@ for at least one full minor, and only then goes.
 ## Pre-release suffixes
 
 - `vX.Y.Z-rc.N` — release candidate; production-supported on a
-  best-effort basis. Per [`ROADMAP.md`](ROADMAP.md), 1.0.0-rc.1 is gated
+  best-effort basis. Per [`ROADMAP.md`](ROADMAP.md), 1.0.0-rc.2 is gated
   on the conformance corpus blocking in CI, an external review, and a
   migrated pilot application.
 - `vX.Y.Z-alpha.N` / `-beta.N` — feature previews; **no SemVer
