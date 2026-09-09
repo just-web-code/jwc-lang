@@ -144,6 +144,7 @@ jwc migrate up               # apply what is pending
 jwc migrate status           # applied, pending, drifted
 jwc migrate verify           # constraints and indexes, by name
 jwc migrate down             # roll back, newest first
+jwc migrate baseline         # adopt a database that already has the tables
 jwc gen-sql                  # the whole schema as DDL, to stdout
 ```
 
@@ -151,6 +152,23 @@ jwc gen-sql                  # the whole schema as DDL, to stdout
 **applied**. Only the second needs a database, which is why the first
 answers in a fresh clone with no `DATABASE_URL` — "what does this checkout
 contain" is a question you ask before you have a database.
+
+`migrate baseline` is for a database somebody else's tool built — an older
+deployment, a hand-written schema. Migrations are snapshot-based, and a
+database with no snapshot behind it makes `migrate new` emit `CREATE TABLE`
+for tables that already hold rows, so `migrate up` fails on the first one.
+Baseline marks every pending migration applied **without running it** and
+leaves the database alone. It refuses an empty one, where there is nothing
+to adopt and `up` is the command you want.
+
+What it cannot do is fix a name. Postgres calls a bare `PRIMARY KEY (…)`
+`link_pkey`; JWC calls it `pk_link`, because the runtime maps a violated
+constraint back to its message by name. Baseline lists those differences
+instead of refusing over them — every adopted database has some — and the
+reconciling `ALTER TABLE … RENAME CONSTRAINT` is yours to write and run
+once, with `migrate verify` as the checklist. It does not belong in
+`migrations/`: a database built by `migrate up` already has the right
+names, and the rename would fail there.
 
 ## Seeing what the compiler sees
 
@@ -254,12 +272,12 @@ See [Editor setup](../getting-started/editor-setup.md).
 ## Which build is this?
 
 ```bash
-jwc --version              # jwc 0.9.951
+jwc --version              # jwc 0.9.952
 jwc --version --verbose    # ...plus the triple, profile, commit and rustc
 ```
 
 ```
-jwc 0.9.951
+jwc 0.9.952
 build target:  x86_64-unknown-linux-gnu
 build profile: release
 git commit:    629ee9d3eaa2

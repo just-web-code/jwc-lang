@@ -1217,6 +1217,66 @@ pub fn migrate_list(path: PathBuf, dir: Option<PathBuf>) -> Result<()> {
 
 /// `jwc migrate verify [path]` — the names the binary expects against the
 /// ones Postgres holds (#28).
+/// `jwc migrate baseline [path]` — adopt a database that already holds the
+/// tables (migrations.md §12).
+pub fn migrate_baseline(path: PathBuf, dir: Option<PathBuf>, to: Option<u32>) -> Result<()> {
+    let ws = crate::workspace::Workspace::load(&path)?;
+    if ws.has_parse_errors() {
+        eprint!("{}", ws.parse_errors().join(""));
+        bail!("{} did not parse", path.display());
+    }
+    let snap = crate::snapshot::of(&crate::model::build(&ws).model);
+    let dir = dir.unwrap_or_else(|| path.join("migrations"));
+    let (rt, client) = migration_client()?;
+    let done = rt.block_on(crate::apply::baseline(&client, &dir, &snap, to))?;
+
+    if done.marked.is_empty() {
+        println!("nothing to adopt — every migration on disk is already recorded");
+    } else {
+        for name in &done.marked {
+            println!("marked  {name}  (not run)");
+        }
+        println!(
+            "{} migration{} adopted; the database was not touched",
+            done.marked.len(),
+            plural(done.marked.len())
+        );
+    }
+
+    // Not an error: these are the real differences between the
+    // declarations and a schema something else built, and the adoption
+    // itself succeeded. Failing here would leave the operator with a
+    // non-zero exit from a command that did exactly what it should.
+    //
+    // `migrate new` is explicitly *not* the answer and saying so is the
+    // point: it diffs the sources against the snapshot, the snapshot
+    // already describes the names below as correct, and it answers "no
+    // schema changes". What is out of step is the database, which the
+    // snapshot model does not read.
+    if !done.outstanding.is_empty() {
+        println!();
+        println!(
+            "{} difference{} remain between the database and the \
+             declarations:",
+            done.outstanding.len(),
+            plural(done.outstanding.len())
+        );
+        for p in &done.outstanding {
+            println!("  {p}");
+        }
+        println!();
+        println!(
+            "These are drift, not a pending change: `jwc migrate new` diffs \
+             the sources against the snapshot, which already calls these \
+             names correct, so it answers \"no schema changes\". Close them \
+             with a hand-written migration — `ALTER TABLE … RENAME \
+             CONSTRAINT` for a name, `CREATE INDEX` for an index — and run \
+             `jwc migrate verify` until it is quiet."
+        );
+    }
+    Ok(())
+}
+
 pub fn migrate_verify(path: PathBuf) -> Result<()> {
     let ws = crate::workspace::Workspace::load(&path)?;
     if ws.has_parse_errors() {

@@ -593,3 +593,141 @@ async fn a_failed_migration_reports_its_own_error_not_the_unlock() {
         "the unlock's error masked the real one:\n{text}"
     );
 }
+
+/// A database something else built can be adopted, and an empty one cannot.
+///
+/// The snapshot is the authoritative previous state (§2), which assumes
+/// the project created the schema. A database that arrived any other way —
+/// a 0.9.x deployment, a hand-written `CREATE TABLE` — has no snapshot to
+/// diff from, so `migrate new` emits `CREATE TABLE` for tables that hold
+/// rows and `up` fails on the first of them. Measured against
+/// jwc-shortener's own 0.9.x files:
+///
+///     Error: ./migrations/1786512984_init.up.sql failed to apply:
+///            db error: ERROR: relation "api_call" already exists
+///
+/// There was no way out, and a database arriving with rows in it is the
+/// ordinary case.
+#[tokio::test]
+async fn a_database_built_by_something_else_can_be_adopted() {
+    let (url, _guard) = db!("a_database_built_by_something_else_can_be_adopted");
+    let client = connect(&url).await;
+    reset(&client).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("migrations");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    let src = tempfile::tempdir().expect("tempdir");
+    let model = model_of(V1, src.path());
+    let snap = snapshot::of(&model);
+    write_migration(&dir, &snapshot::Snapshot::default(), &model, "initial");
+
+    // Nothing is there yet, so there is nothing to adopt. Marking here
+    // would record that a table exists when it does not, and the next `up`
+    // would skip the file that creates it.
+    let refused = apply::baseline(&client, &dir, &snap, None)
+        .await
+        .expect_err("an empty database must not be baselined");
+    let text = refused.to_string();
+    assert!(
+        text.contains("nothing to adopt") && text.contains("migrate up"),
+        "the refusal must say which command is the right one:\n{text}"
+    );
+
+    // Build the schema the way something else would have: run the DDL
+    // directly, so the tables exist and `_jwc_migrations` knows nothing.
+    apply::up(&client, &dir, None).await.expect("up");
+    client
+        .batch_execute(&format!("DELETE FROM {}", apply::TABLE))
+        .await
+        .expect("forget the history, keep the schema");
+    assert!(
+        apply::up(&client, &dir, None).await.is_err(),
+        "this is the situation baseline exists for: `up` must fail on the \
+         table that is already there"
+    );
+
+    let done = apply::baseline(&client, &dir, &snap, None)
+        .await
+        .expect("baseline");
+    assert_eq!(
+        done.marked,
+        vec!["0001_initial".to_string()],
+        "every pending migration is marked, and none of them ran"
+    );
+
+    let st = apply::status(&client, &dir).await.expect("status");
+    assert_eq!(st.applied.len(), 1);
+    assert!(st.pending.is_empty(), "{:?}", st.pending);
+    assert!(
+        st.drift.is_empty(),
+        "the checksum recorded must be the file's, or a baselined migration \
+         reads as drift the moment it is looked at: {:?}",
+        st.drift
+    );
+
+    // Idempotent: a second run has nothing left to mark.
+    let again = apply::baseline(&client, &dir, &snap, None)
+        .await
+        .expect("baseline twice");
+    assert!(again.marked.is_empty(), "{:?}", again.marked);
+}
+
+/// Adoption reports the name differences rather than refusing over them.
+///
+/// They are exactly what differs when another tool built the schema:
+/// Postgres names a bare `PRIMARY KEY (…)` for itself, v1 names it
+/// `pk_<table>` (schema §8.1). Gating on them would refuse every database
+/// this command exists for — so they come back as the work that remains.
+#[tokio::test]
+async fn adoption_reports_a_wrong_constraint_name_instead_of_refusing() {
+    let (url, _guard) = db!("adoption_reports_a_wrong_constraint_name_instead_of_refusing");
+    let client = connect(&url).await;
+    reset(&client).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("migrations");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    let src = tempfile::tempdir().expect("tempdir");
+    let model = model_of(V1, src.path());
+    let snap = snapshot::of(&model);
+    write_migration(&dir, &snapshot::Snapshot::default(), &model, "initial");
+    apply::up(&client, &dir, None).await.expect("up");
+    client
+        .batch_execute(&format!("DELETE FROM {}", apply::TABLE))
+        .await
+        .expect("forget the history");
+
+    // Rename one constraint to what Postgres would have called it.
+    let (schema, table, want) = snap
+        .tables
+        .iter()
+        .find_map(|t| t.primary_key.as_ref().map(|pk| (&t.schema, &t.name, pk.name.clone())))
+        .expect("a table with a primary key");
+    client
+        .batch_execute(&format!(
+            "ALTER TABLE {schema}.{table} RENAME CONSTRAINT {want} TO {table}_pkey"
+        ))
+        .await
+        .expect("rename");
+
+    let done = apply::baseline(&client, &dir, &snap, None)
+        .await
+        .expect("a name difference must not stop the adoption");
+    assert_eq!(done.marked, vec!["0001_initial".to_string()]);
+    assert!(
+        done.outstanding.iter().any(|p| p.contains(&want)),
+        "the difference has to be reported, not swallowed: {:?}",
+        done.outstanding
+    );
+
+    // And it really is closable by hand, which is what the command says.
+    client
+        .batch_execute(&format!(
+            "ALTER TABLE {schema}.{table} RENAME CONSTRAINT {table}_pkey TO {want}"
+        ))
+        .await
+        .expect("rename back");
+    let problems = apply::verify(&client, &snap).await.expect("verify");
+    assert!(problems.is_empty(), "{problems:?}");
+}

@@ -3,6 +3,40 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.952] — `jwc migrate baseline` — 2026-09-09
+
+Found by the rc.1 pilot port: a v1 project could not adopt a database that
+already existed.
+
+### Added
+
+- **`jwc migrate baseline`** — marks every pending migration applied
+  without running it, so a database built by something else comes under v1
+  migrations. It refuses an empty one, where there is nothing to adopt and
+  `up` is the command; the gate is `information_schema`, because marking a
+  migration that never ran would make the next `up` skip the file that
+  creates the table, and the failure would surface as a query against a
+  missing table long after the command that caused it.
+
+  Constraint and index names are deliberately outside that gate. They are
+  precisely what differs when another tool built the schema — Postgres
+  names a bare `PRIMARY KEY (…)` for itself, v1 names it `pk_<table>`
+  (schema §8.1) — so gating on them would refuse every database the command
+  exists for. They are reported instead, as the work that remains.
+
+  That remainder is **drift, and `migrate new` cannot close it**: `new`
+  diffs the sources against the snapshot, the snapshot already calls those
+  names correct, and it answers `no schema changes`. What is out of step is
+  the database, which the snapshot model does not read. The command says
+  so, and points at hand-written SQL with `migrate verify` as the checklist.
+
+Measured end to end against a database rebuilt from jwc-shortener's own
+0.9.x migration files: `migrate up` fails with `relation "api_call" already
+exists`; `baseline` marks both migrations, touches nothing, and names four
+differences (two constraint names, two missing indexes); four hand-written
+statements close them; `verify` answers ok and `status` reads `2 applied,
+0 pending, 0 drift`. migrations.md §12 states the whole path.
+
 ## [0.9.951] — the queue had no ceiling — 2026-09-09
 
 ### Added

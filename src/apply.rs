@@ -187,6 +187,100 @@ async fn up_locked(client: &Client, dir: &Path, to: Option<u32>) -> Result<Vec<S
     Ok(ran)
 }
 
+/// What `jwc migrate baseline` did, or refused to do.
+#[derive(Debug)]
+pub struct Baselined {
+    /// Migrations marked applied without their SQL being run.
+    pub marked: Vec<String>,
+    /// What `verify` says once they are marked: the real differences
+    /// between the declarations and a database built by something else.
+    pub outstanding: Vec<String>,
+}
+
+/// Adopt a database that already holds the tables (migrations.md §12).
+///
+/// The snapshot is the authoritative previous state (§2), which assumes
+/// the project created the schema. A database built by anything else — a
+/// 0.9.x deployment, a hand-written `CREATE TABLE`, another tool — has no
+/// snapshot to diff from, so `migrate new` emits `CREATE TABLE` for tables
+/// that already hold rows and `migrate up` then fails on the first one.
+/// There was no way out of that and it is the ordinary way a real database
+/// arrives.
+///
+/// Baseline marks every pending migration applied **without running it**,
+/// which is what the same command does in every other migration tool, and
+/// leaves the database exactly as it found it.
+///
+/// The refusal is the safety: `check_live_schema` compares the declared
+/// tables and columns against `information_schema`, and a database missing
+/// any of them is not the one being adopted. Marking there would record
+/// that a table exists when it does not, and the next `migrate up` would
+/// skip the file that would have created it — a corruption that surfaces
+/// as a query against a missing table, long after the command that caused
+/// it.
+///
+/// Constraint and index names are deliberately **not** part of that gate.
+/// They are exactly what differs when another tool built the schema —
+/// Postgres names a bare `PRIMARY KEY (…)` for itself, and v1 names it
+/// `pk_<table>` (schema §8.1) — so gating on them would refuse every
+/// database baseline exists to adopt. They come back in `outstanding`
+/// instead, as the follow-up migration to write.
+pub async fn baseline(
+    client: &Client,
+    dir: &Path,
+    snap: &Snapshot,
+    to: Option<u32>,
+) -> Result<Baselined> {
+    lock(client).await?;
+    let result = baseline_locked(client, dir, snap, to).await;
+    release(client, result).await
+}
+
+async fn baseline_locked(
+    client: &Client,
+    dir: &Path,
+    snap: &Snapshot,
+    to: Option<u32>,
+) -> Result<Baselined> {
+    let missing = check_live_schema(client, snap).await?;
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "this database does not hold the declared tables, so there is \
+             nothing to adopt — `jwc migrate up` is what creates them:\n  {}",
+            missing.join("\n  ")
+        );
+    }
+
+    ensure_table(client).await?;
+    let done: Vec<String> = applied(client).await?.into_iter().map(|r| r.name).collect();
+    let mut marked = Vec::new();
+    for m in snapshot::list(dir) {
+        if to.is_some_and(|t| m.ordinal > t) {
+            break;
+        }
+        if done.contains(&m.stem) {
+            continue;
+        }
+        // The checksum is the file's, exactly as `up` records it: a
+        // baselined migration that is later edited has to read as drift
+        // (§9), the same as one that actually ran.
+        let text =
+            std::fs::read_to_string(m.up()).with_context(|| format!("{}", m.up().display()))?;
+        client
+            .execute(
+                &format!("INSERT INTO {TABLE} (name, checksum) VALUES ($1, $2)"),
+                &[&m.stem, &checksum(&text)],
+            )
+            .await?;
+        marked.push(m.stem);
+    }
+
+    Ok(Baselined {
+        outstanding: verify(client, snap).await?,
+        marked,
+    })
+}
+
 /// Roll back the last `count` applied migrations, newest first.
 pub async fn down(client: &Client, dir: &Path, count: usize) -> Result<Vec<String>> {
     lock(client).await?;

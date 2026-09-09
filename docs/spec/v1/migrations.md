@@ -296,3 +296,80 @@ generator that stopped generating would otherwise read as a pass.
 | `E1103` | `was` names something not in the snapshot |
 | `E1104` | rename combined with a type change |
 | `W1101` | stale `was` marker |
+
+---
+
+## 12. Adopting a database something else built
+
+§2 makes the snapshot the authoritative previous state, which assumes the
+project created the schema. A database built by anything else — a 0.9.x
+deployment, a hand-written `CREATE TABLE`, another tool — has no snapshot
+to diff from. `migrate new` therefore emits `CREATE TABLE` for tables that
+already hold rows, and `migrate up` fails on the first one:
+
+```
+Error: ./migrations/0001_init.up.sql failed to apply:
+       db error: ERROR: relation "api_call" already exists
+```
+
+There was no way out of that, and a database arriving with rows already in
+it is the ordinary case, not the exotic one.
+
+### 12.1 `jwc migrate baseline`
+
+Marks every pending migration **applied without running it**, and touches
+nothing else. After it, `migrate status` reads `0 pending` and `migrate up`
+runs only what comes next.
+
+### 12.2 It refuses an empty database
+
+The gate is `information_schema`: every declared table and column must
+already be there. A database missing any of them is not the one being
+adopted, and marking there would record that a table exists when it does
+not — the next `migrate up` would skip the file that creates it, and the
+failure surfaces as a query against a missing table long after the command
+that caused it.
+
+```
+Error: this database does not hold the declared tables, so there is
+       nothing to adopt — `jwc migrate up` is what creates them:
+  table public.api_call does not exist
+  table public.link does not exist
+```
+
+### 12.3 Constraint names are not part of that gate
+
+They are precisely what differs when another tool built the schema:
+Postgres names a bare `PRIMARY KEY (…)` for itself (`link_pkey`), and v1
+names it `pk_link` (schema §8.1). Gating on them would refuse every
+database this command exists for.
+
+They are reported instead, as the work that remains:
+
+```
+2 migrations adopted; the database was not touched
+
+4 differences remain between the database and the declarations:
+  public.api_call: constraint `pk_api_call` is missing
+  public.link: index `ix_link__hits` is missing
+  …
+```
+
+### 12.4 That remainder is drift, and `migrate new` cannot close it
+
+`migrate new` diffs the **sources against the snapshot**, and the snapshot
+already calls those names correct — it answers `no schema changes`. What is
+out of step is the database, which the snapshot model does not read.
+
+So the reconciling SQL is hand-written and run once, by the operator, out
+of band: `ALTER TABLE … RENAME CONSTRAINT` for a name, `CREATE INDEX` for
+an index, with `migrate verify` as the checklist. It does **not** belong in
+`migrations/`: a database built by `migrate up` already has the right
+names, and the rename would fail there.
+
+Measured end to end against a database rebuilt from the 0.9.x files:
+`migrate up` fails on the existing table; `baseline` marks both migrations
+and names four differences; the four statements above close them; `verify`
+answers ok and `status` reads `2 applied, 0 pending, 0 drift`.
+
+---

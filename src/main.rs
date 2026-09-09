@@ -418,6 +418,22 @@ enum MigrateCommand {
         #[arg(long, default_value_t = 1)]
         count: usize,
     },
+    /// Adopt a database that already holds the tables: mark every
+    /// pending migration applied without running it.
+    ///
+    /// For a database built by something else — a 0.9.x deployment, a
+    /// hand-written schema, another tool. Refuses when the tables are
+    /// not already there, because then there is nothing to adopt and
+    /// `up` is the command.
+    Baseline {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Stop after this ordinal.
+        #[arg(long)]
+        to: Option<u32>,
+    },
     /// What is applied, what is pending, and what has drifted.
     Status {
         #[arg(default_value = ".")]
@@ -528,6 +544,7 @@ fn project_dir(c: &Command) -> Option<&std::path::Path> {
             MigrateCommand::New { path, .. }
             | MigrateCommand::Up { path, .. }
             | MigrateCommand::Down { path, .. }
+            | MigrateCommand::Baseline { path, .. }
             | MigrateCommand::Status { path, .. }
             | MigrateCommand::Verify { path, .. }
             | MigrateCommand::List { path, .. } => Some(path.as_path()),
@@ -674,6 +691,7 @@ fn run() -> Result<()> {
             } => cmd::migrate_new(path, name, dir, explain, dry_run),
             MigrateCommand::Up { path, dir, to } => cmd::migrate_up(path, dir, to),
             MigrateCommand::Down { path, dir, count } => cmd::migrate_down(path, dir, count),
+            MigrateCommand::Baseline { path, dir, to } => cmd::migrate_baseline(path, dir, to),
             MigrateCommand::Status { path, dir } => cmd::migrate_status(path, dir),
             MigrateCommand::Verify { path } => cmd::migrate_verify(path),
             MigrateCommand::List { path, dir } => cmd::migrate_list(path, dir),
