@@ -42,6 +42,38 @@ admitting exactly five, refusing the sixth, and accepting again as the
 queue drained. Two phases in `jobs_queue`, both of which fail without the
 change — one on the payload, one on the ceiling being off by one.
 
+### Docs
+
+- **ROADMAP §7 still deferred two things that ship.** `DEFERRED.md` had
+  struck through `DEFERRED-2` (the AOT backend) and `DEFERRED-16` (jobs,
+  the durable queue, the dead-letter table, WebSocket) with reasons, and
+  §7 — which four spec pages link to by name — went on listing both as
+  absent: that `jwc build` produces only a launcher and answers `E0910` to
+  a `--native` flag, and that the language cannot declare a `job`. The
+  first names a flag and an error code that have never existed; the second
+  is four sections of `jobs.md`. Four other lines in ROADMAP still carried
+  `E0910` in "still open" lists.
+
+  §7 is now a view over the register: every row opens with its
+  `DEFERRED-N`, the two withdrawals are recorded in a new §7.1 rather than
+  deleted, and SSE — the one part of `DEFERRED-16` that really is absent —
+  gets its own row under `DEFERRED-19`.
+
+- **Two spec cross-references pointed at the wrong thing.** `routing.md`
+  cited `DEFERRED-17` for Server-Sent Events, but `DEFERRED-17` is
+  sequences as a declared object class; SSE is `DEFERRED-19`. And
+  `DEFERRED-9` explained itself with "queues are ROADMAP §7", which stopped
+  being true when the queue shipped — the language surface is what stays
+  deferred, and the runtime's own claim uses `SKIP LOCKED` (jobs §3.3).
+
+- **A guard, because a banner was not one.** ROADMAP already carried a
+  note at the top saying every `--native` clause below it was stale; a
+  reader arriving at §7 from `writes.md §6` never sees line 3. Two rules
+  now hold: naming a withdrawn id requires saying it was withdrawn, and
+  every §7 row must open with a live id. The second is the one that
+  matters — §7's rows carried no ids at all, so no citation check could
+  have caught them going stale.
+
 ## [0.9.950] — a dead peer kept its slot — 2026-09-08
 
 ### Added

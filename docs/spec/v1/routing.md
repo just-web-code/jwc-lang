@@ -539,7 +539,7 @@ once the deadline passes. A peer that answers its pings is not disturbed.
 under `x-jwc-sockets` rather than emitting the upgrade as a `GET` that
 answers 200 — a lie a client generator would act on.
 
-Server-Sent Events are `DEFERRED-17`: absent rather than
+Server-Sent Events are `DEFERRED-19`: absent rather than
 half-implemented. A transport a program can declare and pass every check
 against, and that then serves nothing, is worse than one that is simply
 not there.

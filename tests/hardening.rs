@@ -3542,3 +3542,156 @@ fn a_fault_says_internal_error_and_nothing_else_on_both_backends() {
         "and so must the builder an author calls by hand"
     );
 }
+
+/// A withdrawn deferral is not cited as if it were live, and ROADMAP §7
+/// is a view over the register rather than a second copy of it.
+///
+/// `DEFERRED.md` is normative: a row struck through is a decision that was
+/// **reversed**, and 1.0 does the thing after all. Two were — `DEFERRED-2`
+/// (the AOT backend) and `DEFERRED-16` (jobs, the durable queue, the
+/// dead-letter table, WebSocket) — and ROADMAP §7, which four spec pages
+/// link to by name, went on presenting both as deferred. A reader arriving
+/// from `writes.md §6` read that `jwc build` produces a launcher and that
+/// the language cannot declare a `job`: the first names a thing that has
+/// never existed, the second is four sections of `jobs.md`.
+///
+/// Two rules, because one would not have caught it. §7's rows carried no
+/// ids at all, so no citation check could have noticed them going stale —
+/// hence the second rule, which is what makes the table follow the
+/// register instead of drifting beside it.
+#[test]
+fn no_page_cites_a_deferral_that_was_withdrawn() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let register = std::fs::read_to_string(root.join("docs/spec/v1/DEFERRED.md"))
+        .expect("DEFERRED.md");
+    let (live, withdrawn) = deferral_register(&register);
+    assert!(live.len() >= 15, "the register did not parse: {live:?}");
+    assert!(
+        withdrawn.contains("DEFERRED-2") && withdrawn.contains("DEFERRED-16"),
+        "the two known withdrawals must parse as withdrawn: {withdrawn:?}"
+    );
+
+    // ---- rule 1: naming a withdrawn id means saying it was withdrawn.
+    //
+    // Recording the reversal is the correct use of the id and most of its
+    // uses, so the test is not "never name it" — it is "name it and say
+    // so". Prose wraps, so the marker may be a line or two away.
+    const RETRACTED: [&str; 6] = [
+        "withdrawn", "Withdrawn", "bekor", "eskirgan", "qaytdi", "noto'g'ri",
+    ];
+    let mut pages: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("docs/spec/v1"))
+        .expect("spec dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "md"))
+        // The register is where a withdrawn row is supposed to live.
+        .filter(|p| p.file_name().is_some_and(|n| n != "DEFERRED.md"))
+        .collect();
+    pages.push(root.join("ROADMAP.md"));
+    pages.sort();
+
+    let mut bad = Vec::new();
+    for page in &pages {
+        let text = std::fs::read_to_string(page).expect("page");
+        let name = page.file_name().unwrap().to_string_lossy().to_string();
+        let lines: Vec<&str> = text.lines().collect();
+        for (n, line) in lines.iter().enumerate() {
+            for id in cited_deferrals(line) {
+                if !live.contains(&id) && !withdrawn.contains(&id) {
+                    bad.push(format!("{name}:{} cites unknown {id}", n + 1));
+                    continue;
+                }
+                if !withdrawn.contains(&id) {
+                    continue;
+                }
+                let window = lines[n.saturating_sub(1)..(n + 3).min(lines.len())].join(" ");
+                if !RETRACTED.iter().any(|w| window.contains(w)) {
+                    bad.push(format!(
+                        "{name}:{} names withdrawn {id} without saying it was: {}",
+                        n + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+
+    // ---- rule 2: every §7 row carries a live id.
+    let roadmap = std::fs::read_to_string(root.join("ROADMAP.md")).expect("ROADMAP.md");
+    let s = roadmap
+        .find("## 7. 1.0 dan keyinga kechiktirilganlar")
+        .expect("ROADMAP §7");
+    let e = roadmap[s..].find("### 7.1").expect("§7.1, the withdrawal record") + s;
+    let mut rows = 0;
+    for line in roadmap[s..e].lines() {
+        // Data rows only: the header and the `|---|` rule are not rows.
+        if !line.starts_with("| `DEFERRED-") {
+            if line.starts_with("| ") && !line.starts_with("| id") && !line.starts_with("|---") {
+                bad.push(format!("ROADMAP §7 row does not open with an id: {line}"));
+            }
+            continue;
+        }
+        rows += 1;
+        // The row opens with its id, so the first one named is the row's.
+        if let Some(id) = cited_deferrals(line).first() {
+            if !live.contains(id) {
+                bad.push(format!("ROADMAP §7 keeps a row for non-live {id}"));
+            }
+        }
+    }
+    assert!(rows >= 8, "§7 lost its table: {rows} rows");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// The register, split into live ids and withdrawn ones.
+fn deferral_register(
+    md: &str,
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let (mut live, mut withdrawn) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
+    for line in md.lines() {
+        let t = line.trim_start();
+        if !t.starts_with("| ") {
+            continue;
+        }
+        let cell = t.trim_start_matches("| ");
+        // Either marker counts. The register struck the id on one row and
+        // only the description on the other, and a guard that read one
+        // spelling would have called the second row live.
+        let struck = cell.starts_with("~~") || line.contains("**Withdrawn");
+        let Some(rest) = cell.trim_start_matches("~~").strip_prefix('`') else {
+            continue;
+        };
+        let Some(id) = rest.split('`').next() else {
+            continue;
+        };
+        if !id.starts_with("DEFERRED-") {
+            continue;
+        }
+        if struck {
+            withdrawn.insert(id.to_string());
+        } else {
+            live.insert(id.to_string());
+        }
+    }
+    (live, withdrawn)
+}
+
+/// Every `DEFERRED-N` named in a line, ids only.
+fn cited_deferrals(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(i) = rest.find("DEFERRED-") {
+        let tail = &rest[i + "DEFERRED-".len()..];
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        if !digits.is_empty() {
+            out.push(format!("DEFERRED-{digits}"));
+        }
+        rest = &tail[digits.len()..];
+    }
+    out
+}

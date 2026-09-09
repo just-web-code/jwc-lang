@@ -128,7 +128,8 @@ nimani bajarishini tasvirlaydi, bu kompilyatorni emas.
 
 O'chgan narsalardan qaytadiganlari: migratsiyalar — v0.26.0, LSP va
 `jwc openapi` — v0.27.0, test freymvorki va paketlar — v0.28.0. Native AOT
-`DEFERRED-2` bo'yicha 1.1 ga qoldirilgan.
+ham qaytdi — `DEFERRED-2` bekor qilindi (§7.1), `jwc build` shu daraxtda
+native binar chiqaradi.
 
 Bu — joylashuv haqidagi qaror, semantika haqida emas: `src/v1/` eski
 grammatikaning bironta konstruksiyasini qabul qilmaydi.
@@ -671,9 +672,10 @@ Yo'l-yo'lakay topilgan uchta narsa:
   etgan ham "operatsiya bermaydi" degan; §4 view kommentini 7-fazaga
   qo'ygan, holbuki view 8-fazada yaratiladi. Uchalasi ham tuzatildi.
 
-**Ochiq qolgani:**
-- **`E0910`** — `--native` rad etish kodi. `jwc build` bu daraxtda yo'q
-  (DEFERRED-2), shuning uchun rad etadigan narsa ham yo'q.
+**Yopildi:**
+- **`E0910`** — `--native` rad etish kodi. Kerak bo'lmadi: `DEFERRED-2`
+  bekor qilindi (§7.1), `jwc build` native binar chiqaradi va rad
+  etadigan bayroq umuman mavjud emas.
 
 ---
 
@@ -730,8 +732,9 @@ Yo'l-yo'lakay:
   `--constraints` aniq javobni beradi: `DELETE /orgs/{org_id}` →
   `fk_invoices__org_id`, 400.
 
-**Ochiq qolgani:**
-- **`E0910`** — hamon `jwc build` yo'q (DEFERRED-2).
+**Yopildi:**
+- **`E0910`** — kerak bo'lmadi: `jwc build` bor va native
+  binar chiqaradi (`DEFERRED-2` bekor qilindi, §7.1).
 
 ---
 
@@ -999,7 +1002,9 @@ bir vaqtda kerak:
    ham "`\n` yozing" deb maslahat berardi — `r"..."` da `\n` teskari
    chiziq va `n`. Tuzatildi.)
 2. `qr-lite` — chiziqchali nom, v1 da `import` qilib bo'lmaydi.
-3. `--native` → `E0910` (`DEFERRED-2`).
+3. ~~`--native` → `E0910`~~ — o'sha paytdagi holat. `DEFERRED-2` bekor
+   qilingandan keyin (§7.1) `jwc build` native binar chiqaradi, va bu
+   band pilot ko'chirish uchun to'siq bo'lmay qoldi.
 
 Bu aynan ROADMAP'ning **v1.0.0-rc.1** dagi "pilot loyiha ko'chirish"
 bandi, va u ishlab turgan xizmatni (1kb.uz) o'zi pin qilgan kompilyatordan
@@ -1186,18 +1191,33 @@ relizini ko'rsatadi.
 qoldiriladi. Har birida "1.0 da nima bo'ladi" ustuni bor — chunki
 kechiktirish **jim noto'g'ri javob** demak emas.
 
-| Kechiktirilgan | 1.0 da nima bo'ladi | Sabab |
+Normativ ro'yxat — `docs/spec/v1/DEFERRED.md`. Bu jadval uning ko'rinishi,
+parallel ro'yxati emas: har bir qatorda `DEFERRED-N` id turadi, va id
+u yerda bekor qilinsa, bu yerdagi qator ham ketishi kerak. Aynan shu
+bo'lmagani uchun quyidagi ikki band oylar davomida "yo'q" deb turgan edi.
+
+| id | Kechiktirilgan | 1.0 da nima bo'ladi | Sabab |
+|---|---|---|---|
+| `DEFERRED-3` | **Enum `reorder` / `DROP VALUE` rebuild** (#26 ning uchdan biri) | Qattiq xato + qo'lda retsept chop etiladi: yangi tip yarat → har bir ustunni `USING` bilan o'zgartir → eski tipni tashla, plus qolgan qatorlarni tekshiruvchi `SELECT count(*)` guard | To'rt statementli rebuild cross-schema ustun xaritasini talab qiladi. Xato + retsept ma'lumot yo'qotmaydi; noto'g'ri avtomatika yo'qotadi |
+| `DEFERRED-4` | **Har bir FK uchun maxsus xabar** (#30 ning yarmi) | FK buzilishi default status oladi (`BadRequest` 400) va `jwc lint --constraints` uni ko'rsatadi | Grammatikaga yana bir xabar sloti qo'shish arzon, lekin FK xabarining to'g'ri statusi (400 vs 409 vs 404) holatga bog'liq. Ma'lumot yig'ilsin |
+| `DEFERRED-5` | **Umumiy subquery / CTE / window function / recursive / full-text** | `where exists`/`not exists` bor; qolgani uchun **`raw` escape hatch** (parametrlangan, `view` ichida taqiqlangan, lint'da ko'rinadi) | Query compiler'ning eng katta bo'lagi allaqachon 28%. Escape hatch klapan bo'ladi va qaysi feature haqiqatan kerakligini o'lchaydi |
+| `DEFERRED-12` | **Bare-join aggregation + `as many` bir query'da** (#4 ning yarmi) | Kompilyatsiya xatosi, aniq diagnostika bilan | Ikkisining birgalikdagi semantikasi (lateral agregatga kiradimi, guruhlashdan omon qoladimi) haqiqiy dizayn savoli. Xato — to'g'ri javob; jim ko'paytirilgan `count` — emas |
+| `DEFERRED-7` | **Dev-only `/__jwc/queries` endpoint'i** (#29 ning bir qismi) | `JWC_LOG_SQL=1`, `jwc explain`, LSP hover-SQL bor | Uchtasi DBA/Developer testini qoplaydi. To'rtinchisi — qulaylik |
+| `DEFERRED-13` | **To'liq modul/visibility sistemasi** | `import` semantikasi yozib qo'yiladi (**N5**), namespace nomlash majburlanadi, lekin nom maydoni **flat** qoladi va `import` ko'rinishni cheklamaydi | Flat namespace + majburlanadigan `import` deklaratsiyasi 1.0 uchun yetadi. Haqiqiy visibility — 2.0 masalasi |
+| `DEFERRED-14` | **Tiplangan klient generatsiyasi (TS/Go/Python SDK)** | `jwc openapi` bor | OpenAPI — chegara. Har bir til uchun SDK — alohida loyiha |
+| `DEFERRED-15` | **Migration `down` ning to'liq avtomatik teskarisi** | `migrate down` bor, lekin destruktiv operatsiyalar uchun teskari skript **generatsiya qilinmaydi** — `-- irreversible` deb belgilanadi | Ustun tushirilgandan keyin ma'lumot yo'q. Teskarilikni va'da qilish — yolg'on |
+| `DEFERRED-19` | **Server-Sent Events** | Yo'q — yarim ishlaydigandan ko'ra umuman yo'q. `socket` (routing §9) yoki long-polling | E'lon qilib bo'ladigan, har qanday tekshiruvdan o'tadigan, keyin hech narsa xizmat qilmaydigan transport — bo'lmaganidan yomonroq |
+
+### 7.1 Bekor qilinganlar
+
+Ikki band bu jadvaldan **olib tashlandi** — kechiktirilgani uchun emas,
+qilingani uchun. Ikkalasi ham `DEFERRED.md` da chizib tashlangan holda,
+sababi bilan turibdi; bu yerda qoldirilishi hujjatni yolg'onchi qilardi.
+
+| id | Nima deyilgan edi | Nima bo'ldi |
 |---|---|---|
-| **`--native` AOT backend** (hozirgi `native_build.rs`, 5 149 satr) | `jwc build` faqat launcher + runtime bundling; `--native` mavjud emas, `E0910` beradi | Semantika 1.0 gacha harakatda. Har bir query-compiler o'zgarishi ikkinchi implementatsiya + differential case talab qilardi. Interpretator — yagona reference. **1.1 da qaytadi**, eski kod ko'chirilmaydi, qayta yoziladi |
-| **Background jobs, durable queue, DLQ, WebSocket, SSE** | Yo'q. Eski runtime kodi saqlanadi, ammo yangi til ularni e'lon qila olmaydi | `DESIGN.md` bu hududlarga umuman tegmaydi. Ularni yangi lug'atda qanday e'lon qilish — hech kim loyihalamagan dizayn ishi. 1.0 lug'atiga taxmin bilan qo'shish — ikki marta yozish |
-| **Enum `reorder` / `DROP VALUE` rebuild** (#26 ning uchdan biri) | Qattiq xato + qo'lda retsept chop etiladi: yangi tip yarat → har bir ustunni `USING` bilan o'zgartir → eski tipni tashla, plus qolgan qatorlarni tekshiruvchi `SELECT count(*)` guard | To'rt statementli rebuild cross-schema ustun xaritasini talab qiladi. Xato + retsept ma'lumot yo'qotmaydi; noto'g'ri avtomatika yo'qotadi |
-| **Har bir FK uchun maxsus xabar** (#30 ning yarmi) | FK buzilishi default status oladi (`BadRequest` 400) va `jwc lint --constraints` uni ko'rsatadi | Grammatikaga yana bir xabar sloti qo'shish arzon, lekin FK xabarining to'g'ri statusi (400 vs 409 vs 404) holatga bog'liq. Ma'lumot yig'ilsin |
-| **Umumiy subquery / CTE / window function / recursive / full-text** | `where exists`/`not exists` bor; qolgani uchun **`raw` escape hatch** (parametrlangan, `view` ichida taqiqlangan, lint'da ko'rinadi) | Query compiler'ning eng katta bo'lagi allaqachon 28%. Escape hatch klapan bo'ladi va qaysi feature haqiqatan kerakligini o'lchaydi |
-| **Bare-join aggregation + `as many` bir query'da** (#4 ning yarmi) | Kompilyatsiya xatosi, aniq diagnostika bilan | Ikkisining birgalikdagi semantikasi (lateral agregatga kiradimi, guruhlashdan omon qoladimi) haqiqiy dizayn savoli. Xato — to'g'ri javob; jim ko'paytirilgan `count` — emas |
-| **Dev-only `/__jwc/queries` endpoint'i** (#29 ning bir qismi) | `JWC_LOG_SQL=1`, `jwc explain`, LSP hover-SQL bor | Uchtasi DBA/Developer testini qoplaydi. To'rtinchisi — qulaylik |
-| **To'liq modul/visibility sistemasi** | `import` semantikasi yozib qo'yiladi (**N5**), namespace nomlash majburlanadi, lekin nom maydoni **flat** qoladi va `import` ko'rinishni cheklamaydi | Flat namespace + majburlanadigan `import` deklaratsiyasi 1.0 uchun yetadi. Haqiqiy visibility — 2.0 masalasi |
-| **Tiplangan klient generatsiyasi (TS/Go/Python SDK)** | `jwc openapi` bor | OpenAPI — chegara. Har bir til uchun SDK — alohida loyiha |
-| **Migration `down` ning to'liq avtomatik teskarisi** | `migrate down` bor, lekin destruktiv operatsiyalar uchun teskari skript **generatsiya qilinmaydi** — `-- irreversible` deb belgilanadi | Ustun tushirilgandan keyin ma'lumot yo'q. Teskarilikni va'da qilish — yolg'on |
+| ~~`DEFERRED-2`~~ | `--native` AOT backend yo'q; `jwc build` faqat launcher bundle qiladi; `--native` `E0910` beradi; **1.1 da qaytadi** | `jwc build` native binar chiqaradi va tilni qoplaydi — `view` dan boshqa hech narsa nom bilan rad etilmaydi. `--native` degan bayroq hech qachon bo'lmagan va `E0910` mavjud emas. Muzlatish sababi — "ikkinchi backend har bir query-compiler o'zgarishini ikki marta qildiradi" — noto'g'ri chiqdi: `query_sql` so'rovni kompilyatsiya vaqtida SQL matniga tushiradi, codegen query kompilyatorini *chaqiradi* |
+| ~~`DEFERRED-16`~~ | Background jobs, durable queue, DLQ, WebSocket, SSE — yo'q; yangi til ularni e'lon qila olmaydi | SSE dan boshqa hammasi e'lon qilinadigan konstruksiya: `job` / `dispatch` va `_jwc_jobs` / `_jwc_jobs_dead` (jobs.md), `socket` (routing §9), `cache.*` (builtins §8). "Lug'atni taxmin qilish uni ikki marta yozdiradi" degan sabab teskari chiqdi — bir marta yozish arzonroq bo'ldi. SSE `DEFERRED-19` sifatida qoladi |
 
 ---
 
