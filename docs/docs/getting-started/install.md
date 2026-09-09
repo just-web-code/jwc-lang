@@ -25,6 +25,14 @@ Both resolve the latest release themselves, verify the published `.sha256`
 against what they downloaded, and refuse to install on a mismatch. The
 Windows script installs to `%LOCALAPPDATA%\jwc\bin`.
 
+:::note
+
+"Latest" means the latest **stable** release. `1.0.0-rc.1` is a candidate
+and is published as a pre-release, so a bare install does not pick it up —
+pin it, as below, if that is what you want to run.
+
+:::
+
 ```bash
 jwc --version
 ```

@@ -230,6 +230,13 @@ jobs:
           # asking on all five printed "What's Changed" five times over. The
           # v0.9.7 body carries four copies of it.
           generate_release_notes: ${{ matrix.short == 'x86_64-linux' }}
+          # A tag with a SemVer pre-release part (`v1.0.0-rc.1`) is a
+          # pre-release, and saying so is what keeps it out of
+          # `/releases/latest` — which is exactly where `install.sh`
+          # resolves a bare install. Without this, publishing a candidate
+          # hands it to everyone who pipes the script with no
+          # `JWC_VERSION`, with nothing in the output to say it is one.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
 # The VS Code extension is NOT published here. It has its own workflow —
 # .github/workflows/vscode-marketplace.yml — which fires on the same `v*`
