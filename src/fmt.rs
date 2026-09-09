@@ -985,16 +985,17 @@ impl Writer {
             // `filter` is the `where` of a `count(x) where …`, which reads
             // as part of the call rather than as another argument, so a
             // call carrying one is left alone.
-            ExprKind::Call { callee, args, filter } if filter.is_none() && !args.is_empty() => {
+            ExprKind::Call {
+                callee,
+                args,
+                filter,
+            } if filter.is_none() && !args.is_empty() => {
                 let head = format!("{prefix}{}(", wrap(callee, 10));
                 // The common shape, and the one a person writes by hand:
                 // `string.join([` … `], "\n");`. Hug when the first
                 // argument is the one that grew and the rest still fit
                 // beside the closing bracket.
-                let rest: String = args[1..]
-                    .iter()
-                    .map(|a| format!(", {}", expr(a)))
-                    .collect();
+                let rest: String = args[1..].iter().map(|a| format!(", {}", expr(a))).collect();
                 let bracketed = matches!(&*args[0].kind, ExprKind::Array(i) if !i.is_empty())
                     || matches!(&*args[0].kind, ExprKind::Object(i) if !i.is_empty());
                 if bracketed && !self.over("]", &rest, &format!("){suffix}")) {
@@ -1055,9 +1056,7 @@ impl Writer {
             // Restricted to the three that actually chain — `+` for
             // building a string, `and`/`or` for building a condition. A
             // broken `==` would read as two statements.
-            ExprKind::Binary { op, .. }
-                if matches!(op, BinOp::Add | BinOp::And | BinOp::Or) =>
-            {
+            ExprKind::Binary { op, .. } if matches!(op, BinOp::Add | BinOp::And | BinOp::Or) => {
                 let op = *op;
                 let mut parts: Vec<&Expr> = Vec::new();
                 Self::chain(e, op, &mut parts);
@@ -1099,7 +1098,11 @@ impl Writer {
     }
 
     fn comma(n: usize, len: usize) -> &'static str {
-        if n + 1 < len { "," } else { "" }
+        if n + 1 < len {
+            ","
+        } else {
+            ""
+        }
     }
 
     fn items(&mut self, len: usize, mut f: impl FnMut(&mut Self, usize)) {
@@ -1154,7 +1157,11 @@ impl Writer {
         // Measured against the margin including the indent *and* the
         // suffix: an `insert … catch Conflict (err) {` counted only the
         // columns before the `catch` and printed 96 of them.
-        let fits = !self.over(&format!("{head} {{ "), &inline, &format!(" }}{buffered}{suffix}"));
+        let fits = !self.over(
+            &format!("{head} {{ "),
+            &inline,
+            &format!(" }}{buffered}{suffix}"),
+        );
         if fits && tail.is_empty() && i.projection.is_none() {
             self.line(&format!("{head} {{ {inline} }}{buffered}{suffix}"));
             return;

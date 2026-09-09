@@ -3478,7 +3478,9 @@ fn a_fault_says_internal_error_and_nothing_else_on_both_backends() {
     // Every other way the interpreter reaches a 500 says the same word, so
     // the redacting branch is the whole set and not one of several bodies.
     assert_eq!(
-        serve.matches(r#"Response::message(500, "internal_error")"#).count(),
+        serve
+            .matches(r#"Response::message(500, "internal_error")"#)
+            .count(),
         3,
         "the interpreter's other 500s must keep answering `internal_error`"
     );
@@ -3508,8 +3510,8 @@ fn a_fault_says_internal_error_and_nothing_else_on_both_backends() {
 #[test]
 fn no_page_cites_a_deferral_that_was_withdrawn() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let register = std::fs::read_to_string(root.join("docs/spec/v1/DEFERRED.md"))
-        .expect("DEFERRED.md");
+    let register =
+        std::fs::read_to_string(root.join("docs/spec/v1/DEFERRED.md")).expect("DEFERRED.md");
     let (live, withdrawn) = deferral_register(&register);
     assert!(live.len() >= 15, "the register did not parse: {live:?}");
     assert!(
@@ -3523,7 +3525,12 @@ fn no_page_cites_a_deferral_that_was_withdrawn() {
     // uses, so the test is not "never name it" — it is "name it and say
     // so". Prose wraps, so the marker may be a line or two away.
     const RETRACTED: [&str; 6] = [
-        "withdrawn", "Withdrawn", "bekor", "eskirgan", "qaytdi", "noto'g'ri",
+        "withdrawn",
+        "Withdrawn",
+        "bekor",
+        "eskirgan",
+        "qaytdi",
+        "noto'g'ri",
     ];
     let mut pages: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("docs/spec/v1"))
         .expect("spec dir")
@@ -3566,7 +3573,10 @@ fn no_page_cites_a_deferral_that_was_withdrawn() {
     let s = roadmap
         .find("## 7. 1.0 dan keyinga kechiktirilganlar")
         .expect("ROADMAP §7");
-    let e = roadmap[s..].find("### 7.1").expect("§7.1, the withdrawal record") + s;
+    let e = roadmap[s..]
+        .find("### 7.1")
+        .expect("§7.1, the withdrawal record")
+        + s;
     let mut rows = 0;
     for line in roadmap[s..e].lines() {
         // Data rows only: the header and the `|---|` rule are not rows.

@@ -269,19 +269,30 @@ impl CorsConfig {
 /// left for HTTP, the pool and the listener; clamped low so a tiny limit
 /// still allows a handful of sockets, and clamped high because past a few
 /// thousand the memory per connection matters more than the descriptor.
+///
+/// Off unix there is no such limit to read — a Windows handle table grows
+/// until memory runs out — so the cap is the same 512 a unix host that
+/// refuses to answer gets. The number still binds; it is just not derived.
 fn default_max_sockets() -> usize {
-    let mut lim = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: `getrlimit` writes into a struct we own and reads nothing
-    // else; the return value tells us whether it wrote at all.
-    let ok = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) } == 0;
-    if !ok {
-        return 512;
+    #[cfg(unix)]
+    {
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` writes into a struct we own and reads nothing
+        // else; the return value tells us whether it wrote at all.
+        let ok = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) } == 0;
+        if !ok {
+            return 512;
+        }
+        let soft = lim.rlim_cur as usize;
+        (soft / 2).clamp(64, 4096)
     }
-    let soft = lim.rlim_cur as usize;
-    (soft / 2).clamp(64, 4096)
+    #[cfg(not(unix))]
+    {
+        512
+    }
 }
 
 impl Default for ServerConfig {
@@ -1559,9 +1570,12 @@ impl<'a> Vm<'a> {
         // Dropping the value here rather than in `sql::insert` keeps the
         // two vectors the single thing they are meant to be: names and
         // the values that go with them, in step.
-        let target = self.program.model.tables.iter().find(|t| {
-            t.schema == i.table.schema.name && t.declared == i.table.object.name
-        });
+        let target = self
+            .program
+            .model
+            .tables
+            .iter()
+            .find(|t| t.schema == i.table.schema.name && t.declared == i.table.object.name);
         if let Some(table) = target {
             let keep: Vec<bool> = fields
                 .0

@@ -106,7 +106,9 @@ async fn a_failed_job_comes_back_after_its_backoff() {
     let url = skip_unless_db!("a_failed_job_comes_back_after_its_backoff");
     let client = setup(&url).await;
 
-    jobs::enqueue("Retry", "{}", 5, 0, 0, 0).await.expect("enqueue")
+    jobs::enqueue("Retry", "{}", 5, 0, 0, 0)
+        .await
+        .expect("enqueue")
         .expect("this phase runs with both bounds off");
     let first = jobs::claim().await.expect("claim").expect("ready");
     jobs::fail(&first, 60, "boom").await.expect("fail");
@@ -181,7 +183,7 @@ async fn two_claims_take_two_different_jobs() {
         jobs::enqueue("Spread", &format!(r#"{{"i":{i}}}"#), 3, 0, 0, 0)
             .await
             .expect("enqueue")
-        .expect("this phase runs with both bounds off");
+            .expect("this phase runs with both bounds off");
     }
 
     let a = jobs::claim().await.expect("a").expect("ready");
@@ -219,9 +221,13 @@ async fn depths_report_both_tables() {
     let url = skip_unless_db!("depths_report_both_tables");
     setup(&url).await;
 
-    jobs::enqueue("A", "{}", 1, 0, 0, 0).await.expect("enqueue")
+    jobs::enqueue("A", "{}", 1, 0, 0, 0)
+        .await
+        .expect("enqueue")
         .expect("this phase runs with both bounds off");
-    jobs::enqueue("B", "{}", 1, 0, 0, 0).await.expect("enqueue")
+    jobs::enqueue("B", "{}", 1, 0, 0, 0)
+        .await
+        .expect("enqueue")
         .expect("this phase runs with both bounds off");
     let claim = jobs::claim().await.expect("claim").expect("ready");
     jobs::fail(&claim, 0, "dead on the first attempt")
@@ -237,7 +243,6 @@ async fn depths_report_both_tables() {
     assert!(text.contains("jwc_jobs_dead 1"), "{text}");
     assert!(text.contains("jwc_jobs_dead_total"), "{text}");
 }
-
 
 /// A payload over `job_max_payload` is refused, and writes nothing.
 ///
@@ -307,7 +312,10 @@ async fn the_queue_depth_is_bounded() {
     );
 
     for _ in 0..3 {
-        match jobs::enqueue("Fill", "{}", 1, 0, 0, 5).await.expect("enqueue") {
+        match jobs::enqueue("Fill", "{}", 1, 0, 0, 5)
+            .await
+            .expect("enqueue")
+        {
             Err(jobs::Refused::QueueFull { limit }) => assert_eq!(limit, 5),
             other => panic!("a dispatch past the limit was accepted: {other:?}"),
         }

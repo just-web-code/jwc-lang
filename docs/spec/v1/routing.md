@@ -487,7 +487,8 @@ The default is half the process's own descriptor limit, clamped to
 ends: 1024 is the common Linux soft limit, so defaulting to 1024 would let
 sockets take every descriptor the process has — the exact failure this cap
 exists to stop — while on a host tuned to 65536 the same number is
-needlessly small.
+needlessly small. Where there is no such limit to read — Windows, whose
+handle table grows until memory runs out — the default is **512**.
 
 `max_sockets = 0` means **no limit**, the same thing `0` means for
 `max_body_bytes` — the escape hatch for a deployment whose load balancer

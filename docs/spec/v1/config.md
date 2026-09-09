@@ -95,7 +95,7 @@ default.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `max_sockets` | `int` | half the process's descriptor limit, clamped to [64, 4096] | over → 503 before the handshake (routing §9.5) |
+| `max_sockets` | `int` | half the process's descriptor limit, clamped to [64, 4096]; 512 where there is none to read | over → 503 before the handshake (routing §9.5) |
 | `socket_keepalive` | duration | `30s` | ping interval and pong deadline on a quiet socket; `0s` disables (routing §9.5.1) |
 | `job_max_payload` | `int` | 65536 | biggest `dispatch` payload in bytes; over → fault (jobs §3.7) |
 | `job_queue_limit` | `int` | 10000 | jobs that may be waiting; at it → `dispatch` is refused (jobs §3.7) |

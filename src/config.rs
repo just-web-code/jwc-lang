@@ -227,7 +227,7 @@ pub const REGISTRY: &[EnvVar] = &[
     EnvVar {
         name: "JWC_MAX_SOCKETS",
         parse_kind: ParseKind::Usize,
-        default: "server { max_sockets }, else half the descriptor limit",
+        default: "server { max_sockets }, else half the descriptor limit (512 on Windows)",
         doc: "Concurrent WebSocket connections; 0 disables the cap. \
               Native builds only — `jwc serve` reads `server { max_sockets }`.",
     },

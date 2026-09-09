@@ -702,7 +702,11 @@ async fn adoption_reports_a_wrong_constraint_name_instead_of_refusing() {
     let (schema, table, want) = snap
         .tables
         .iter()
-        .find_map(|t| t.primary_key.as_ref().map(|pk| (&t.schema, &t.name, pk.name.clone())))
+        .find_map(|t| {
+            t.primary_key
+                .as_ref()
+                .map(|pk| (&t.schema, &t.name, pk.name.clone()))
+        })
         .expect("a table with a primary key");
     client
         .batch_execute(&format!(

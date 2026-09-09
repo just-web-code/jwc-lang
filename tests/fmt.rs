@@ -375,7 +375,6 @@ fn a_value_that_would_run_past_the_margin_is_broken() {
     assert_eq!(once, fmt("margin.jwc (2nd)", &once));
 }
 
-
 /// A chain of one operator breaks at its joints; a ternary does not.
 ///
 /// The distinction is the whole rule. `a + b + c` is a list with the same

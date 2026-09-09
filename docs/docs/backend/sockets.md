@@ -96,7 +96,7 @@ Two `server { }` keys bound sockets, and they answer different questions.
 
 | Key | Default | What it does |
 |---|---|---|
-| `max_sockets` | half the descriptor limit, clamped to [64, 4096] | past it the upgrade is `503`, answered before the handshake so the descriptor is never spent |
+| `max_sockets` | half the descriptor limit, clamped to [64, 4096]; 512 on Windows | past it the upgrade is `503`, answered before the handshake so the descriptor is never spent |
 | `socket_keepalive` | `"30s"` | pings a quiet connection; a peer that has not answered by the next tick is dropped and its slot returned |
 
 The second exists because the first is not enough on its own. A cap on how

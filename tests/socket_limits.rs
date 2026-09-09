@@ -62,7 +62,9 @@ enum Outcome {
 }
 
 async fn send_frame(port: u16, size: usize) -> Outcome {
-    let mut s = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+    let mut s = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("connect");
     let req = format!(
         "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n\
          Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
@@ -241,7 +243,9 @@ async fn idle_upgrade(port: u16) -> Result<TcpStream, String> {
          Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
          Sec-WebSocket-Version: 13\r\n\r\n"
     );
-    s.write_all(req.as_bytes()).await.map_err(|e| e.to_string())?;
+    s.write_all(req.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
@@ -372,11 +376,8 @@ routes "/" {
     let mut closed = false;
     while std::time::Instant::now() < deadline {
         let mut buf = [0u8; 256];
-        let read = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            s.read(&mut buf),
-        )
-        .await;
+        let read =
+            tokio::time::timeout(std::time::Duration::from_millis(500), s.read(&mut buf)).await;
         let n = match read {
             Err(_) => continue,
             Ok(Ok(0)) | Ok(Err(_)) => {
@@ -407,7 +408,10 @@ routes "/" {
         }
     }
 
-    assert!(pinged >= 2, "the server must ping a quiet socket, saw {pinged}");
+    assert!(
+        pinged >= 2,
+        "the server must ping a quiet socket, saw {pinged}"
+    );
     assert!(
         !closed,
         "a peer that answered {pinged} pings was closed anyway — the \
