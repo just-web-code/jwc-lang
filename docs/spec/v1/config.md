@@ -100,11 +100,13 @@ default.
 | `job_max_payload` | `int` | 65536 | biggest `dispatch` payload in bytes; over → fault (jobs §3.7) |
 | `job_queue_limit` | `int` | 10000 | jobs that may be waiting; at it → `dispatch` is refused (jobs §3.7) |
 | `max_body_bytes` | `int` | 1048576 | over → 413 before middleware (routing §5.1); also caps a socket message and frame (routing §9.4) |
+| `swagger` | `string` | off | path the API reference is served at, e.g. `"/docs"`; `""` is off (§4.0.8) |
 | `request_timeout` | duration | `30s` | whole request |
 | `header_timeout` | duration | `10s` | request line + headers |
 | `max_page_size` | `int` | 100 | ceiling for `page … size` (queries §9.2) |
 | `strict_slash` | `boolean` | true | `/x/` → 308 → `/x` |
 | `bind` | `text` | `"0.0.0.0"` | the address the listener binds |
+| `port` | `int` | 8080 | the port the listener binds; an integer literal, `E1208` otherwise (§3.2.2) |
 | `cursor_secret` | `text` | — | HMAC key for keyset cursors; **required** if any query uses `page` (`E1205`) |
 | `trusted_proxies` | `inet[]` | `[]` | see §3.3 |
 | `shutdown_grace` | duration | `20s` | drain window on SIGTERM |
@@ -120,12 +122,23 @@ server rather than falling back to the default — the fallback would put the
 listener on every interface, which is the opposite of what writing the key
 was reaching for, and nothing outside the process would show it.
 
-3.2.2 The **port** is not a `server { }` key: it is the argument of
-`serve(port)` in `main()` (builtins §2). `main` is evaluated at boot, so the
-argument is an expression and not a literal —
-`serve(int(env("PORT") ?? "8080"))` is the ordinary form. A `main` that
-raises stops the boot and says so rather than listening somewhere nobody
-asked for; a program with no `main` listens on 8080.
+3.2.2 The **port** is `server { port }`, beside `bind`: they are two halves
+of one address, and splitting them across the block and `main()` put one of
+them outside this table and outside the registry (§5). The resolution order
+is the one every key in this block follows, with the flag on top:
+
+```
+--port  →  JWC_PORT  →  PORT  →  server { port }  →  8080
+```
+
+`PORT` is honoured unprefixed because a platform that injects a port injects
+that name — the same pair `JWC_DATABASE_URL` and `DATABASE_URL` make.
+
+**Whether** a program listens is a separate question, and `serve()` in
+`main()` is the answer (builtins §2). A `main` that never calls it is an
+ordinary program: it runs and exits, and `jwc serve` refuses to start rather
+than binding a port nobody asked for. `main` is evaluated at boot either
+way, so a `main` that raises stops the boot and says so.
 
 `jwc serve --port N` overrides the program's own value, for a local run that
 needs a different port than the one the program ships with. Without the flag
@@ -247,6 +260,24 @@ grow separate opinions about what is on.
 | `/readyz` | `200 {"status":"ready"}` or `503 {"status":"unready","failed":[…]}` | every configured dependency |
 | `/metrics` | Prometheus text (`text/plain; version=0.0.4`) | nothing |
 
+4.0.8 **The API reference.** `server { swagger = "/docs" }` serves a
+browsable reference of every route at that path, and the OpenAPI document
+it was rendered from at `/docs/openapi.json`. `JWC_SWAGGER` wins over the
+key, so one build can carry the reference on a staging deployment and not
+on a production one.
+
+It is **off by default**. The page lists every route, its parameters and
+the errors it can raise — a map of the attack surface, useful to whoever
+reads it. It runs no middleware, like the three above, so a reference an
+operator can reach is not gated behind the application's own auth; keeping
+it off a public listener is the same job as keeping `/metrics` off one.
+
+The document is the one `jwc openapi` writes, from the same walk — a
+second generator kept in step by hand is how a page and its document come
+to disagree. Both backends serve the same bytes: `jwc serve` renders at
+load, `jwc build` bakes the page in at compile time, since a native binary
+carries none of the analysis the document is a function of.
+
 4.0.2 They are **not declarable**, and that is deliberate. An operator needs
 them at a known path before reading anyone's source, and a liveness probe
 that depends on the application having remembered to write one is a
@@ -305,7 +336,7 @@ deployment grows.
 | Variable | Used by |
 |---|---|
 | `DATABASE_URL` / `JWC_DATABASE_URL` | connection |
-| `PORT` | only if the program reads it: `serve(int(env("PORT") ?? "8080"))` |
+| `PORT` / `JWC_PORT` | listener port, over `server { port }` (§3.2.2) |
 | `JWC_LOG_LEVEL` | `error` / `warn` / `info` / `debug` |
 | `JWC_LOG_FORMAT` | `json` (default) / `text` |
 | `JWC_LOG_SQL` | `1` logs every statement with timing (queries §7.4) |
@@ -414,3 +445,4 @@ under `jwc serve` and could not be built.
 | `E1205` | `page` used with no `cursor_secret` |
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` |
+| `E1208` | `port` is not an integer literal |

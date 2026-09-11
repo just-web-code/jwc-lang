@@ -1,9 +1,9 @@
---- The two-stage rewrite (#44, queries.md §8.3).
----
---- A bounded page over a relation that carries a collection is the shape
---- that reads fine and scans the table: the lateral runs for every
---- candidate row and all but `limit` of the results are thrown away. The
---- keys are cheap, so the keys go first.
+/// The two-stage rewrite (#44, queries.md §8.3).
+///
+/// A bounded page over a relation that carries a collection is the shape
+/// that reads fine and scans the table: the lateral runs for every
+/// candidate row and all but `limit` of the results are thrown away. The
+/// keys are cheap, so the keys go first.
 namespace pushdown;
 
 database App : Postgres;
@@ -37,65 +37,65 @@ view InvoiceDetail of App.s {
     select I from App.s.Invoices
         left join App.s.Lines L on L.invoice_id == I.id
             as many lines orderby id asc limit 50
-        as { id, org_id, number, issued_at, lines: { id, body } }
+        as { I.id, I.org_id, I.number, I.issued_at, lines: { id, body } }
 }
 
 service Invoices {
-    --- Over a view whose projection carries a collection: the page of
-    --- keys is taken from the base table, then the view is joined for
-    --- those keys only.
+    /// Over a view whose projection carries a collection: the page of
+    /// keys is taken from the base table, then the view is joined for
+    /// those keys only.
     function recent(org_id: bigint, size: int) {
         return select ID from App.s.InvoiceDetail
-            where org_id == $org_id
-            orderby issued_at desc, id desc
-            limit $size;
+            where ID.org_id == @org_id
+            orderby ID.issued_at desc, ID.id desc
+            limit @size;
     }
 
-    --- The same shape written inline rather than through a view.
+    /// The same shape written inline rather than through a view.
     function recent_inline(org_id: bigint, size: int) {
         return select I from App.s.Invoices
             left join App.s.Lines L on L.invoice_id == I.id
                 as many lines orderby id asc limit 50
-            where org_id == $org_id
-            as { id, number, issued_at, lines: { id, body } }
+            where I.org_id == @org_id
+            as { I.id, I.number, I.issued_at, lines: { id, body } }
             orderby I.issued_at desc, I.id desc
-            limit $size;
+            limit @size;
     }
 
-    --- Ordered by a column with no index, so the order needs a sort and
-    --- the sort needs every candidate row. Without the rewrite the
-    --- collection is built for all of them and all but `size` thrown away.
+    /// Ordered by a column with no index, so the order needs a sort and
+    /// the sort needs every candidate row. Without the rewrite the
+    /// collection is built for all of them and all but `size` thrown away.
     function recent_by_number(org_id: bigint, size: int) {
         return select ID from App.s.InvoiceDetail
-            where org_id == $org_id
-            orderby number asc
-            limit $size;
+            where ID.org_id == @org_id
+            orderby ID.number asc
+            limit @size;
     }
 
-    --- One row by key: no page, because there is nothing to bound.
+    /// One row by key: no page, because there is nothing to bound.
     function one(invoice_id: bigint) {
         return select ID from App.s.InvoiceDetail
-            where id == $invoice_id
+            where ID.id == @invoice_id
             first;
     }
 }
 
---- A view that carries both a nested `one` and a collection. Ordering by
---- the nested field lowers to the flattened column (N6), which the base
---- table does not have — so a *bounded* page over it cannot be pushed
---- down and is E0542. Unbounded, the same order is fine: there is no page
---- to build first.
+/// A view that carries both a nested `one` and a collection. Ordering by
+/// the nested field lowers to the flattened column (N6), which the base
+/// table does not have — so a *bounded* page over it cannot be pushed
+/// down and is E0542. Unbounded, the same order is fine: there is no page
+/// to build first.
 view InvoiceWithOrg of App.s {
     select I from App.s.Invoices
         left join App.s.Orgs O on O.id == I.org_id as one org
         left join App.s.Lines L on L.invoice_id == I.id
             as many lines under I orderby id asc limit 50
-        as { id, org_id, number, issued_at, org: { id, name }, lines: { id, body } }
+        as { I.id, I.org_id, I.number, I.issued_at, org: { id, name }, lines: { id, body } }
 }
 
 service ByOrgName {
     function unbounded() {
         return select IWO from App.s.InvoiceWithOrg
-            orderby org.name asc;
+            orderby IWO.org.name asc;
     }
 }

@@ -8,7 +8,7 @@ be.
 | File | What it fixes |
 |---|---|
 | [`grammar.ebnf`](./grammar.ebnf) | the syntax, complete |
-| [`names.md`](./names.md) | lexical structure, `namespace`/`import`, name resolution, the `$`/`@` sigils |
+| [`names.md`](./names.md) | lexical structure, `namespace`/`import`, name resolution, the `@` sigil |
 | [`types.md`](./types.md) | scalar dictionary, `Raw \| Record` lattice, `T?` and narrowing, spread, class validation, expression core |
 | [`schema.md`](./schema.md) | tables, enums, constraints, indexes, triggers, comments, constraint naming, DDL emission order |
 | [`queries.md`](./queries.md) | `select`, joins, projections, aggregates, `first`, views, keyset pagination |
@@ -48,7 +48,7 @@ was written from are fixed, and each fix is a clause:
 | `AuthService.login` answered **403** for bad credentials | `Unauthorized` → 401 (errors §1.2) |
 | `RequireOrgAdmin` read a `context` key it never declared | `requires RequireOrgMember` + `provides role: MemberRole` (middleware §3, §6) |
 | `WebhookService.record_payment` was select-then-insert — a TOCTOU that turned redelivery into a retry loop | `on conflict (provider_ref) do nothing` (writes §2.3) |
-| six `where` sites were ambiguous between a column and a local | `$` is mandatory on every local (names §5.3) |
+| six `where` sites were ambiguous between a column and a local | a column names its binding (`T.col`), a local carries `@` (queries §2.4) |
 
 Money moved from `int` cents to `numeric(14,2)` (types §2.1), path
 parameters are typed (routing §3.1), the invoice list is keyset-paginated

@@ -4,66 +4,69 @@
 
 # JWC Language for VS Code
 
-> **v0.25.0 note.** The language changed: `entity`, `dbcontext`, `with`,
-> `via`, `validate body`, `new … from`, `patch`, `group`, `mount` and `dome`
-> were removed in favour of the grammar in `docs/spec/v1/`. Syntax
-> highlighting here follows the new keywords. The language server is not
-> built at the moment — it was written against the old parser and returns,
-> rewritten, in v0.27.0. Until then the extension gives highlighting and
-> snippets, and `jwc check` gives diagnostics.
-
-Syntax highlighting, snippets, and LSP-powered diagnostics for [JWC (Just Web Code)](https://jwc.1kb.uz).
+Syntax highlighting, snippets and language-server diagnostics for
+[JWC (Just Web Code)](https://jwc.1kb.uz) — a backend language with
+first-class routes, tables and views over Postgres.
 
 ## Features
 
-- Syntax highlighting for `.jwc` files (including the package keywords
-  `namespace`, `import`, `mount`, `group`, `public`, `private`).
-- Snippets for routes, entities, queries, CRUD scaffolds, and package
-  pieces (`namespace`, `import`, `mount`, `group`, `pub-fn`, `priv-fn`,
-  `pub-middleware`).
-- Diagnostics (parse + validate + lint) via `jwc-lsp`.
-- Hover info on entities / classes / functions.
+### Syntax highlighting
 
-### Navigation: Go to Definition
+Every `.jwc` construct in [the v1 grammar](https://jwc.1kb.uz): declarations
+(`database`, `schema`, `table`, `view`, `enum`, `class`, `error`, `service`,
+`middleware`, `routes`, `route`, `socket`, `errorHandler`, `server`, `job`,
+`test`), the query clauses, the scalar dictionary, the validation rules, and
+the two things that are easy to misread without colour — `B.column` for a
+column of binding `B`, and `@name` for a local, a parameter or a path
+parameter.
 
-Press `F12` (or `Ctrl+click`) on any top-level `entity`, `class`, `function`,
-`middleware`, or `dbcontext` reference. The LSP resolves the identifier
-against the per-document symbol index built on each save and jumps to the
-declaration site.
+Comments are `//` for a line and `///` for a doc comment, which attaches to
+the declaration, column or field below it.
 
-### Refactoring: Rename Symbol
+### Diagnostics
 
-Press `F2` on a top-level symbol to rename it. The new name is validated
-against `^[A-Za-z_][A-Za-z0-9_]*$` and rejected if it collides with an
-existing top-level declaration in the same document. Every reference is
-rewritten in a single workspace edit; matches inside comments and string
-literals are skipped.
+The language server checks the buffer on every keystroke, not on save, so a
+diagnostic is about the text on screen. Each one carries the same code the
+compiler prints — `E0305`, `W0102` — and the same message.
 
-### Smart Completion
+### Hover, Go to Definition, completion, signature help
 
-Completion is context-aware:
+- Hover a table, class, enum, service or function for its declaration.
+- `F12` (or `Ctrl`+click) jumps to it.
+- Completion after `.` offers the members of what precedes it —
+  `request.`, `date.`, `string.`, a service, a projected row — and elsewhere
+  the names in scope.
+- Signature help fires inside `(` and on each `,`.
 
-- Typing inside `catch (e: ...)` lists the JWC error kinds (`DbError`,
-  `HttpError.NotFound`, `ValidationError`, ...).
-- Typing after `use ` on a `route` / `group` lists the declared middleware
-  names.
-- Anywhere else, completion offers JWC keywords + built-in functions
-  (`json`, `body`, `now`, ...) + user-defined functions from the
-  current document.
+### Snippets
+
+One per declaration and per query shape:
+
+`namespace`, `import`, `database`, `schema`, `table`, `enum`, `class`,
+`error`, `service`, `function`, `middleware`, `routes`, `routes-use`,
+`route-get`, `route-get-id`, `route-post`, `route-patch`, `route-delete`,
+`socket`, `errorHandler`, `server`, `sel-page`, `sel-first`, `sel-where`,
+`insert`, `update`, `delete`, `transaction`, `test`, `job`, `main`.
+
+Every one of them is compiled by the toolchain's own test suite, so a
+snippet cannot drift from the language it expands into.
 
 ## Requirements
 
-Install the `jwc` toolchain (which ships `jwc-lsp`):
+Install the `jwc` toolchain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.sh | bash
 ```
 
-The extension auto-discovers `jwc-lsp` on `PATH` or under `~/.jwc/bin`. Override via the `jwc.lspPath` setting.
+The language server is a subcommand of the compiler — `jwc lsp` — so the
+server and the checker are always the same build. The extension looks for
+`jwc` on `PATH`, then under `~/.jwc/bin`. Without it you still get
+highlighting and snippets.
 
 ## Settings
 
-- `jwc.lspPath` — explicit path to the `jwc-lsp` binary.
+- `jwc.lspPath` — path to the `jwc` executable. Leave empty to search.
 - `jwc.trace.server` — `off` / `messages` / `verbose` LSP trace.
 
 ## Commands

@@ -199,7 +199,7 @@ fn build_one(model: &SchemaModel, v: &ViewDecl, loc: Loc, sym: &Symbols) -> Opti
     let mut columns = Vec::new();
     for f in &projection.fields {
         match f {
-            ProjField::Column(i) => {
+            ProjField::Column { column: i, .. } => {
                 let c = root.column(&i.name)?;
                 columns.push(view_column(&i.name, c.ty.clone(), c.nullable));
             }
@@ -235,7 +235,7 @@ fn build_one(model: &SchemaModel, v: &ViewDecl, loc: Loc, sym: &Symbols) -> Opti
     let mut base_columns = Vec::new();
     for f in &projection.fields {
         match f {
-            ProjField::Column(i) => {
+            ProjField::Column { column: i, .. } => {
                 if root.column(&i.name).is_some() {
                     base_columns.push((i.name.clone(), i.name.clone()));
                 }
@@ -294,7 +294,7 @@ fn flatten(
     };
     for f in &shape.fields {
         let (name, ty, nullable) = match f {
-            ProjField::Column(i) => match table.column(&i.name) {
+            ProjField::Column { column: i, .. } => match table.column(&i.name) {
                 Some(c) => (i.name.clone(), c.ty.clone(), true),
                 None => continue,
             },

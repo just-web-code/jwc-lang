@@ -11,9 +11,9 @@
 //! file, in the order the operations come out:
 //!
 //! ```text
-//! -- ops: 2 add_column org.orgs.region
-//! -- ops: 9 drop_column org.orgs.legacy
-//! -- diag: E0440
+//! // ops: 2 add_column org.orgs.region
+//! // ops: 9 drop_column org.orgs.legacy
+//! // diag: E0440
 //! ```
 //!
 //! The number is the phase (migrations.md §4), so the corpus pins the
@@ -85,7 +85,7 @@ fn load(path: &Path) -> (Workspace, model::SchemaModel) {
 }
 
 fn annotations(text: &str, tag: &str) -> Vec<String> {
-    let prefix = format!("-- {tag}:");
+    let prefix = format!("// {tag}:");
     text.lines()
         .filter_map(|l| l.trim().strip_prefix(&prefix))
         .map(|s| s.trim().to_string())
@@ -123,10 +123,10 @@ fn every_case_produces_exactly_its_annotated_operations() {
             failures.push(format!(
                 "{name}: operations differ\n  want:\n{}\n  got:\n{}",
                 want.iter()
-                    .map(|l| format!("    -- ops: {l}\n"))
+                    .map(|l| format!("    // ops: {l}\n"))
                     .collect::<String>(),
                 got.iter()
-                    .map(|l| format!("    -- ops: {l}\n"))
+                    .map(|l| format!("    // ops: {l}\n"))
                     .collect::<String>(),
             ));
         }
@@ -137,13 +137,13 @@ fn every_case_produces_exactly_its_annotated_operations() {
         if std::env::var("JWC_BLESS").is_ok() {
             let body: String = after_text
                 .lines()
-                .skip_while(|l| l.trim().starts_with("-- ops:") || l.trim().starts_with("-- diag:"))
+                .skip_while(|l| l.trim().starts_with("// ops:") || l.trim().starts_with("// diag:"))
                 .collect::<Vec<_>>()
                 .join("\n");
             let head: String = got
                 .iter()
-                .map(|l| format!("-- ops: {l}\n"))
-                .chain(got_diags.iter().map(|c| format!("-- diag: {c}\n")))
+                .map(|l| format!("// ops: {l}\n"))
+                .chain(got_diags.iter().map(|c| format!("// diag: {c}\n")))
                 .collect();
             let head = if head.is_empty() {
                 head

@@ -12,10 +12,10 @@ and the value it returns is the projection it asks for.
 ## Insert
 
 ```jwc no-compile
-insert into App.notes.Notes {
-    org_id = $org_id,
-    title  = $req.title,
-    body   = $req.body
+insert Notes into App.notes.Notes {
+    org_id = @org_id,
+    title  = @req.title,
+    body   = @req.body
 } as { id, title, created_at }
 ```
 
@@ -25,22 +25,22 @@ and the expression's value is null.
 ### Spread
 
 ```jwc no-compile
-insert into App.auth.Accounts {
-    ...$req except (password),
-    password_hash = $password_hash
+insert Accounts into App.auth.Accounts {
+    ...@req except (password),
+    password_hash = @password_hash
 } as { id, email, display_name }
 ```
 
-`...$req` spreads the fields the value **carries**. An absent field is
+`...@req` spreads the fields the value **carries**. An absent field is
 omitted from the column list entirely, so the column's default applies —
 which is different from sending null, and deliberately so.
 
 ### Conflicts
 
 ```jwc no-compile
-insert into App.tasks.TaskLabels {
-    task_id  = $task_id,
-    label_id = $label_id
+insert TaskLabels into App.tasks.TaskLabels {
+    task_id  = @task_id,
+    label_id = @label_id
 } on conflict (task_id, label_id) do nothing
 ```
 
@@ -53,7 +53,7 @@ more than one it has to be named.
 ### Buffered
 
 ```jwc no-compile
-insert into App.audit.Events {
+insert Events into App.audit.Events {
     actor = context.account_id,
     route = request.route()
 } buffered
@@ -89,9 +89,9 @@ Each is a compile error, not a surprise at runtime.
 ## Update
 
 ```jwc no-compile
-update App.notes.Notes
-    set title = $req.title
-    where id == $id
+update Notes of App.notes.Notes
+    set title = @req.title
+    where id == @id
     as { id, title, updated_at }
     first
 ```
@@ -99,7 +99,7 @@ update App.notes.Notes
 ### Expressions the database evaluates
 
 ```jwc no-compile
-update App.billing.Counters
+update Counters of App.billing.Counters
     set value = value + 1
     where name == "invoice"
     as { value }
@@ -115,9 +115,9 @@ emitted as SQL, everything else is bound.
 ### Partial updates
 
 ```jwc no-compile
-update App.notes.Notes
-    set title =? $req.title, body =? $req.body
-    where id == $id
+update Notes of App.notes.Notes
+    set title =? @req.title, body =? @req.body
+    where id == @id
     as { id, title, body }
     first
 ```
@@ -127,7 +127,7 @@ only `title` leaves `body` alone — without a read first, and therefore
 without the window between the read and the write in which someone else's
 change disappears.
 
-`set ...$req` is the same thing over every field of a class at once.
+`set ...@req` is the same thing over every field of a class at once.
 
 Absent and null are different here. `"body": null` sets the column to
 null; omitting `body` leaves it. The whole `=?` and spread design rests on
@@ -142,7 +142,7 @@ row and both write it.
 ## Delete
 
 ```jwc no-compile
-delete from App.notes.Notes where id == $id
+delete Notes from App.notes.Notes where id == @id
 ```
 
 If the schema declares `on delete cascade`, children go with it. Walking
@@ -154,12 +154,12 @@ the tree by hand is what a schema without foreign keys forces.
 service WorkspaceService {
     function create(owner_id: int, req: CreateWorkspaceRequest) {
         transaction {
-            let ws = insert into App.org.Workspaces {
-                name = $req.name, owner_id = $owner_id
+            let ws = insert Workspaces into App.org.Workspaces {
+                name = @req.name, owner_id = @owner_id
             } as { id, name };
 
-            insert into App.org.Members {
-                workspace_id = $ws.id, user_id = $owner_id, role = "owner"
+            insert Members into App.org.Members {
+                workspace_id = @ws.id, user_id = @owner_id, role = "owner"
             };
 
             return ws;

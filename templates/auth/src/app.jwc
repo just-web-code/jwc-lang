@@ -11,10 +11,11 @@ database App : Postgres {
 schema auth of App;
 
 server {
+    port            = 8080;
     max_body_bytes  = 262144;
     request_timeout = "30s";
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }

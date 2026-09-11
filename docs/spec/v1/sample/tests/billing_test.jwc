@@ -4,23 +4,23 @@ import app;
 import db.billing;
 import db.org;
 
--- Every test builds its own fixtures. `seed.*` is gone: the sample's old
--- tests shared one org and the second one failed on the partial unique
--- index the first one had already satisfied (ROADMAP §5 / N9). A shared
--- fixture model is DEFERRED-11.
+// Every test builds its own fixtures. `seed.*` is gone: the sample's old
+// tests shared one org and the second one failed on the partial unique
+// index the first one had already satisfied (ROADMAP §5 / N9). A shared
+// fixture model is DEFERRED-11.
 function fixture_org(slug: text) -> { id: bigint } {
-    return insert into App.org.Orgs {
-        slug = $slug,
+    return insert Orgs into App.org.Orgs {
+        slug = @slug,
         name = "Test Org"
-    } as { id };
+    } as { Orgs.id };
 }
 
 function fixture_plan(code: text) -> { id: bigint } {
-    return insert into App.billing.Plans {
-        code  = $code,
+    return insert Plans into App.billing.Plans {
+        code  = @code,
         name  = "Test Plan",
         price = 10.00
-    } as { id };
+    } as { Plans.id };
 }
 
 test "obuna yaratilganda davr oxiri boshidan keyin bo'ladi" {
@@ -28,16 +28,21 @@ test "obuna yaratilganda davr oxiri boshidan keyin bo'ladi" {
     let plan = fixture_plan("t_period");
 
     let starts = date.now();
-    let ends = $starts + date.days(30);
+    let ends = @starts + date.days(30);
 
-    let sub = insert into App.billing.Subscriptions {
-        org_id               = $org.id,
-        plan_id              = $plan.id,
-        current_period_start = $starts,
-        current_period_end   = $ends
-    } as { id, current_period_start, current_period_end };
+    let sub = insert Subscriptions into App.billing.Subscriptions {
+        org_id               = @org.id,
+        plan_id              = @plan.id,
+        current_period_start = @starts,
+        current_period_end   = @ends
+    }
+        as {
+            Subscriptions.id,
+            Subscriptions.current_period_start,
+            Subscriptions.current_period_end
+        };
 
-    assert $sub.current_period_end > $sub.current_period_start;
+    assert @sub.current_period_end > @sub.current_period_start;
 }
 
 test "bitta tashkilotda ikkita faol obuna bo'lolmaydi" {
@@ -45,27 +50,27 @@ test "bitta tashkilotda ikkita faol obuna bo'lolmaydi" {
     let plan = fixture_plan("t_dup");
 
     let starts = date.now();
-    let ends = $starts + date.days(30);
+    let ends = @starts + date.days(30);
 
-    insert into App.billing.Subscriptions {
-        org_id               = $org.id,
-        plan_id              = $plan.id,
+    insert Subscriptions into App.billing.Subscriptions {
+        org_id               = @org.id,
+        plan_id              = @plan.id,
         status               = SubscriptionStatus.active,
-        current_period_start = $starts,
-        current_period_end   = $ends
+        current_period_start = @starts,
+        current_period_end   = @ends
     };
 
-    -- The partial unique index carries a message, so the violation is a
-    -- declared `Conflict`, not a fault (errors.md §6.1). `with` checks the
-    -- sentence a caller would see, which is the only artefact tying the
-    -- schema declaration to the response (testing.md §4.2).
+    // The partial unique index carries a message, so the violation is a
+    // declared `Conflict`, not a fault (errors.md §6.1). `with` checks the
+    // sentence a caller would see, which is the only artefact tying the
+    // schema declaration to the response (testing.md §4.2).
     assert fails Conflict {
-        insert into App.billing.Subscriptions {
-            org_id               = $org.id,
-            plan_id              = $plan.id,
+        insert Subscriptions into App.billing.Subscriptions {
+            org_id               = @org.id,
+            plan_id              = @plan.id,
             status               = SubscriptionStatus.active,
-            current_period_start = $starts,
-            current_period_end   = $ends
+            current_period_start = @starts,
+            current_period_end   = @ends
         };
     } with "bu tashkilotda faol obuna allaqachon bor";
 }
@@ -73,12 +78,12 @@ test "bitta tashkilotda ikkita faol obuna bo'lolmaydi" {
 test "to'langan hisobda paid_at bo'lishi shart" {
     let org = fixture_org("t-paid");
 
-    -- A `check` carrying a message is a `BadRequest`, not a
-    -- `ConstraintViolation` — nothing in the runtime raises that one
-    -- (errors.md §6.1).
+    // A `check` carrying a message is a `BadRequest`, not a
+    // `ConstraintViolation` — nothing in the runtime raises that one
+    // (errors.md §6.1).
     assert fails BadRequest {
-        insert into App.billing.Invoices {
-            org_id  = $org.id,
+        insert Invoices into App.billing.Invoices {
+            org_id  = @org.id,
             number  = "INV-TEST-0001",
             amount  = 10.00,
             status  = InvoiceStatus.paid,
@@ -92,27 +97,27 @@ test "bekor qilingan obunadan keyin yangisini ochish mumkin" {
     let plan = fixture_plan("t_recancel");
 
     let starts = date.now();
-    let ends = $starts + date.days(30);
+    let ends = @starts + date.days(30);
 
-    let first_sub = insert into App.billing.Subscriptions {
-        org_id               = $org.id,
-        plan_id              = $plan.id,
+    let first_sub = insert Subscriptions into App.billing.Subscriptions {
+        org_id               = @org.id,
+        plan_id              = @plan.id,
         status               = SubscriptionStatus.active,
-        current_period_start = $starts,
-        current_period_end   = $ends
-    } as { id };
+        current_period_start = @starts,
+        current_period_end   = @ends
+    } as { Subscriptions.id };
 
-    update App.billing.Subscriptions
+    update Subscriptions of App.billing.Subscriptions
         set status = SubscriptionStatus.canceled, canceled_at = date.now()
-        where id == $first_sub.id;
+        where Subscriptions.id == @first_sub.id;
 
-    let second_sub = insert into App.billing.Subscriptions {
-        org_id               = $org.id,
-        plan_id              = $plan.id,
+    let second_sub = insert Subscriptions into App.billing.Subscriptions {
+        org_id               = @org.id,
+        plan_id              = @plan.id,
         status               = SubscriptionStatus.active,
-        current_period_start = $starts,
-        current_period_end   = $ends
-    } as { id };
+        current_period_start = @starts,
+        current_period_end   = @ends
+    } as { Subscriptions.id };
 
-    assert $second_sub.id != $first_sub.id;
+    assert @second_sub.id != @first_sub.id;
 }

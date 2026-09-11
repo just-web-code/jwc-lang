@@ -279,15 +279,15 @@ fn self_signed() -> Option<(String, String, tempfile::TempDir)> {
 const SOCKET_APP: &str = "namespace s;\n\
                           middleware NeedKey provides who: text {\n\
                           \x20   let key = request.query(\"key\") or throw Unauthorized(\"kalit kerak\");\n\
-                          \x20   context.who = $key;\n\
+                          \x20   context.who = @key;\n\
                           }\n\
                           routes \"/live\" {\n\
                           \x20   route GET \"health\" { return json({ ok: true }); }\n\
                           \x20   socket \"echo/{room: text}\" use NeedKey {\n\
                           \x20       on open { socket.send(\"salom \" + context.who + \" @\" + @room); }\n\
                           \x20       on message (m) {\n\
-                          \x20           if ($m == \"bye\") { socket.close(); }\n\
-                          \x20           socket.send(\"echo: \" + $m);\n\
+                          \x20           if (@m == \"bye\") { socket.close(); }\n\
+                          \x20           socket.send(\"echo: \" + @m);\n\
                           \x20       }\n\
                           \x20   }\n\
                           }\n";

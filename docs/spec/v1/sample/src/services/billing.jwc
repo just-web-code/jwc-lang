@@ -5,172 +5,195 @@ import db.billing;
 import dto.billing;
 import views.billing;
 
---- `update … first` emits FOR UPDATE (writes.md §4), so two concurrent
---- callers serialise and neither sees the same number. This is what a
---- sequence would do; sequences are DEFERRED-17.
+/// `update … first` emits FOR UPDATE (writes.md §4), so two concurrent
+/// callers serialise and neither sees the same number. This is what a
+/// sequence would do; sequences are DEFERRED-17.
 function next_invoice_number() -> text {
-    let counter = update App.billing.Counters
-        set value = value + 1
-        where name == "invoice"
-        as { value }
+    let counter = update Counters of App.billing.Counters
+        set value = Counters.value + 1
+        where Counters.name == "invoice"
+        as { Counters.value }
         first or throw NotFound("hisob raqami hisoblagichi sozlanmagan");
 
-    let digits = string.pad_left(string.of($counter.value), 8, "0");
+    let digits = string.pad_left(string.of(@counter.value), 8, "0");
 
-    return "INV-" + $digits;
+    return "INV-" + @digits;
 }
 
 service BillingService {
     function plans() {
         return select P from App.billing.Plans
-            where active == true
-            as { id, code, name, price, currency, interval, features }
-            orderby price asc, id asc;
+            where P.active == true
+            as { P.id, P.code, P.name, P.price, P.currency, P.interval, P.features }
+            orderby P.price asc, P.id asc;
     }
 
-    --- Covered by the partial unique index `unique (org_id) where
-    --- status != canceled`, which is what lets `first` compile without an
-    --- `orderby` (queries.md §5.2).
+    /// Covered by the partial unique index `unique (org_id) where
+    /// status != canceled`, which is what lets `first` compile without an
+    /// `orderby` (queries.md §5.2).
     function subscription(org_id: bigint) {
         return select SD from App.billing.SubscriptionDetail
-            where org_id == $org_id and status != SubscriptionStatus.canceled
+            where SD.org_id == @org_id and SD.status != SubscriptionStatus.canceled
             first or throw NotFound("faol obuna yo'q");
     }
 
     function subscribe(org_id: bigint, req: SubscribeRequest) {
         let plan = select P from App.billing.Plans
-            where code == $req.plan_code and active == true
-            as { id, interval }
+            where P.code == @req.plan_code and P.active == true
+            as { P.id, P.interval }
             first or throw BadRequest("tarif topilmadi");
 
-        let trial_days = $req.trial_days ?? 0;
-        let is_trial = $trial_days > 0;
+        let trial_days = @req.trial_days ?? 0;
+        let is_trial = @trial_days > 0;
 
-        let trial = date.days($trial_days);
-        let is_yearly = $plan.interval == BillingInterval.yearly;
-        let period = $is_yearly ? date.days(365) : date.days(30);
+        let trial = date.days(@trial_days);
+        let is_yearly = @plan.interval == BillingInterval.yearly;
+        let period = @is_yearly ? date.days(365) : date.days(30);
 
         let starts_at = date.now();
-        let ends_at = $starts_at + $trial + $period;
+        let ends_at = @starts_at + @trial + @period;
 
-        let status = $is_trial ? SubscriptionStatus.trialing : SubscriptionStatus.active;
+        let status = @is_trial ? SubscriptionStatus.trialing : SubscriptionStatus.active;
 
-        return insert into App.billing.Subscriptions {
-            org_id               = $org_id,
-            plan_id              = $plan.id,
-            status               = $status,
-            current_period_start = $starts_at,
-            current_period_end   = $ends_at
-        } as { id, org_id, status, current_period_start, current_period_end };
+        return insert Subscriptions into App.billing.Subscriptions {
+            org_id               = @org_id,
+            plan_id              = @plan.id,
+            status               = @status,
+            current_period_start = @starts_at,
+            current_period_end   = @ends_at
+        }
+            as {
+                Subscriptions.id,
+                Subscriptions.org_id,
+                Subscriptions.status,
+                Subscriptions.current_period_start,
+                Subscriptions.current_period_end
+            };
     }
 
     function cancel(org_id: bigint) {
         let canceled_at = date.now();
 
-        return update App.billing.Subscriptions
-            set status = SubscriptionStatus.canceled, canceled_at = $canceled_at
-            where org_id == $org_id and status != SubscriptionStatus.canceled
-            as { id, org_id, status, canceled_at }
+        return update Subscriptions of App.billing.Subscriptions
+            set status = SubscriptionStatus.canceled, canceled_at = @canceled_at
+            where Subscriptions.org_id == @org_id and Subscriptions.status != SubscriptionStatus.canceled
+            as {
+                Subscriptions.id,
+                Subscriptions.org_id,
+                Subscriptions.status,
+                Subscriptions.canceled_at
+            }
             first or throw NotFound("faol obuna yo'q");
     }
 
-    --- Keyset pagination. The order is total (`issued_at desc, id desc`),
-    --- which is what `page` requires, and it is backed by
-    --- `index on (org_id, issued_at desc, id desc)`.
+    /// Keyset pagination. The order is total (`issued_at desc, id desc`),
+    /// which is what `page` requires, and it is backed by
+    /// `index on (org_id, issued_at desc, id desc)`.
     function invoices(org_id: bigint, status: InvoiceStatus?, cursor: text?, size: int) {
         return select ID from App.billing.InvoiceDetail
-            where org_id == $org_id and status ==? $status
-            orderby issued_at desc, id desc
-            page after $cursor size $size max 100;
+            where ID.org_id == @org_id and ID.status ==? @status
+            orderby ID.issued_at desc, ID.id desc
+            page after @cursor size @size max 100;
     }
 
     function invoice(org_id: bigint, invoice_id: bigint) {
         return select ID from App.billing.InvoiceDetail
-            where id == $invoice_id and org_id == $org_id
+            where ID.id == @invoice_id and ID.org_id == @org_id
             first or throw NotFound("hisob topilmadi");
     }
 
     function create_invoice(org_id: bigint, req: InvoiceCreate) {
         transaction {
-            let total = array.sum_product($req.lines, "quantity", "unit_price");
+            let total = array.sum_product(@req.lines, "quantity", "unit_price");
             let issued_at = date.now();
-            let due_at = $req.due_at ?? $issued_at + date.days(14);
+            let due_at = @req.due_at ?? @issued_at + date.days(14);
             let number = next_invoice_number();
 
-            let invoice = insert into App.billing.Invoices {
-                org_id    = $org_id,
-                number    = $number,
-                amount    = $total,
+            let invoice = insert Invoices into App.billing.Invoices {
+                org_id    = @org_id,
+                number    = @number,
+                amount    = @total,
                 status    = InvoiceStatus.open,
-                issued_at = $issued_at,
-                due_at    = $due_at
-            } as { id, number, amount, currency, status, due_at };
+                issued_at = @issued_at,
+                due_at    = @due_at
+            }
+                as {
+                    Invoices.id,
+                    Invoices.number,
+                    Invoices.amount,
+                    Invoices.currency,
+                    Invoices.status,
+                    Invoices.due_at
+                };
 
-            for (line in $req.lines) {
-                insert into App.billing.InvoiceLines { ...$line, invoice_id = $invoice.id };
+            for (let line in @req.lines) {
+                insert InvoiceLines into App.billing.InvoiceLines {
+                    ...@line,
+                    invoice_id = @invoice.id
+                };
             }
 
-            return $invoice;
+            return @invoice;
         }
     }
 
-    --- Surfaces the provider's decline reason to the caller. This is the
-    --- one place the app needs a status the predeclared errors do not
-    --- carry, which is why `PaymentDeclined` is declared at all
-    --- (errors.md §1.1).
+    /// Surfaces the provider's decline reason to the caller. This is the
+    /// one place the app needs a status the predeclared errors do not
+    /// carry, which is why `PaymentDeclined` is declared at all
+    /// (errors.md §1.1).
     function retry_payment(org_id: bigint) {
         let invoice = select I from App.billing.Invoices
-            where org_id == $org_id and status == InvoiceStatus.open
-            as { id, number }
-            orderby due_at asc, id asc
+            where I.org_id == @org_id and I.status == InvoiceStatus.open
+            as { I.id, I.number }
+            orderby I.due_at asc, I.id asc
             first or throw NotFound("to'lanmagan hisob yo'q");
 
         let failed = select P from App.billing.Payments
-            where invoice_id == $invoice.id and status == PaymentStatus.failed
-            as { id, failure_code }
-            orderby created_at desc, id desc
+            where P.invoice_id == @invoice.id and P.status == PaymentStatus.failed
+            as { P.id, P.failure_code }
+            orderby P.created_at desc, P.id desc
             first;
 
-        if ($failed != null) {
-            throw PaymentDeclined($failed.failure_code ?? "unknown");
+        if (@failed != null) {
+            throw PaymentDeclined(@failed.failure_code ?? "unknown");
         }
 
-        return $invoice;
+        return @invoice;
     }
 
     function summary(org_id: bigint) {
         return select OBS from App.billing.OrgBillingSummary
-            where org_id == $org_id
+            where OBS.org_id == @org_id
             first or throw NotFound("tashkilot topilmadi");
     }
 }
 
 service WebhookService {
-    --- Idempotent by construction. The old select-then-insert was a race:
-    --- two concurrent deliveries of the same event both saw nothing, both
-    --- inserted, one violated the unique index and answered 4xx — which
-    --- Stripe reads as "retry" (writes.md §2.3).
+    /// Idempotent by construction. The old select-then-insert was a race:
+    /// two concurrent deliveries of the same event both saw nothing, both
+    /// inserted, one violated the unique index and answered 4xx — which
+    /// Stripe reads as "retry" (writes.md §2.3).
     function record_payment(req: WebhookPayment) -> { status: text } {
         transaction {
-            let payment = insert into App.billing.Payments {
-                ...$req,
+            let payment = insert Payments into App.billing.Payments {
+                ...@req,
                 provider = "stripe"
             }
                 on conflict (provider_ref) do nothing
-                as { id };
+                as { Payments.id };
 
-            if ($payment == null) {
+            if (@payment == null) {
                 return { status: "duplicate" };
             }
 
-            let succeeded = $req.status == PaymentStatus.succeeded;
+            let succeeded = @req.status == PaymentStatus.succeeded;
 
-            if ($succeeded) {
+            if (@succeeded) {
                 let paid_at = date.now();
 
-                update App.billing.Invoices
-                    set status = InvoiceStatus.paid, paid_at = $paid_at
-                    where id == $req.invoice_id;
+                update Invoices of App.billing.Invoices
+                    set status = InvoiceStatus.paid, paid_at = @paid_at
+                    where Invoices.id == @req.invoice_id;
             }
 
             return { status: "ok" };

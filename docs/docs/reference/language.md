@@ -61,8 +61,8 @@ Five lexical facts do most of the damage when they are unknown:
 
 | | |
 |---|---|
-| Line comment | `--`, **not** `//`. `//` lexes as two divisions |
-| Doc comment | `---`, attaches to the next declaration, reaches Postgres as `COMMENT ON` |
+| Line comment | `//` |
+| Doc comment | `///`, attaches to the next declaration, reaches Postgres as `COMMENT ON` |
 | Logical operators | `and`, `or`, `not`. `&&` and `\|\|` do not exist |
 | Strings | `"…"` with escapes, `r"…"` raw. A newline **inside** either is an error — use `\n` |
 | Terminator | `;` after every statement and declaration |
@@ -79,23 +79,23 @@ language left over.
 
 | | |
 |---|---|
-| `$name` | a local, a parameter, a `let` binding |
-| `@name` | a path parameter, declared in the route pattern |
-| bare `name` | **inside a query clause**: a column. Everywhere else: the local |
+| `B.column` | a column of binding `B` — **required** inside a query clause |
+| `@name` | a local, a parameter, a path parameter |
+| bare `name` | outside a query clause: the local. Inside one: `E0904` |
 
-`$` is *required* inside a query clause and optional outside one. That
-looks like noise until you see what it prevents:
+Inside a query clause every name says what it is, so the two readings that
+used to collide are now spelled apart:
 
 ```jwc no-compile
-where email == $email     -- the column, compared to your variable
-where email == email      -- the column, compared to itself: always true
+where U.email == @email       // the column, compared to your variable
+where U.email == U.email      // the column, compared to itself: always true
 ```
 
 Both compile. They are different queries, not a typo and an error — so the
-language makes you say which you meant, in the one place where it cannot
-guess.
+language makes you say which you meant.
 
-Everywhere else `$` is optional, and this compiles with or without it:
+Outside a query clause the sigil is optional, and this compiles with or
+without it:
 
 ```jwc
 namespace intro;
@@ -103,7 +103,7 @@ namespace intro;
 service Greeter {
     function hello(who: text) -> text {
         let name = who;
-        return "salom, " + $name;
+        return "salom, " + @name;
     }
 }
 ```
@@ -130,13 +130,13 @@ schema notes of App;
 server {
     max_body_bytes  = 262144;
     request_timeout = "30s";
-    -- Required by any query that uses `page`: a cursor is a
-    -- client-supplied predicate, and unsigned it is a second filter
-    -- nobody checked.
+    // Required by any query that uses `page`: a cursor is a
+    // client-supplied predicate, and unsigned it is a second filter
+    // nobody checked.
     cursor_secret   = env("CURSOR_SECRET");
 }
 
---- One note. The doc comment above reaches Postgres as a `COMMENT ON`.
+/// One note. The doc comment above reaches Postgres as a `COMMENT ON`.
 table Notes of App.notes {
     id         bigint primary key identity;
     title      varchar(200) minLength(1) : "sarlavha bo'sh bo'lmasin";
@@ -155,21 +155,21 @@ class NoteCreate {
 service NoteService {
     function list(size: int) {
         return select N from App.notes.Notes
-            where archived == false
-            as { id, title, created_at }
-            orderby created_at desc, id desc
-            page size $size max 100;
+            where N.archived == false
+            as { N.id, N.title, N.created_at }
+            orderby N.created_at desc, N.id desc
+            page size @size max 100;
     }
 
     function get(id: bigint) {
         return select N from App.notes.Notes
-            where id == $id
-            as { id, title, body, created_at }
+            where N.id == @id
+            as { N.id, N.title, N.body, N.created_at }
             first or throw NotFound("bunday eslatma yo'q");
     }
 
     function create(req: NoteCreate) {
-        return insert into App.notes.Notes { ...$req } as { id, title, created_at };
+        return insert Notes into App.notes.Notes { ...@req } as { Notes.id, Notes.title, Notes.created_at };
     }
 }
 
@@ -180,7 +180,7 @@ routes "/api/v1/notes" {
 
     route POST "" {
         let req = request.body() as NoteCreate;
-        return created(json(NoteService.create($req)));
+        return created(json(NoteService.create(@req)));
     }
 
     route GET "{id: bigint}" {
@@ -189,7 +189,7 @@ routes "/api/v1/notes" {
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 
@@ -270,17 +270,17 @@ class Row { id bigint required; }
 
 service S {
     function guard(r: Row?) {
-        if ($r == null) { throw NotFound("yo'q"); }
-        return $r.id;
+        if (@r == null) { throw NotFound("yo'q"); }
+        return @r.id;
     }
 
     function positive(r: Row?) {
-        if ($r != null) { return $r.id; }
+        if (@r != null) { return @r.id; }
         return 0;
     }
 
     function branch(r: Row?) {
-        if ($r == null) { return 0; } else { return $r.id; }
+        if (@r == null) { return 0; } else { return @r.id; }
     }
 }
 ```
@@ -290,7 +290,7 @@ what makes the standard boot line work, because `env` answers null and not
 `""` for an unset variable:
 
 ```jwc no-compile
-serve(int(env("PORT") ?? "8080"));
+serve();
 ```
 
 ### 5.2 `Raw` and `Record`
@@ -324,7 +324,7 @@ schema shop of App;
 
 enum OrderState of App.shop { pending, paid, shipped, cancelled }
 
---- One customer order.
+/// One customer order.
 table Orders of App.shop as "order" {
     id       bigint primary key identity;
     customer varchar(80) minLength(2) : "mijoz ismi juda qisqa";
@@ -428,41 +428,41 @@ table Orders of App.shop {
 }
 
 service Reports {
-    --- Many rows, bounded.
+    /// Many rows, bounded.
     function big(floor: numeric) {
         return select O from App.shop.Orders
-            where total > $floor
-            as { id, customer, total }
-            orderby total desc
+            where O.total > @floor
+            as { O.id, O.customer, O.total }
+            orderby O.total desc
             limit 50;
     }
 
-    --- One row, or an answer to what "no row" means.
+    /// One row, or an answer to what "no row" means.
     function one(id: bigint) {
         return select O from App.shop.Orders
-            where id == $id
-            as { id, customer, total }
+            where O.id == @id
+            as { O.id, O.customer, O.total }
             first or throw NotFound("buyurtma yo'q");
     }
 
-    --- An aggregate over the whole table is one row, so it needs `first`.
+    /// An aggregate over the whole table is one row, so it needs `first`.
     function totals() {
         return select O from App.shop.Orders
             as { orders: count(O.id), spend: sum(O.total) }
             first;
     }
 
-    --- Grouped: many rows again, one per group, and no `first`.
+    /// Grouped: many rows again, one per group, and no `first`.
     function per_customer() {
         return select O from App.shop.Orders
             group by O.customer
-            as { customer, orders: count(O.id), spend: sum(O.total) };
+            as { O.customer, orders: count(O.id), spend: sum(O.total) };
     }
 
-    --- The last day. `timestamptz - interval` is an ordinary operator.
+    /// The last day. `timestamptz - interval` is an ordinary operator.
     function recent() {
         return select O from App.shop.Orders
-            where placed > date.now() - date.hours(24)
+            where O.placed > date.now() - date.hours(24)
             as { count: count(O.id) }
             first;
     }
@@ -487,14 +487,14 @@ say so is worth the inconvenience.
 
 **`count` answers `int`; `sum` widens to `numeric`.** Which means a summed
 column comes back as a JSON *string* — see §5. If the number is a counter
-rather than money, `int($row.total ?? "0")` narrows it back, and the `??`
+rather than money, `int(@row.total ?? "0")` narrows it back, and the `??`
 is not decoration: `sum` over no rows is null.
 
 ### 7.1 Pagination is keyset
 
 ```jwc no-compile
 orderby created_at desc, id desc
-page after $cursor size $size max 100
+page after @cursor size @size max 100
 ```
 
 There is no `offset`. Offset re-reads and re-sorts everything it skips, and
@@ -513,7 +513,7 @@ log will show.
 genuinely not expressible, there is one hatch:
 
 ```jwc no-compile
-let n = raw("SELECT count(*) FROM public.thing WHERE kind = {}", $kind);
+let n = raw("SELECT count(*) FROM public.thing WHERE kind = {}", @kind);
 ```
 
 `{}` placeholders are bound as parameters — nothing is interpolated, so
@@ -544,27 +544,27 @@ class ItemNew { name varchar(80) required; }
 
 service Stock {
     function add(req: ItemNew) {
-        return insert into App.shop.Items { ...$req } as { id, name };
+        return insert Items into App.shop.Items { ...@req } as { Items.id, Items.name };
     }
 
-    --- The atomic increment: bare `stock` is the column's current value,
-    --- `$by` is the parameter. One statement, no read-modify-write, so two
-    --- concurrent calls are two increments and never a lost update.
+    /// The atomic increment: bare `stock` is the column's current value,
+    /// `@by` is the parameter. One statement, no read-modify-write, so two
+    /// concurrent calls are two increments and never a lost update.
     function bump(id: bigint, by: int) {
-        return update App.shop.Items
-            set stock = stock + $by
-            where id == $id
-            as { id, stock }
+        return update Items of App.shop.Items
+            set stock = Items.stock + @by
+            where Items.id == @id
+            as { Items.id, Items.stock }
             first or throw NotFound("mahsulot yo'q");
     }
 
     function drop(id: bigint) {
-        delete from App.shop.Items where id == $id;
+        delete Items from App.shop.Items where Items.id == @id;
     }
 }
 ```
 
-`...$req` spreads a validated class into the write, so the boundary shape
+`...@req` spreads a validated class into the write, so the boundary shape
 and the insert cannot drift apart.
 
 `on conflict do nothing` and `on conflict do update set …` are the upsert
@@ -572,7 +572,7 @@ forms. `do nothing` makes a collision a *missing row* rather than a raised
 error, which turns a retry loop into an ordinary `if`:
 
 ```jwc no-compile
-let made = insert into App.shop.Items { ...$req }
+let made = insert Items into App.shop.Items { ...@req }
     on conflict do nothing as { id, name };
 if (made == null) { … }
 ```
@@ -588,9 +588,9 @@ written later on another connection and a rollback would not take it back.
 
 ```jwc no-compile
 transaction {
-    let org = insert into App.org.Orgs { ...$req } as { id, slug };
-    insert into App.org.Members { org_id = $org.id, account_id = $owner };
-    return $org;
+    let org = insert Orgs into App.org.Orgs { ...@req } as { id, slug };
+    insert Members into App.org.Members { org_id = @org.id, account_id = @owner };
+    return @org;
 }
 ```
 
@@ -630,14 +630,14 @@ is not a language feature.
 `statusCode`, `redirect`, `content`, `text`, `html`.
 
 ```jwc no-compile
-return json($org);
-return created(json($org)) with { "Location": "/api/v1/orgs/" + string.of($org.id) };
-return text("hello");                       -- text/plain
-return html("<h1>hi</h1>");                 -- text/html
-return content("application/xml", $body);   -- anything else
+return json(@org);
+return created(json(@org)) with { "Location": "/api/v1/orgs/" + string.of(@org.id) };
+return text("hello");                       // text/plain
+return html("<h1>hi</h1>");                 // text/html
+return content("application/xml", @body);   // anything else
 return noContent();
-return redirect(302, "/dashboard");          -- a path on this service
-return redirectExternal(302, $link.url);    -- anywhere, and named so
+return redirect(302, "/dashboard");          // a path on this service
+return redirectExternal(302, @link.url);    // anywhere, and named so
 ```
 
 `redirect` refuses a target that leaves this service — a scheme, an
@@ -693,8 +693,8 @@ a slot does not take an operational name.)
 routes "/live" use RequireAuth {
     socket "rooms/{room: text}" use RequireMember {
         on open    { socket.send("joined " + @room); }
-        on message (text) { socket.send("echo: " + $text); }
-        on close   { -- released here, whatever ended the connection
+        on message (text) { socket.send("echo: " + @text); }
+        on close   { // released here, whatever ended the connection
         }
     }
 }
@@ -712,9 +712,9 @@ this language does not have.
 ```jwc no-compile
 middleware RequireAuth provides account_id: bigint {
     let header = request.header("Authorization") or throw Unauthorized("token kerak");
-    let claims = jwt.verify(string.strip_prefix($header, "Bearer "), $secret)
+    let claims = jwt.verify(string.strip_prefix(@header, "Bearer "), @secret)
         or throw Unauthorized("token yaroqsiz");
-    context.account_id = bigint($claims.sub);
+    context.account_id = bigint(@claims.sub);
 }
 
 middleware RequireOrgMember(@org_id: bigint) requires RequireAuth provides org_id: bigint {
@@ -771,7 +771,7 @@ that already knows its status needs no arm at all.
 There is **one** local recovery form, and it is postfix:
 
 ```jwc no-compile
-let payment = insert into App.billing.Payments { ...$req } as { id }
+let payment = insert Payments into App.billing.Payments { ...@req } as { id }
     catch Conflict (err) { return { status: "duplicate" }; };
 ```
 
@@ -805,22 +805,22 @@ service Loops {
         let total = 0;
         let i = 0;
 
-        while (i < $n) {
+        while (i < @n) {
             i += 1;
             if (i == 3) { continue; }
             if (i > LIMIT) { break; }
             total += i;
         }
 
-        for (x in [1, 2, 3]) {
+        for (let x in [1, 2, 3]) {
             total += x;
         }
 
         let cfg = { a: 1, b: { c: 2 } };
         cfg.b.c = 20;
-        cfg.fresh = 30;          -- assigning a field that does not exist adds it
+        cfg.fresh = 30;          // assigning a field that does not exist adds it
 
-        return $total;
+        return @total;
     }
 }
 ```
@@ -888,17 +888,17 @@ a validator, a constraint and an error string that drift.
 ```jwc no-compile
 job SendWelcome(account_id: bigint, email: text) retries 5 backoff "30s" {
     let account = select A from App.auth.Accounts
-        where id == $account_id
+        where id == @account_id
         first or throw NotFound("akkaunt topilmadi");
 
-    mail.send($email, "Welcome", "<p>salom</p>");
+    mail.send(@email, "Welcome", "<p>salom</p>");
 }
 ```
 
 Dispatched from anywhere:
 
 ```jwc no-compile
-dispatch SendWelcome(account_id: $account.id, email: $account.email);
+dispatch SendWelcome(account_id: @account.id, email: @account.email);
 ```
 
 The queue is a Postgres table, so a dispatch inside a `transaction { }`
@@ -920,13 +920,13 @@ error.
 ```jwc no-compile
 test "an org gets an owner membership" {
     let org = OrgService.create(NewOrg { name: "Acme", slug: "acme" }, 1);
-    let members = select M from App.org.Members where org_id == $org.id as { role };
-    assert array.len($members) == 1;
+    let members = select M from App.org.Members where org_id == @org.id as { role };
+    assert array.len(@members) == 1;
 }
 
 test "two active subscriptions are refused" {
     assert fails Conflict {
-        SubscriptionService.start($org_id);
+        SubscriptionService.start(@org_id);
     } with "bu tashkilotda faol obuna allaqachon bor";
 }
 ```
@@ -978,7 +978,7 @@ one.
 
 `hash.password` for a secret a **human** chose; `hash.sha256` for a
 high-entropy token the **server** generated. A salted KDF cannot serve
-`where token_hash == $h`, because every call produces a different string.
+`where token_hash == @h`, because every call produces a different string.
 `sha1` and `md5` are for reading a checksum someone else produced.
 
 **Request** — `request.body() as C`, `header`, `query`, `query_all`,
@@ -1124,12 +1124,12 @@ Knowing what is *not* here saves more time than any feature list:
 
 | | |
 |---|---|
-| `//` comments | `--`. `//` is division, twice |
+| `--` comments | `//`. `--` is a minus sign and a negation |
 | `&&`, `\|\|` | `and`, `or` |
 | `try` / `catch` statements | `or throw`, or postfix `catch` on one expression |
 | `async` / `await` | the runtime is async; the language is not |
 | lambdas, first-class functions | hence `array.sum(rows, "amount")` |
-| `offset` pagination | keyset `page after $cursor` |
+| `offset` pagination | keyset `page after @cursor` |
 | `SELECT *` | project with `as { … }`, or take `Raw` |
 | `x?.y` | narrow with `if (x == null)`, or `??` |
 | `right` / `full` / `cross join` | `left` and `inner` |
@@ -1141,8 +1141,8 @@ Knowing what is *not* here saves more time than any feature list:
 
 ## 22. The mistakes that actually happen
 
-**`//` instead of `--`.** It lexes as two divisions and the error surfaces
-somewhere else entirely.
+**`--` instead of `//`.** It lexes as a minus sign followed by a negation
+and the error surfaces somewhere else entirely.
 
 **Logic in a route.** Read the request, call one service function, return.
 
@@ -1154,8 +1154,8 @@ and stop the chain silently, so it is `E0812`.
 
 **Forgetting the binder.** `select O from App.s.T` — the `O` is required.
 
-**Forgetting `$` inside a query clause.** `where email == email` is always
-true and compiles.
+**Forgetting the qualifier inside a query clause.** `where email == @email`
+is `E0904`: the column is `U.email`.
 
 **Reading a field of a `T?`.** `first` answers `T?`; use `or throw` or
 narrow.
@@ -1166,7 +1166,7 @@ opaque by design.
 **Forgetting `first` on an aggregate.** A projection with no `group by`
 still answers an array without it.
 
-**`int($row.sum_column)` on an empty table.** `sum` over no rows is null.
+**`int(@row.sum_column)` on an empty table.** `sum` over no rows is null.
 `?? "0"`.
 
 **Hand-writing a migration.** `jwc migrate new` diffs the schema. Read the

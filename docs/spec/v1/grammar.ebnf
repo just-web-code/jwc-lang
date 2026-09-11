@@ -9,9 +9,10 @@
      (* ... *)      comment
 
    Whitespace and comments are skipped between tokens except inside string
-   literals. A line comment starts with "--" and runs to end of line. A doc
-   comment starts with "---" and attaches to the next declaration, column or
-   class field (schema.md §7).
+   literals. A line comment starts with "//" and runs to end of line. A doc
+   comment starts with "///" and attaches to the next declaration, column or
+   class field (schema.md §7). A block comment runs from "/*" to "*/" and
+   nests (names.md §1.7).
 
    This file is the syntax. Where a production is accepted here but rejected
    by a static rule, the rejecting clause is named in a trailing comment.
@@ -185,7 +186,7 @@ statement       = let_stmt | assign_stmt | if_stmt | for_stmt
 let_stmt        = "let" ident [ ":" type_ref ] "=" expr ";" ;
 assign_stmt     = ( local_ref | "context" "." ident ) "=" expr ";" ;
 if_stmt         = "if" "(" expr ")" block [ "else" ( if_stmt | block ) ] ;
-for_stmt        = "for" "(" ident "in" expr ")" block ;   (* binder is bare, refs use $ *)
+for_stmt        = "for" "(" "let" ident "in" expr ")" block ;
 break_stmt      = "break" ";" ;                            (* inside for only *)
 continue_stmt   = "continue" ";" ;
 return_stmt     = "return" [ expr ] ";" ;
@@ -291,4 +292,4 @@ col_ref         = ident { "." ident } ;
 ident           = letter { letter | digit | "_" } ;
 number          = digit { digit } [ "." digit { digit } ] ;
 string          = '"' { character } '"' ;
-doc_comment     = "---" { character } newline ;
+doc_comment     = "///" { character } newline ;

@@ -21,7 +21,7 @@ routes "/live" use RequireAuth {
         }
 
         on close {
-            -- runs however the connection ended
+            // runs however the connection ended
         }
     }
 }
@@ -47,7 +47,7 @@ This is the reason `use` on a socket is worth anything:
 ```jwc no-compile
 middleware RequireAuth provides account_id: bigint {
     let header = request.header("Authorization") or throw Unauthorized("a bearer token is required");
-    -- …
+    // …
 }
 ```
 
@@ -72,7 +72,7 @@ on message (text) {
     if (text == "bye") {
         socket.close();
     }
-    socket.send("this never goes");   -- the close came first
+    socket.send("this never goes");   // the close came first
 }
 ```
 
@@ -114,7 +114,7 @@ risk. A dead one is reclaimed between one and two intervals after it dies.
 ```jwc
 server {
     max_sockets = 5000;
-    socket_keepalive = "45s";   -- "0s" turns the ping off
+    socket_keepalive = "45s";   // "0s" turns the ping off
 }
 ```
 

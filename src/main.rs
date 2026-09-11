@@ -227,7 +227,13 @@ enum Command {
         no_rollback: bool,
     },
     /// Run the language server, speaking LSP over stdio.
-    Lsp,
+    Lsp {
+        /// Accepted and ignored: stdio is the only transport this server
+        /// speaks. Editors append it by convention, and a client that does
+        /// is not wrong.
+        #[arg(long)]
+        stdio: bool,
+    },
     /// Emit an OpenAPI 3.1 document for the route table.
     ///
     /// Offline: derived from the typed signatures and the raise sets, never
@@ -404,6 +410,13 @@ enum MigrateCommand {
         /// Stop after this ordinal.
         #[arg(long)]
         to: Option<u32>,
+        /// Create the database first if it is not there.
+        ///
+        /// Off by default: without it a typo in `DATABASE_URL` is
+        /// answered by an error naming the database, and with it by a
+        /// new empty one that migrates cleanly.
+        #[arg(long)]
+        create_db: bool,
     },
     /// Roll back applied migrations, newest first.
     ///
@@ -553,7 +566,7 @@ fn project_dir(c: &Command) -> Option<&std::path::Path> {
         },
         // `new` creates the project, so there is no `.env` to read yet;
         // `login` and `lsp` are not run inside one.
-        New { .. } | Login { .. } | Lsp => None,
+        New { .. } | Login { .. } | Lsp { .. } => None,
     }
 }
 
@@ -639,7 +652,7 @@ fn run() -> Result<()> {
             filter,
             no_rollback,
         } => cmd::test(path, filter, no_rollback),
-        Command::Lsp => jwc::lsp::run(),
+        Command::Lsp { stdio: _ } => jwc::lsp::run(),
         Command::Openapi {
             path,
             out,
@@ -689,7 +702,12 @@ fn run() -> Result<()> {
                 explain,
                 dry_run,
             } => cmd::migrate_new(path, name, dir, explain, dry_run),
-            MigrateCommand::Up { path, dir, to } => cmd::migrate_up(path, dir, to),
+            MigrateCommand::Up {
+                path,
+                dir,
+                to,
+                create_db,
+            } => cmd::migrate_up(path, dir, to, create_db),
             MigrateCommand::Down { path, dir, count } => cmd::migrate_down(path, dir, count),
             MigrateCommand::Baseline { path, dir, to } => cmd::migrate_baseline(path, dir, to),
             MigrateCommand::Status { path, dir } => cmd::migrate_status(path, dir),

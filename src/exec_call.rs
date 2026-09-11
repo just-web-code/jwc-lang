@@ -613,12 +613,11 @@ impl<'a> Vm<'a> {
                 )],
             },
 
-            // The program's own statement of where it listens. `main` is
-            // evaluated at boot precisely so this runs — the argument is an
-            // expression, and `serve(int(env("PORT") ?? "8080"))` is the
-            // form the spec's sample uses.
+            // The program's own statement that it is a server. Where it
+            // listens is `server { port }` and the env over it (config.md
+            // §3.2); this call is what decides *whether* it listens.
             "serve" => {
-                self.serve_port = Some(n(0) as u16);
+                self.serve_called = true;
                 Value::Null
             }
 

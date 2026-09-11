@@ -11,8 +11,8 @@ enum InvoiceStatus of App.billing { draft, open, paid, void }
 
 enum PaymentStatus of App.billing { pending, succeeded, failed, refunded }
 
---- Money is `numeric`, never an integer count of cents (types.md §2.1).
---- `price` is per `interval`.
+/// Money is `numeric`, never an integer count of cents (types.md §2.1).
+/// `price` is per `interval`.
 table Plans of App.billing {
     id         bigint primary key identity;
     code       varchar(40) unique, pattern(r"^[a-z0-9_]+$");
@@ -48,9 +48,9 @@ table Subscriptions of App.billing {
     index on (status, current_period_end);
 }
 
---- Monotonic counters. `update … first` emits FOR UPDATE, which is what
---- makes this safe under concurrency (writes.md §4). Sequences are
---- DEFERRED-17.
+/// Monotonic counters. `update … first` emits FOR UPDATE, which is what
+/// makes this safe under concurrency (writes.md §4). Sequences are
+/// DEFERRED-17.
 table Counters of App.billing {
     name  varchar(40) primary key;
     value bigint default 0;
@@ -95,8 +95,8 @@ table Payments of App.billing {
     id           bigint primary key identity;
     invoice_id   bigint;
     provider     varchar(20);
-    --- The provider's idempotency key. `on conflict do nothing` on this
-    --- constraint is what makes webhook redelivery safe (writes.md §2.3).
+    /// The provider's idempotency key. `on conflict do nothing` on this
+    /// constraint is what makes webhook redelivery safe (writes.md §2.3).
     provider_ref varchar(120) unique : "bu to'lov allaqachon qayd etilgan";
     amount       numeric(14, 2) min(0) : "summa manfiy bo'lmasin";
     status       PaymentStatus default PaymentStatus.pending;

@@ -9,7 +9,7 @@ routes "/api/v1/plans" {
     route GET "" {
         let plans = BillingService.plans();
 
-        return json($plans) with { "Cache-Control": "public, max-age=60" };
+        return json(@plans) with { "Cache-Control": "public, max-age=60" };
     }
 }
 
@@ -17,55 +17,55 @@ routes "/api/v1/orgs/{org_id: bigint}/subscription" use RequireAuth, RequireOrgM
     route GET "" {
         let sub = BillingService.subscription(@org_id);
 
-        return json($sub);
+        return json(@sub);
     }
 
     route POST "" use RequireOrgAdmin {
         let req = request.body() as SubscribeRequest;
-        let sub = BillingService.subscribe(@org_id, $req);
+        let sub = BillingService.subscribe(@org_id, @req);
 
-        return created(json($sub));
+        return created(json(@sub));
     }
 
     route POST "cancel" use RequireOrgAdmin {
         let sub = BillingService.cancel(@org_id);
 
-        return json($sub);
+        return json(@sub);
     }
 
     route POST "retry-payment" use RequireOrgAdmin {
         let invoice = BillingService.retry_payment(@org_id);
 
-        return json($invoice);
+        return json(@invoice);
     }
 }
 
 routes "/api/v1/orgs/{org_id: bigint}/invoices" use RequireAuth, RequireOrgMember, Audit {
-    --- `?status=` is optional and drops the predicate when absent (`==?`);
-    --- `?size=` is client-derived, so a bad value is 400, not 500
-    --- (types.md §7.2).
+    /// `?status=` is optional and drops the predicate when absent (`==?`);
+    /// `?size=` is client-derived, so a bad value is 400, not 500
+    /// (types.md §7.2).
     route GET "" {
         let raw_status = request.query("status");
-        let status = enum(InvoiceStatus, $raw_status);
+        let status = enum(InvoiceStatus, @raw_status);
         let cursor = request.query("cursor");
         let size = int(request.query("size") ?? "50");
 
-        let page = BillingService.invoices(@org_id, $status, $cursor, $size);
+        let page = BillingService.invoices(@org_id, @status, @cursor, @size);
 
-        return json($page);
+        return json(@page);
     }
 
     route GET "{invoice_id: bigint}" {
         let invoice = BillingService.invoice(@org_id, @invoice_id);
 
-        return json($invoice);
+        return json(@invoice);
     }
 
     route POST "" use RequireOrgAdmin {
         let req = request.body() as InvoiceCreate;
-        let invoice = BillingService.create_invoice(@org_id, $req);
+        let invoice = BillingService.create_invoice(@org_id, @req);
 
-        return created(json($invoice)) with { Location: "/api/v1/orgs/" + string.of(@org_id) + "/invoices/" + string.of($invoice.id) };
+        return created(json(@invoice)) with { Location: "/api/v1/orgs/" + string.of(@org_id) + "/invoices/" + string.of(@invoice.id) };
     }
 }
 
@@ -73,6 +73,6 @@ routes "/api/v1/orgs/{org_id: bigint}/billing" use RequireAuth, RequireOrgMember
     route GET "summary" {
         let summary = BillingService.summary(@org_id);
 
-        return json($summary);
+        return json(@summary);
     }
 }

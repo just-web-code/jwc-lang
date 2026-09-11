@@ -111,12 +111,12 @@ dead code, and the insert binds null into a `NOT NULL` column.
 With it:
 
 ```jwc no-compile
-status = $req.status ?? "todo",
+status = @req.status ?? "todo",
 ```
 
 ## Absent is not null
 
 `types.md §6.5`: a key the body omitted and a key it sent as `null` are
-different. That is what `=?` and `...$req` rest on — an omitted field
+different. That is what `=?` and `...@req` rest on — an omitted field
 leaves the column alone, an explicit null clears it. A validated class
 carries the distinction through, so the write can act on it.

@@ -1,4 +1,4 @@
--- diag: W1101
+// diag: W1101
 
 namespace c;
 database App : Postgres;

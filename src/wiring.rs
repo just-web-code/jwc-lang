@@ -134,7 +134,7 @@ impl<'a> Wiring<'a> {
     /// someone deliberately narrowed it.
     fn check_server_keys(&mut self, sv: &crate::ast::ServerDecl, fi: usize) {
         use crate::ast::ServerEntry;
-        const KEYS: [&str; 13] = [
+        const KEYS: [&str; 15] = [
             "max_sockets",
             "socket_keepalive",
             "job_max_payload",
@@ -148,6 +148,8 @@ impl<'a> Wiring<'a> {
             "trusted_proxies",
             "shutdown_grace",
             "bind",
+            "port",
+            "swagger",
         ];
         const GROUPS: [&str; 3] = ["cors", "tls", "headers"];
         const CORS: [&str; 5] = ["origins", "methods", "headers", "credentials", "max_age"];
@@ -168,6 +170,26 @@ impl<'a> Wiring<'a> {
                 ServerEntry::Set(a) => {
                     if !KEYS.contains(&a.key.name.as_str()) {
                         unknown(self, &a.key.name, a.key.span, "`server { }` key", &KEYS);
+                    }
+                    // The reader takes an integer literal and nothing else,
+                    // so anything else would be dropped in silence and the
+                    // listener would bind a port the source does not name.
+                    // The env is where a deployment changes it (config.md
+                    // §3.2.2), not an expression here.
+                    if a.key.name == "port"
+                        && !matches!(&*a.value.kind, crate::ast::ExprKind::Int(_))
+                    {
+                        self.err(
+                            Loc {
+                                file: fi,
+                                span: a.value.span,
+                            },
+                            "E1208",
+                            "`port` takes an integer literal",
+                            "a deployment changes it with `JWC_PORT` or `PORT`, which win \
+                             over this value",
+                            "config.md §3.2.2",
+                        );
                     }
                 }
                 ServerEntry::Group {

@@ -79,33 +79,33 @@ on the shape, so every endpoint that takes a `NewEntry` gets it.
 ```jwc no-compile
 service BinService {
     function create(req: NewBin) {
-        return insert into App.links.Bins {
+        return insert Bins into App.links.Bins {
             slug  = crypto.token(6),
-            title = $req.title
+            title = @req.title
         } as { id, slug, title, created_at };
     }
 
     function by_slug(slug: text) {
         return select B from App.links.Bins
-            where slug == $slug
+            where slug == @slug
             as { id, slug, title, created_at }
             first;
     }
 
     function add(bin_id: bigint, req: NewEntry) {
-        return insert into App.links.Entries {
-            bin_id = $bin_id,
-            url    = $req.url,
-            note   = $req.note
+        return insert Entries into App.links.Entries {
+            bin_id = @bin_id,
+            url    = @req.url,
+            note   = @req.note
         } as { id, url, note, created_at };
     }
 
     function entries(bin_id: bigint, cursor: text?, size: int) {
         return select E from App.links.Entries
-            where bin_id == $bin_id
+            where bin_id == @bin_id
             as { id, url, note, created_at }
             orderby created_at asc, id asc
-            page after $cursor size $size;
+            page after @cursor size @size;
     }
 }
 ```
@@ -148,7 +148,7 @@ routes "/bins" {
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 

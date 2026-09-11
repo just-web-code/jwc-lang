@@ -34,9 +34,21 @@ The first four commands are the same in all four:
 cp .env.example .env      # then point DATABASE_URL at a database
 jwc check                 # types, schema, routes — offline, no database
 jwc migrate new init      # turn the schema into DDL
-jwc migrate up            # apply it
+jwc migrate up --create-db  # create the database and apply it
 jwc serve                 # run
 ```
+
+`--create-db` creates the database named in `DATABASE_URL`. Without it,
+`migrate up` applies to a database that is already there and says so when
+it is not — a typo in the URL is worth an error rather than an empty
+database that migrates cleanly. `createdb <name>` does the same thing by
+hand.
+
+To read the API, add `swagger = "/docs";` to the `server { }` block and
+the running server answers on `/docs`, with the OpenAPI document on
+`/docs/openapi.json`. `JWC_SWAGGER=/docs jwc serve` does the same without
+editing the source. `jwc swagger` renders the same page without running
+the app.
 
 `jwc check` needs no database and no network: the schema is in the source,
 so the queries are checked against it without connecting to anything.

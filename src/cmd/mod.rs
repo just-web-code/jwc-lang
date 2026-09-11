@@ -429,7 +429,7 @@ pub fn explain(
             // which feature to add next, so it is printed rather than
             // assumed to be zero.
             for (i, line) in file.source.text.lines().enumerate() {
-                if line.contains("raw(") && !line.trim_start().starts_with("--") {
+                if line.contains("raw(") && !line.trim_start().starts_with("//") {
                     hatches += 1;
                     println!(
                         "\x1b[1m{}:{}\x1b[0m  raw() — hand-written SQL, unchecked shape",
@@ -770,25 +770,18 @@ pub fn run(path: PathBuf, dev: bool, request_logging: bool) -> Result<()> {
             crate::engine::init_engine_from_env()?;
         }
         crate::redis_engine::init_from_env()?;
-        // `declared_port` runs `main`, and `serve(n)` inside it records
-        // the port rather than blocking — it is a declaration, not a
-        // call that listens.
+        // `main` runs here, and `serve()` inside it records that the
+        // program is a server rather than blocking — it is a declaration,
+        // not a call that listens. So `jwc run app.jwc` on a program whose
+        // `main` calls `serve()` starts the listener, and one that only
+        // prints a line prints it and exits.
         //
-        // So this used to run `main`, take the port, throw it away, and
-        // exit: `jwc run app.jwc` on a program whose `main` is
-        // `serve(8080)` printed nothing and returned 0. The help text
-        // beside this command has always said the opposite — "a `main`
-        // that calls `serve(...)` still starts a server, because that is
-        // what the call means" — and the comment that used to sit here
-        // claimed the program "has already blocked inside it and never
-        // reaches here". Neither was true, and the first thing a reader
-        // does with the hello-world is `jwc run` it.
-        //
-        // `main` deciding to serve is the difference between the two
-        // commands: `jwc run` starts a listener only when the program
-        // asked for one, and `jwc serve` starts one either way.
-        if let Some(port) = crate::serve::declared_port(&program).await? {
+        // That call is the whole difference between the two commands:
+        // `jwc run` listens only when the program asked to, and `jwc serve`
+        // refuses to start when it did not.
+        if crate::serve::wants_serve(&program).await? {
             println!("{} routes", program.routes.len());
+            let port = crate::serve::resolved_port(&program.server);
             crate::serve::serve(program, port).await?;
         }
         Ok(())
@@ -878,20 +871,18 @@ pub fn serve(
                  this is a development switch."
             );
         }
-        // `serve(port)` in `main()` is where the program says where it
-        // listens, and until now nothing evaluated it: the listener took
-        // the CLI default and a program asking for 3000 silently got 8080.
-        // `main` is an ordinary body, so it runs on an ordinary Vm — which
-        // is also what makes `serve(int(env("PORT") ?? "8080"))`, the form
-        // the spec's own sample uses, mean anything.
-        //
-        // `main` runs either way. It used to run only when `--port` was
-        // absent, because the only caller was the port lookup — so
-        // `jwc serve --port 3000` skipped the program's initialisation
-        // entirely, and a `main` that did anything besides call `serve`
-        // did it or not depending on a flag about the port.
-        let declared = crate::serve::declared_port(&program).await?;
-        let port = port.or(declared).unwrap_or(8080);
+        // `main` runs first, whatever the flags say: it is the program's
+        // own initialisation, and `serve()` inside it is what says this
+        // program listens at all. A program that never calls it is not a
+        // server, and saying so beats binding a port nobody asked for.
+        if !crate::serve::wants_serve(&program).await? {
+            bail!(
+                "this program never calls `serve()`, so there is nothing to serve.\n\
+                 Add it to `main`:\n\
+                 \n    function main() {{\n        serve();\n    }}\n"
+            );
+        }
+        let port = port.unwrap_or_else(|| crate::serve::resolved_port(&program.server));
         println!("{} routes", program.routes.len());
         crate::serve::serve(program, port).await
     })
@@ -1130,10 +1121,23 @@ fn migration_client() -> Result<(tokio::runtime::Runtime, tokio_postgres::Client
     Ok((rt, client))
 }
 
-/// `jwc migrate up [path] [--to N]` — apply every pending migration.
-pub fn migrate_up(path: PathBuf, dir: Option<PathBuf>, to: Option<u32>) -> Result<()> {
+/// `jwc migrate up [path] [--to N] [--create-db]` — apply every pending
+/// migration, having created the database first when asked to.
+pub fn migrate_up(
+    path: PathBuf,
+    dir: Option<PathBuf>,
+    to: Option<u32>,
+    create_db: bool,
+) -> Result<()> {
     let dir = migrations_dir(&path, dir);
-    let (rt, client) = migration_client()?;
+    let url = crate::engine::database_url_from_env()?;
+    let rt = runtime()?;
+    if create_db {
+        if let Some(name) = rt.block_on(crate::engine::create_database_if_absent(&url))? {
+            println!("created database {name}");
+        }
+    }
+    let client = rt.block_on(crate::engine::connect_for_migrations(&url))?;
     let ran = rt.block_on(crate::apply::up(&client, &dir, to))?;
     if ran.is_empty() {
         println!("nothing to apply");
@@ -1470,59 +1474,14 @@ pub fn openapi_document(path: &Path, title: Option<String>) -> Result<serde_json
         bail!("{errors} error{} — no document written", plural(errors));
     }
 
-    // Which declared errors each route can raise. errors.md §4.3 makes a
-    // declared error's default status the answer whether or not an
-    // `errorHandler` arm names it, so this is exactly the non-2xx set.
-    let bodies = crate::wiring::function_bodies(&ws);
-    let mut raises: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    for file in &ws.files {
-        for d in &file.program.decls {
-            let crate::ast::Decl::Routes(r) = d else {
-                continue;
-            };
-            for rt in &r.routes {
-                let key = format!(
-                    "{} {}",
-                    rt.method.name.to_uppercase(),
-                    crate::wiring::route_pattern(&r.prefix, &rt.suffix)
-                );
-                let mut set: Vec<String> = crate::wiring::raises_from(&symbols, &bodies, &rt.body)
-                    .into_iter()
-                    .collect();
-                // Middleware runs before the handler and can answer on its
-                // own, so what it raises the route can produce.
-                for m in &rt.uses {
-                    if let Some(b) = middleware_body(&ws, &m.name) {
-                        set.extend(crate::wiring::raises_from(&symbols, &bodies, b));
-                    }
-                }
-                for m in &r.uses {
-                    if let Some(b) = middleware_body(&ws, &m.name) {
-                        set.extend(crate::wiring::raises_from(&symbols, &bodies, b));
-                    }
-                }
-                set.sort();
-                set.dedup();
-                raises.insert(key, set);
-            }
-        }
-    }
-
-    let title = title.unwrap_or_else(|| {
-        built
-            .model
-            .database
-            .clone()
-            .unwrap_or_else(|| "JWC application".to_string())
-    });
-    Ok(crate::openapi::document(&crate::openapi::Input {
+    Ok(crate::openapi::document_for(
+        &ws,
+        built.model.database.as_deref(),
+        &symbols,
+        &checked,
+        &wired,
         title,
-        version: "1.0.0".to_string(),
-        sym: &symbols,
-        wired: &wired,
-        checked: &checked,
-        raises,
-    }))
+    ))
 }
 
 /// `jwc swagger [path] [--port N] [--out FILE]` — the OpenAPI document,
@@ -1549,18 +1508,6 @@ pub fn swagger(
     }
 
     runtime()?.block_on(crate::swagger::serve(doc, port))
-}
-
-fn middleware_body<'a>(
-    ws: &'a crate::workspace::Workspace,
-    name: &str,
-) -> Option<&'a crate::ast::Block> {
-    ws.files.iter().find_map(|f| {
-        f.program.decls.iter().find_map(|d| match d {
-            crate::ast::Decl::Middleware(m) if m.name.name == name => Some(&m.body),
-            _ => None,
-        })
-    })
 }
 
 /// `jwc lint [path] [--constraints]` — `jwc check` plus the whole-program

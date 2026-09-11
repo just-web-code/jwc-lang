@@ -8,7 +8,7 @@ table Orgs of App.org {
     name varchar(80)?;
 }
 
---- Orgs, flattened.
+/// Orgs, flattened.
 view OrgSummary of App.org {
-    select O from App.org.Orgs as { id, slug };
+    select O from App.org.Orgs as { O.id, O.slug };
 }

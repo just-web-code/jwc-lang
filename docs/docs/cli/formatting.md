@@ -36,13 +36,13 @@ alone, rather than half-rewriting it.
 namespace f;
 import  app ;
 
---- doc comment
+/// doc comment
 service   S {
   function  g( a : int )  {
-    -- a line comment
+    // a line comment
     let x=1;
-    let y = not $a;   -- trailing
-    if($x==1){return "one";}
+    let y = not @a;   // trailing
+    if(@x==1){return "one";}
     return "other";
   }
 }
@@ -54,14 +54,14 @@ becomes
 namespace f;
 import app;
 
---- doc comment
+/// doc comment
 service S {
     function g(a: int) {
-        -- a line comment
+        // a line comment
         let x = 1;
-        let y = !$a;
-        -- trailing
-        if ($x == 1) {
+        let y = !@a;
+        // trailing
+        if (@x == 1) {
             return "one";
         }
         return "other";
@@ -84,7 +84,7 @@ fixed.
 
 ## What it preserves
 
-**Doc comments (`---`) and line comments (`--`)** survive. The parser
+**Doc comments (`///`) and line comments (`//`)** survive. The parser
 attaches them to the declaration, statement, column or class field that
 follows, and the printer writes them back in place — which is what keeps
 a doc comment attached to its column, where `jwc migrate` turns it into a
@@ -128,7 +128,7 @@ every joint, so one per line is the only shape available.
 
 ```jwc no-compile
 return "<img src='https://barcodeapi.org/api/qr/"
-    + $encoded
+    + @encoded
     + "?format=svg' alt='QR Code'/>";
 ```
 
@@ -155,7 +155,7 @@ the file alone and says which:
 
 ```
 ./src/app.jwc: not formatted — 4 comments would be lost:
-    -- `request.client_ip()` walks `X-Forwarded-For` right to left and
+    // `request.client_ip()` walks `X-Forwarded-For` right to left and
     …
 ```
 

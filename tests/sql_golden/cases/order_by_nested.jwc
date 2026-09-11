@@ -1,6 +1,6 @@
---- queries.md §5.4 — `orderby` reaches a nested `as one` field. Written
---- with the projection field's name, because that is what the projection
---- calls it; it lowers to the joined column, never a JSON path (N6).
+/// queries.md §5.4 — `orderby` reaches a nested `as one` field. Written
+/// with the projection field's name, because that is what the projection
+/// calls it; it lowers to the joined column, never a JSON path (N6).
 namespace order_by_nested;
 
 database App : Postgres;
@@ -20,19 +20,19 @@ table Members of App.s {
 }
 
 service Rosters {
-    --- The join is in this query, so the order key is the joined column.
+    /// The join is in this query, so the order key is the joined column.
     function by_org_name() {
         return select M from App.s.Members
             left join App.s.Orgs O on O.id == M.org_id as one org
-            as { account_id, org: { id, name } }
+            as { M.account_id, org: { id, name } }
             orderby org.name asc, M.id asc;
     }
 
-    --- The binding's own name reaches the same column.
+    /// The binding's own name reaches the same column.
     function by_binding_name() {
         return select M from App.s.Members
             left join App.s.Orgs O on O.id == M.org_id as one org
-            as { account_id, org: { id, name } }
+            as { M.account_id, org: { id, name } }
             orderby O.name asc, M.id asc;
     }
 }

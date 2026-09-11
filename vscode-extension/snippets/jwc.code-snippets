@@ -1,432 +1,341 @@
 {
-  "Route GET": {
-    "prefix": "route-get",
+  "Namespace": {
+    "prefix": "namespace",
+    "description": "File-scoped namespace (must match the file's path)",
     "body": [
-      "route GET \"${1:api/resource}\" {",
-      "\ttry {",
-      "\t\t${2:// handler}",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}"
-    ],
-    "description": "HTTP GET route"
+      "namespace ${1:app};"
+    ]
   },
-
-  "Route GET by ID": {
-    "prefix": "route-get-id",
+  "Import": {
+    "prefix": "import",
+    "description": "Import a namespace declared elsewhere in the project",
     "body": [
-      "route GET \"${1:api/resource}/{id}\" {",
-      "\ttry {",
-      "\t\tlet id = params.id;",
-      "\t\tlet item = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @id first;",
-      "\t\tif (item) {",
-      "\t\t\treturn json(item);",
-      "\t\t}",
-      "\t\treturn notFound();",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}"
-    ],
-    "description": "HTTP GET by ID route"
+      "import ${1:db.notes};"
+    ]
   },
-
-  "Route POST": {
-    "prefix": "route-post",
+  "Database": {
+    "prefix": "database",
+    "description": "Postgres database with an init block",
     "body": [
-      "route POST \"${1:api/resource}\" {",
-      "\ttry {",
-      "\t\tlet data = body();",
-      "\t\tlet item = new ${2:Entity}();",
-      "\t\t${3:// set fields}",
-      "\t\tinsert item into ${4:db}.${5:Table};",
-      "\t\treturn created(item);",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
+      "database ${1:App} : Postgres {",
+      "    init() {",
+      "        pool_size       = int(env(\"DB_POOL\") ?? \"20\");",
+      "        statement_timeout = \"10s\";",
+      "        connect_timeout = \"5s\";",
+      "    }",
       "}"
-    ],
-    "description": "HTTP POST route"
+    ]
   },
-
-  "Route PUT": {
-    "prefix": "route-put",
+  "Schema": {
+    "prefix": "schema",
+    "description": "A schema of a database",
     "body": [
-      "route PUT \"${1:api/resource}/{id}\" {",
-      "\ttry {",
-      "\t\tlet id = params.id;",
-      "\t\tlet existing = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @id first;",
-      "\t\tif (existing) {",
-      "\t\t\tlet data = body();",
-      "\t\t\t${5:// update fields}",
-      "\t\t\tupdate existing in ${3:db}.${4:Table};",
-      "\t\t\treturn json(existing);",
-      "\t\t}",
-      "\t\treturn notFound();",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}"
-    ],
-    "description": "HTTP PUT route"
+      "schema ${1:public} of ${2:App};"
+    ]
   },
-
-  "Route DELETE": {
-    "prefix": "route-delete",
+  "Table": {
+    "prefix": "table",
+    "description": "A table with an identity key and timestamps",
     "body": [
-      "route DELETE \"${1:api/resource}/{id}\" {",
-      "\ttry {",
-      "\t\tlet id = params.id;",
-      "\t\tlet item = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @id first;",
-      "\t\tif (item) {",
-      "\t\t\tdelete item from ${3:db}.${4:Table};",
-      "\t\t\treturn noContent();",
-      "\t\t}",
-      "\t\treturn notFound();",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
+      "table ${1:Notes} of ${2:App}.${3:notes} {",
+      "    id         bigint primary key identity;",
+      "    ${4:title}      varchar(200);",
+      "    created_at timestamptz default now();",
+      "    updated_at timestamptz default now();",
+      "",
+      "    index on (created_at, id);",
       "}"
-    ],
-    "description": "HTTP DELETE route"
+    ]
   },
-
-  "Entity": {
-    "prefix": "entity",
+  "Enum": {
+    "prefix": "enum",
+    "description": "An enum type",
     "body": [
-      "entity ${1:EntityName} of ${2:AppDb} {",
-      "\tid int pk autoincrement;",
-      "\t${3:field} ${4:varchar(255)};",
-      "}"
-    ],
-    "description": "JWC entity with autoincrement int PK"
+      "enum ${1:Status} { ${2:open}, ${3:closed} }"
+    ]
   },
-
-  "Entity with UUID PK": {
-    "prefix": "entity-uuid",
+  "Class": {
+    "prefix": "class",
+    "description": "A request-body class with validation rules",
     "body": [
-      "entity ${1:EntityName} of ${2:AppDb} {",
-      "\tid uuid pk;",
-      "\t${3:name} varchar(255);",
+      "class ${1:NoteCreate} {",
+      "    ${2:title} varchar(200) required, minLength(2);",
+      "    ${3:body}  text?;",
       "}"
-    ],
-    "description": "JWC entity with UUID primary key"
+    ]
   },
-
-  "Route WS": {
-    "prefix": "route-ws",
+  "Error": {
+    "prefix": "error",
+    "description": "An error type with its default status",
     "body": [
-      "route WS \"${1:/ws/path}\" {",
-      "\twhile (true) {",
-      "\t\tlet msg = ws_recv();",
-      "\t\tif (msg == null) { break; }",
-      "\t\tws_send(msg);",
-      "\t}",
-      "}"
-    ],
-    "description": "WebSocket route"
+      "error ${1:PaymentDeclined}(${2:message}: text) = ${3:402} : \"${4:to'lov rad etildi}\";"
+    ]
   },
-
-  "Dome": {
-    "prefix": "dome",
+  "Service": {
+    "prefix": "service",
+    "description": "A service holding the queries a route calls",
     "body": [
-      "dome ${1:Service} {",
-      "\tfunction ${2:method}(${3:params}) {",
-      "\t\t${4:// body}",
-      "\t}",
+      "service ${1:NoteService} {",
+      "    function ${2:get}(id: bigint) {",
+      "        return select N from ${3:App}.${4:notes}.${5:Notes}",
+      "            where N.id == @id",
+      "            as { N.id, N.title }",
+      "            first or throw NotFound(\"${6:topilmadi}\");",
+      "    }",
       "}"
-    ],
-    "description": "Dome (static-class) declaration"
+    ]
   },
-
-  "Transaction": {
-    "prefix": "transaction",
+  "Function": {
+    "prefix": "function",
+    "description": "A function",
     "body": [
-      "transaction {",
-      "\t${1:// db statements run atomically}",
+      "function ${1:name}(${2:id}: ${3:bigint}) {",
+      "    $0",
       "}"
-    ],
-    "description": "Transaction block"
+    ]
   },
-
   "Middleware": {
     "prefix": "middleware",
+    "description": "Middleware that provides a value to the routes under it",
     "body": [
-      "middleware ${1:Name} {",
-      "\t${2:// runs before the route handler}",
-      "}"
-    ],
-    "description": "Middleware declaration"
-  },
-
-  "Setup main": {
-    "prefix": "main-setup",
-    "body": [
-      "dbcontext ${1:AppDb} : Postgres;",
+      "middleware ${1:RequireAuth} provides ${2:account_id}: bigint {",
+      "    let header = request.header(\"Authorization\") or throw Unauthorized(\"${3:token kerak}\");",
+      "    let token = string.strip_prefix(@header, \"Bearer \");",
+      "    let secret = env(\"JWT_SECRET\") or throw Unauthorized(\"server sozlanmagan\");",
+      "    let claims = jwt.verify(@token, @secret) or throw Unauthorized(\"token yaroqsiz\");",
       "",
-      "function main() {",
-      "\tsetConnectionString();",
+      "    context.${2:account_id} = bigint(@claims.sub);",
       "}"
-    ],
-    "description": "main() with dbcontext + env-based connection string"
+    ]
   },
-
-  "DbContext": {
-    "prefix": "dbcontext",
+  "Routes block": {
+    "prefix": "routes",
+    "description": "A routes block with a shared prefix",
     "body": [
-      "dbcontext ${1:AppDbContext} : ${2:Postgres};"
-    ],
-    "description": "Database context declaration"
-  },
-
-  "Function": {
-    "prefix": "fn",
-    "body": [
-      "function ${1:name}(${2:params}) {",
-      "\t${3:// body}",
+      "routes \"${1:/api/v1/notes}\" {",
+      "    $0",
       "}"
-    ],
-    "description": "JWC function declaration"
+    ]
   },
-
-  "Async Function": {
-    "prefix": "afn",
+  "Routes with middleware": {
+    "prefix": "routes-use",
+    "description": "A routes block behind a middleware chain",
     "body": [
-      "async function ${1:name}(${2:params}) {",
-      "\t${3:// body}",
+      "routes \"${1:/api/v1/notes}\" use ${2:RequireAuth} {",
+      "    $0",
       "}"
-    ],
-    "description": "JWC async function declaration"
+    ]
   },
-
-  "Select All": {
-    "prefix": "sel-all",
+  "Route GET list": {
+    "prefix": "route-get",
+    "description": "GET a keyset-paginated list",
     "body": [
-      "let ${1:items} = select ${2:Entity} from ${3:db}.${4:Table};"
-    ],
-    "description": "Select all records from a table"
+      "route GET \"\" {",
+      "    let cursor = request.query(\"cursor\");",
+      "    let size   = int(request.query(\"size\") ?? \"20\");",
+      "",
+      "    return json(select ${1:N} from ${2:App}.${3:notes}.${4:Notes}",
+      "        as { $1.id, $1.${5:title} }",
+      "        orderby $1.created_at desc, $1.id desc",
+      "        page after @cursor size @size max 100);",
+      "}"
+    ]
   },
-
-  "Select by ID": {
-    "prefix": "sel-id",
+  "Route GET one": {
+    "prefix": "route-get-id",
+    "description": "GET one row by id, 404 when absent",
     "body": [
-      "let ${1:item} = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @${5:id} first;"
-    ],
-    "description": "Select a single record by ID"
+      "route GET \"{id: bigint}\" {",
+      "    return json(select ${1:N} from ${2:App}.${3:notes}.${4:Notes}",
+      "        where $1.id == @id",
+      "        as { $1.id, $1.${5:title} }",
+      "        first or throw NotFound(\"${6:topilmadi}\"));",
+      "}"
+    ]
   },
-
-  "Select with where": {
+  "Route POST": {
+    "prefix": "route-post",
+    "description": "POST a validated body, answer 201",
+    "body": [
+      "route POST \"\" {",
+      "    let req = request.body() as ${1:NoteCreate};",
+      "",
+      "    return created(json(insert ${4:Notes} into ${2:App}.${3:notes}.$4 { ...@req }",
+      "        as { $4.id, $4.${5:title} }));",
+      "}"
+    ]
+  },
+  "Route PATCH": {
+    "prefix": "route-patch",
+    "description": "PATCH the fields that were sent",
+    "body": [
+      "route PATCH \"{id: bigint}\" {",
+      "    let req = request.body() as ${1:NoteEdit};",
+      "",
+      "    return json(update ${4:Notes} of ${2:App}.${3:notes}.$4",
+      "        set ...@req, updated_at = date.now()",
+      "        where $4.id == @id",
+      "        as { $4.id, $4.${5:title}, $4.updated_at }",
+      "        first or throw NotFound(\"${6:topilmadi}\"));",
+      "}"
+    ]
+  },
+  "Route DELETE": {
+    "prefix": "route-delete",
+    "description": "DELETE one row, answer 204",
+    "body": [
+      "route DELETE \"{id: bigint}\" {",
+      "    delete ${3:Notes} from ${1:App}.${2:notes}.$3",
+      "        where $3.id == @id",
+      "        as { $3.id }",
+      "        first or throw NotFound(\"${4:topilmadi}\");",
+      "",
+      "    return noContent();",
+      "}"
+    ]
+  },
+  "Socket": {
+    "prefix": "socket",
+    "description": "A WebSocket endpoint",
+    "body": [
+      "socket \"${1:/ws/notes}\" {",
+      "    on open {",
+      "        socket.send(\"${2:salom}\");",
+      "    }",
+      "",
+      "    on message (text) {",
+      "        socket.send(\"echo: \" + text);",
+      "    }",
+      "",
+      "    on close {",
+      "        $0",
+      "    }",
+      "}"
+    ]
+  },
+  "Error handler": {
+    "prefix": "errorHandler",
+    "description": "The one place a raised error becomes a response",
+    "body": [
+      "errorHandler (e) {",
+      "    catch ${1:NotFound} (err) {",
+      "        return statusCode(404, { error: \"not_found\", message: @err.message });",
+      "    }",
+      "    catch (err) {",
+      "        return internalError();",
+      "    }",
+      "}"
+    ]
+  },
+  "Server block": {
+    "prefix": "server",
+    "description": "Runtime limits and CORS",
+    "body": [
+      "server {",
+      "    port            = ${1:8080};",
+      "    max_body_bytes  = 262144;",
+      "    request_timeout = \"30s\";",
+      "    max_page_size   = 100;",
+      "    cursor_secret   = env(\"CURSOR_SECRET\");",
+      "",
+      "    cors {",
+      "        origins = [\"${2:https://app.example.com}\"];",
+      "        methods = [\"GET\", \"POST\", \"PATCH\", \"DELETE\"];",
+      "        headers = [\"authorization\", \"content-type\"];",
+      "    }",
+      "}"
+    ]
+  },
+  "Select page": {
+    "prefix": "sel-page",
+    "description": "Keyset-paginated select",
+    "body": [
+      "select ${1:N} from ${2:App}.${3:s}.${4:T}",
+      "    as { $1.id, $1.${5:name} }",
+      "    orderby $1.created_at desc, $1.id desc",
+      "    page after @cursor size @size max 100"
+    ]
+  },
+  "Select first": {
+    "prefix": "sel-first",
+    "description": "Select one row or raise",
+    "body": [
+      "select ${1:N} from ${2:App}.${3:s}.${4:T}",
+      "    where $1.id == ${5:@id}",
+      "    as { $1.id, $1.${6:name} }",
+      "    first or throw NotFound(\"${7:topilmadi}\")"
+    ]
+  },
+  "Select where": {
     "prefix": "sel-where",
+    "description": "Select rows matching a predicate",
     "body": [
-      "let ${1:items} = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.${5:field} == @${6:value};"
-    ],
-    "description": "Select records with a where clause"
+      "select ${1:N} from ${2:App}.${3:s}.${4:T}",
+      "    where $1.${5:archived} == false",
+      "    as { $1.id, $1.${6:name} }"
+    ]
   },
-
   "Insert": {
-    "prefix": "db-insert",
+    "prefix": "insert",
+    "description": "Insert a row and project the result",
     "body": [
-      "let ${1:item} = new ${2:Entity}();",
-      "${1:item}.${3:field} = ${4:value};",
-      "insert ${1:item} into ${5:db}.${6:Table};"
-    ],
-    "description": "Create and insert a new entity"
+      "insert ${3:T} into ${1:App}.${2:s}.$3 { ...@${4:req} }",
+      "    as { $3.id, $3.${5:name} }"
+    ]
   },
-
   "Update": {
-    "prefix": "db-update",
+    "prefix": "update",
+    "description": "Update the fields that were sent",
     "body": [
-      "${1:item}.${2:field} = ${3:value};",
-      "update ${1:item} in ${4:db}.${5:Table};"
-    ],
-    "description": "Update an entity"
+      "update ${3:T} of ${1:App}.${2:s}.$3",
+      "    set ...@${4:req}, updated_at = date.now()",
+      "    where $3.id == ${5:@id}",
+      "    as { $3.id, $3.${6:name} }",
+      "    first or throw NotFound(\"${7:topilmadi}\")"
+    ]
   },
-
   "Delete": {
-    "prefix": "db-delete",
+    "prefix": "delete",
+    "description": "Delete one row",
     "body": [
-      "delete ${1:item} from ${2:db}.${3:Table};"
-    ],
-    "description": "Delete an entity"
+      "delete ${3:T} from ${1:App}.${2:s}.$3",
+      "    where $3.id == ${4:@id}"
+    ]
   },
-
-  "If Null Check": {
-    "prefix": "ifn",
+  "Transaction": {
+    "prefix": "transaction",
+    "description": "Run statements in one transaction",
     "body": [
-      "if (${1:value} == null) {",
-      "\treturn notFound();",
+      "transaction {",
+      "    $0",
       "}"
-    ],
-    "description": "Null check with notFound response"
+    ]
   },
-
-  "Try Catch": {
-    "prefix": "try",
+  "Test": {
+    "prefix": "test",
+    "description": "A test block; each one is rolled back",
     "body": [
-      "try {",
-      "\t${1:// code}",
-      "} catch (error) {",
-      "\treturn internalError(error.message);",
+      "test \"${1:nom}\" {",
+      "    $0",
       "}"
-    ],
-    "description": "Try-catch block"
+    ]
   },
-
-  "Validate Body": {
-    "prefix": "validate",
+  "Job": {
+    "prefix": "job",
+    "description": "A background job with a retry policy",
     "body": [
-      "validate body {",
-      "\t${1:field}: required, ${2:minLength(1)};",
+      "job ${1:SendEmail}(${2:to}: text) retries 3 backoff \"30s\" {",
+      "    $0",
       "}"
-    ],
-    "description": "Body validation block"
+    ]
   },
-
-  "Main function": {
+  "Main": {
     "prefix": "main",
+    "description": "The entry point that starts the server",
     "body": [
       "function main() {",
-      "\t${1:// entry point}",
+      "    serve();",
       "}"
-    ],
-    "description": "Main entry point function"
-  },
-
-  "Full CRUD controller": {
-    "prefix": "crud",
-    "body": [
-      "// GET all ${1:items}",
-      "route GET \"api/${1:items}\" {",
-      "\ttry {",
-      "\t\tlet items = select ${2:Entity} from ${3:db}.${4:Table};",
-      "\t\treturn json(items);",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}",
-      "",
-      "// GET by id",
-      "route GET \"api/${1:items}/{id}\" {",
-      "\ttry {",
-      "\t\tlet id = params.id;",
-      "\t\tlet item = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @id first;",
-      "\t\tif (item) {",
-      "\t\t\treturn json(item);",
-      "\t\t}",
-      "\t\treturn notFound();",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}",
-      "",
-      "// POST create",
-      "route POST \"api/${1:items}\" {",
-      "\ttry {",
-      "\t\tlet data = body();",
-      "\t\tlet item = new ${2:Entity}();",
-      "\t\t${5:// item.field = data.field;}",
-      "\t\tinsert item into ${3:db}.${4:Table};",
-      "\t\treturn created(item);",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}",
-      "",
-      "// DELETE",
-      "route DELETE \"api/${1:items}/{id}\" {",
-      "\ttry {",
-      "\t\tlet id = params.id;",
-      "\t\tlet item = select ${2:Entity} from ${3:db}.${4:Table} where ${2:Entity}.id == @id first;",
-      "\t\tif (item) {",
-      "\t\t\tdelete item from ${3:db}.${4:Table};",
-      "\t\t\treturn noContent();",
-      "\t\t}",
-      "\t\treturn notFound();",
-      "\t} catch (error) {",
-      "\t\treturn internalError(error.message);",
-      "\t}",
-      "}"
-    ],
-    "description": "Full CRUD routes for an entity"
-  },
-
-  "Namespace declaration": {
-    "prefix": "namespace",
-    "body": ["namespace ${1:my_pkg};", ""],
-    "description": "File-scoped namespace declaration"
-  },
-
-  "Import a package namespace": {
-    "prefix": "import",
-    "body": ["import ${1:greet};"],
-    "description": "Import another namespace's public members"
-  },
-
-  "Public function": {
-    "prefix": "pub-fn",
-    "body": [
-      "public function ${1:name}(${2:params}): ${3:type} {",
-      "\t${4:// body}",
-      "}"
-    ],
-    "description": "Public (exported) function"
-  },
-
-  "Private function": {
-    "prefix": "priv-fn",
-    "body": [
-      "private function ${1:name}(${2:params}): ${3:type} {",
-      "\t${4:// body}",
-      "}"
-    ],
-    "description": "Explicit private function (same as no modifier)"
-  },
-
-  "Public middleware": {
-    "prefix": "pub-middleware",
-    "body": [
-      "public middleware ${1:Name} {",
-      "\t${2:// return null to continue, return any value to short-circuit}",
-      "\treturn null;",
-      "}"
-    ],
-    "description": "Library-exported middleware"
-  },
-
-  "Mount a library": {
-    "prefix": "mount",
-    "body": ["mount ${1:greet}${2: at \"/${3:prefix}\"};"],
-    "description": "Activate a library's routes (optionally under a prefix)"
-  },
-
-  "Group with prefix + middleware": {
-    "prefix": "group",
-    "body": [
-      "group \"${1:/api}\" use ${2:Mw1}${3:, Mw2} {",
-      "\t${4:// route / mount / nested group}",
-      "}"
-    ],
-    "description": "Wrap routes and mounts with shared prefix + middleware chain"
-  },
-
-  "Group prefix only": {
-    "prefix": "group-prefix",
-    "body": [
-      "group \"${1:/api}\" {",
-      "\t${2:// route / mount / nested group}",
-      "}"
-    ],
-    "description": "Group with prefix, no middleware"
-  },
-
-  "Group middleware only": {
-    "prefix": "group-use",
-    "body": [
-      "group use ${1:Mw1}${2:, Mw2} {",
-      "\t${3:// route / mount / nested group}",
-      "}"
-    ],
-    "description": "Group with middleware, no prefix"
+    ]
   }
 }

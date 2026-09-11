@@ -1,5 +1,5 @@
---- `where` shapes that are not a plain comparison: `in`, the array form,
---- `exists`, and `not exists` (queries.md §3.3, §3.5).
+/// `where` shapes that are not a plain comparison: `in`, the array form,
+/// `exists`, and `not exists` (queries.md §3.3, §3.5).
 namespace predicates;
 
 database App : Postgres;
@@ -21,38 +21,38 @@ table Invoices of App.s {
 }
 
 service Filters {
-    --- A literal list.
+    /// A literal list.
     function by_status() {
         return select I from App.s.Invoices
-            where status in (Status.open, Status.paid)
-            orderby id asc;
+            where I.status in (Status.open, Status.paid)
+            orderby I.id asc;
     }
 
-    --- One array-typed operand: `= ANY($1)`, one parameter, and no way
-    --- for a caller's value to reach the SQL as text.
+    /// One array-typed operand: `= ANY($1)`, one parameter, and no way
+    /// for a caller's value to reach the SQL as text.
     function by_statuses(statuses: Status[]) {
         return select I from App.s.Invoices
-            where status in ($statuses)
-            orderby id asc;
+            where I.status in (@statuses)
+            orderby I.id asc;
     }
 
     function not_in(statuses: Status[]) {
         return select I from App.s.Invoices
-            where status not in ($statuses)
-            orderby id asc;
+            where I.status not in (@statuses)
+            orderby I.id asc;
     }
 
-    --- Filtering a parent by its children. The inner `where` reaches the
-    --- outer binding, which is the whole point.
+    /// Filtering a parent by its children. The inner `where` reaches the
+    /// outer binding, which is the whole point.
     function with_open_invoices() {
         return select O from App.s.Orgs
-            where exists (select I from App.s.Invoices where org_id == O.id and status == Status.open)
-            orderby id asc;
+            where exists (select I from App.s.Invoices where I.org_id == O.id and I.status == Status.open)
+            orderby O.id asc;
     }
 
     function without_invoices() {
         return select O from App.s.Orgs
-            where not exists (select I from App.s.Invoices where org_id == O.id)
-            orderby id asc;
+            where not exists (select I from App.s.Invoices where I.org_id == O.id)
+            orderby O.id asc;
     }
 }

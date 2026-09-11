@@ -1,6 +1,6 @@
---- Aggregates over a bare join. `count` is an int on the wire; `sum` and
---- `avg` widen and come back as strings, because that is what their JWC
---- type says (types.md §6.3).
+/// Aggregates over a bare join. `count` is an int on the wire; `sum` and
+/// `avg` widen and come back as strings, because that is what their JWC
+/// type says (types.md §6.3).
 namespace aggregates;
 
 database App : Postgres;
@@ -29,8 +29,8 @@ view CustomerTotals of App.s {
         left join App.s.Orders O on O.customer_id == C.id as group
         group by C.id, C.name
         as {
-            customer_id: id,
-            name,
+            customer_id: C.id,
+            C.name,
             order_count: count(O.id),
             paid_count:  count(O.id where O.status == OrderStatus.paid),
             paid_total:  sum(O.amount where O.status == OrderStatus.paid),
@@ -41,21 +41,21 @@ view CustomerTotals of App.s {
         }
 }
 
---- `having` reads an aggregate, so the literal it is compared against is
---- cast to what the aggregate comes back as, not to the column's type.
---- The `orderby` lives on the query, not in the view: a view body carrying
---- a per-query clause is E0541 (queries.md §8.1).
+/// `having` reads an aggregate, so the literal it is compared against is
+/// cast to what the aggregate comes back as, not to the column's type.
+/// The `orderby` lives on the query, not in the view: a view body carrying
+/// a per-query clause is E0541 (queries.md §8.1).
 view BusyCustomers of App.s {
     select C from App.s.Customers
         left join App.s.Orders O on O.customer_id == C.id as group
         group by C.id
         having count(O.id) > 2
-        as { customer_id: id, order_count: count(O.id) }
+        as { customer_id: C.id, order_count: count(O.id) }
 }
 
---- Two bare joins fan out, so a plain `count` over either one counts the
---- other's rows too. `count.distinct` is the answer, and W0502 is the
---- warning that points at it.
+/// Two bare joins fan out, so a plain `count` over either one counts the
+/// other's rows too. `count.distinct` is the answer, and W0502 is the
+/// warning that points at it.
 table Notes of App.s {
     id          bigint primary key identity;
     customer_id bigint;
@@ -70,7 +70,7 @@ view CustomerActivity of App.s {
         left join App.s.Notes N on N.customer_id == C.id as group
         group by C.id
         as {
-            customer_id: id,
+            customer_id: C.id,
             orders: count.distinct(O.id),
             notes:  count.distinct(N.id)
         }

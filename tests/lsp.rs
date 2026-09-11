@@ -21,9 +21,17 @@ struct Client {
 }
 
 impl Client {
+    /// `--stdio` is how a client spawns it: `vscode-languageclient`
+    /// appends the flag for `TransportKind.stdio`, and neovim, helix and
+    /// emacs all pass it too. Spawning it here without the flag is what let
+    /// the server reject every real editor while this suite was green.
     fn start(root: &Path) -> Client {
+        Client::start_with(root, &["lsp", "--stdio"])
+    }
+
+    fn start_with(root: &Path, args: &[&str]) -> Client {
         let mut child = Command::new(env!("CARGO_BIN_EXE_jwc"))
-            .arg("lsp")
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -230,10 +238,10 @@ fn completion_offers_members_after_a_dot_and_names_otherwise() {
          service Svc {\n\
          \x20   function one(id: bigint) -> text { return \"x\"; }\n\
          }\n\
-         -- completion probes\n\
-         -- Orgs.\n\
-         -- Svc.\n\
-         -- date.\n",
+         // completion probes\n\
+         // Orgs.\n\
+         // Svc.\n\
+         // date.\n",
     )
     .expect("write");
     let root = dir.path().to_path_buf();
@@ -253,20 +261,20 @@ fn completion_offers_members_after_a_dot_and_names_otherwise() {
             .collect()
     };
 
-    let cols = members(&mut c, "-- Orgs.");
+    let cols = members(&mut c, "// Orgs.");
     assert!(cols.contains(&"slug".to_string()), "{cols:?}");
     // schema.md §3.1 — a `private` column is never in a response, so it is
     // not offered where a projection is being written.
     assert!(!cols.contains(&"secret".to_string()), "{cols:?}");
 
-    let fns = members(&mut c, "-- Svc.");
+    let fns = members(&mut c, "// Svc.");
     assert_eq!(fns, vec!["one".to_string()], "{fns:?}");
 
-    let dates = members(&mut c, "-- date.");
+    let dates = members(&mut c, "// date.");
     assert!(dates.contains(&"now".to_string()), "{dates:?}");
 
     // At statement position, the visible names.
-    let (line, _) = find(&text, "-- completion probes");
+    let (line, _) = find(&text, "// completion probes");
     let items = c.at(&path, "textDocument/completion", line, 3);
     let labels: Vec<String> = items
         .as_array()
@@ -311,4 +319,21 @@ fn an_unsaved_edit_is_what_gets_checked() {
     assert_eq!(diags[0]["source"], "jwc");
     assert!(diags[0]["code"].is_string(), "{after}");
     assert_eq!(std::fs::read_to_string(&path).expect("read"), good);
+}
+
+#[test]
+fn the_server_starts_however_the_editor_spells_it() {
+    // Two spellings reach this binary: `jwc lsp` from a person at a shell,
+    // and `jwc lsp --stdio` from every LSP client, which appends the flag
+    // for the transport it picked. Rejecting either is a server that does
+    // not start, and the editor only reports `write EPIPE`.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
+
+    for args in [&["lsp"][..], &["lsp", "--stdio"][..]] {
+        // `start_with` asserts the capabilities in the `initialize` reply,
+        // so reaching this line is the whole assertion.
+        let c = Client::start_with(&root, args);
+        drop(c);
+    }
 }

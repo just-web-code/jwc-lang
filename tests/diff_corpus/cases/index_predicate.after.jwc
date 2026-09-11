@@ -1,5 +1,5 @@
--- ops: 5 create_index org.uq_orgs__slug__dd2b9f6c
--- ops: 9 drop_index org.uq_orgs__slug__9661dc66
+// ops: 5 create_index org.uq_orgs__slug__dd2b9f6c
+// ops: 9 drop_index org.uq_orgs__slug__9661dc66
 
 namespace c;
 database App : Postgres;

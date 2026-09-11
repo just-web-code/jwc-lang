@@ -1,4 +1,4 @@
--- ops: 9 drop_column org.orgs.legacy
+// ops: 9 drop_column org.orgs.legacy
 
 namespace c;
 database App : Postgres;

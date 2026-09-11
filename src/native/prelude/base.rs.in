@@ -3306,6 +3306,47 @@ async fn jwc_shutdown_signal() {
     });
 }
 
+/// Where the API reference is served, or `None` for nowhere.
+///
+/// `JWC_SWAGGER` wins over the source, exactly as it does under
+/// `jwc serve`; `JWC_SOURCE_SWAGGER` is what `server { swagger }` said, and
+/// is `""` when it said nothing. Read once — a path that changed under a
+/// running process would be a route that appears mid-flight.
+/// The port, resolved the way `serve.rs::resolved_port` resolves it:
+/// `JWC_PORT`, then `PORT`, then `server { port }` baked in at build.
+///
+/// `PORT` unprefixed because every platform that injects a port injects
+/// that one — the same pair `JWC_DATABASE_URL` and `DATABASE_URL` make.
+fn jwc_port() -> u16 {
+    for name in ["JWC_PORT", "PORT"] {
+        if let Ok(v) = std::env::var(name) {
+            if let Ok(p) = v.trim().parse::<u16>() {
+                if p != 0 {
+                    return p;
+                }
+            }
+        }
+    }
+    JWC_SOURCE_PORT
+}
+
+fn jwc_swagger_path() -> Option<String> {
+    static P: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let raw = std::env::var("JWC_SWAGGER")
+            .unwrap_or_else(|_| JWC_SOURCE_SWAGGER.to_string());
+        let v = raw.trim().trim_end_matches('/');
+        if v.is_empty() {
+            None
+        } else if v.starts_with('/') {
+            Some(v.to_string())
+        } else {
+            Some(format!("/{}", v))
+        }
+    })
+    .clone()
+}
+
 /// config.md §4 — `/healthz`, `/readyz` and `/metrics`, at fixed names,
 /// reachable before anyone reads the source.
 ///
@@ -3357,6 +3398,24 @@ async fn jwc_operational(method: &str, path: &str) -> Option<axum::response::Res
                 .body(jwc_op_metrics().await.into())
                 .unwrap(),
         ),
+
+        // The API reference, where `server { swagger }` put it — the same
+        // page and the same document `jwc serve` answers with, rendered
+        // at compile time from the same walk rather than a second one.
+        p if jwc_swagger_path().as_deref() == Some(p) => Some(
+            axum::response::Response::builder()
+                .status(200)
+                .header("content-type", "text/html; charset=utf-8")
+                .body(JWC_SWAGGER_HTML.into())
+                .unwrap(),
+        ),
+        p if jwc_swagger_path()
+            .as_ref()
+            .is_some_and(|s| p == format!("{}/openapi.json", s)) =>
+        {
+            Some(json(200, JWC_SWAGGER_JSON.to_string()))
+        }
+
         _ => None,
     }
 }

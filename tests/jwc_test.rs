@@ -255,7 +255,7 @@ fn an_untyped_assert_fails_is_a_compile_error() {
          table T of App.s { id bigint primary key identity; }\n\
          test \"untyped\" {\n\
          \x20   assert fails {\n\
-         \x20       insert into App.s.T { id = 1 };\n\
+         \x20       insert T into App.s.T { id = 1 };\n\
          \x20   };\n\
          }\n",
     )

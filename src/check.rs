@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `created(json($row))` — the inner `json` already recorded a 200
-    /// carrying `$row`'s type, and then `created` recorded a 201 carrying
+    /// carrying `@row`'s type, and then `created` recorded a 201 carrying
     /// the type of `json(...)`, which is `Response` and has no schema. So
     /// `jwc openapi` said a POST answers 200 with the object (it does not)
     /// and 201 with nothing (it answers 201 with the object). That is the
@@ -1331,47 +1331,38 @@ impl<'a> Checker<'a> {
             ExprKind::Bool(_) => Ty::boolean(),
             ExprKind::Null => Ty::Null,
 
-            ExprKind::Local(i) => match self.lookup(&i.name) {
-                Some(t) => t,
-                None => {
-                    self.err_note(
-                        i.span,
-                        "E0211",
-                        format!("unknown local `${}`", i.name),
-                        "declare it with `let`, or take it as a parameter",
-                        "names.md §5.3",
-                    );
-                    Ty::Unknown
-                }
-            },
-
-            ExprKind::PathParam(i) => {
-                if !matches!(
+            // One sigil for everything bound outside the query. A `let` may
+            // not shadow a parameter or a path parameter (`E0214`), so the
+            // two namespaces are disjoint and the order here cannot hide one
+            // behind the other.
+            ExprKind::Local(i) => {
+                if let Some(t) = self.lookup(&i.name) {
+                    t
+                } else if let Some(t) = self.params.get(&i.name) {
+                    t.clone()
+                } else if matches!(
                     self.body,
                     BodyKind::Route | BodyKind::Middleware | BodyKind::After | BodyKind::Socket
                 ) {
                     self.err_note(
                         i.span,
-                        "E0220",
-                        format!("`@{}` outside a route or middleware", i.name),
-                        "path parameters exist only where a path does",
+                        "E0801",
+                        format!("`@{}` is not declared here", i.name),
+                        "declare it with `let`, or as a path parameter: a route \
+                         declares one in its path (`{id: bigint}`), a middleware \
+                         as a binder (`middleware M(@id: bigint)`)",
+                        "middleware.md §2",
+                    );
+                    Ty::Unknown
+                } else {
+                    self.err_note(
+                        i.span,
+                        "E0211",
+                        format!("unknown name `@{}`", i.name),
+                        "declare it with `let`, or take it as a parameter",
                         "names.md §5.2",
                     );
-                    return Ty::Unknown;
-                }
-                match self.params.get(&i.name) {
-                    Some(t) => t.clone(),
-                    None => {
-                        self.err_note(
-                            i.span,
-                            "E0801",
-                            format!("`@{}` is not declared here", i.name),
-                            "a route declares it in its path (`{id: bigint}`); a \
-                             middleware declares it as a binder (`middleware M(@id: bigint)`)",
-                            "middleware.md §2",
-                        );
-                        Ty::Unknown
-                    }
+                    Ty::Unknown
                 }
             }
 
@@ -1925,63 +1916,58 @@ impl<'a> Checker<'a> {
                 }
             };
         }
-        let mut hits: Vec<(String, Ty)> = Vec::new();
         let Some(scope) = self.query.last() else {
             return Ty::Unknown;
         };
-        for b in &scope.bindings {
-            if let Some(ty) = self.column_of(&b.object, &i.name) {
-                hits.push((b.name.clone(), ty));
-            }
+        if scope
+            .bindings
+            .iter()
+            .any(|b| self.column_of(&b.object, &i.name).is_some())
+        {
+            let names = scope
+                .bindings
+                .iter()
+                .filter(|b| self.column_of(&b.object, &i.name).is_some())
+                .map(|b| format!("`{}.{}`", b.name, i.name))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            self.err_note(
+                i.span,
+                "E0904",
+                format!("`{}` does not name its binding", i.name),
+                format!("write {names}"),
+                "queries.md §2.4",
+            );
+            return Ty::Unknown;
         }
-        match hits.len() {
-            1 => hits.remove(0).1,
-            0 => {
-                // The characteristic slip: a local written without its sigil
-                // (names.md §5.3).
-                if self.lookup(&i.name).is_some() || self.params.contains_key(&i.name) {
-                    self.err_note(
-                        i.span,
-                        "E0210",
-                        format!("`{}` is not a column of any binding here", i.name),
-                        format!("did you mean `${}`?", i.name),
-                        "names.md §5.3",
-                    );
-                } else if self.sym.enums.contains_key(&i.name) || is_namespace(&i.name) {
-                    return Ty::Unknown;
-                } else {
-                    let bindings = scope
-                        .bindings
-                        .iter()
-                        .map(|b| b.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    self.err_note(
-                        i.span,
-                        "E0211",
-                        format!("`{}` is not a column of any binding here", i.name),
-                        format!("bindings in scope: {bindings}"),
-                        "names.md §5.3",
-                    );
-                }
-                Ty::Unknown
-            }
-            _ => {
-                let names = hits
-                    .iter()
-                    .map(|(b, _)| format!("`{b}.{}`", i.name))
-                    .collect::<Vec<_>>()
-                    .join(" and ");
-                self.err_note(
-                    i.span,
-                    "E0213",
-                    format!("`{}` is ambiguous", i.name),
-                    format!("it resolves to {names} — qualify it"),
-                    "names.md §5.4",
-                );
-                hits.remove(0).1
-            }
+        // The characteristic slip: a local written without its sigil
+        // (names.md §5.2).
+        if self.lookup(&i.name).is_some() || self.params.contains_key(&i.name) {
+            self.err_note(
+                i.span,
+                "E0210",
+                format!("`{}` is not a column of any binding here", i.name),
+                format!("did you mean `@{}`?", i.name),
+                "names.md §5.2",
+            );
+        } else if self.sym.enums.contains_key(&i.name) || is_namespace(&i.name) {
+            return Ty::Unknown;
+        } else {
+            let bindings = scope
+                .bindings
+                .iter()
+                .map(|b| b.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.err_note(
+                i.span,
+                "E0211",
+                format!("`{}` is not a column of any binding here", i.name),
+                format!("bindings in scope: {bindings}"),
+                "names.md §5.2",
+            );
         }
+        Ty::Unknown
     }
 
     fn column_of(&self, object: &str, column: &str) -> Option<Ty> {
@@ -2732,7 +2718,7 @@ impl<'a> Checker<'a> {
             }
             "cookie" => Ty::Response,
             "serve" => {
-                arity(self, 1);
+                arity(self, 0);
                 Ty::Void
             }
 
@@ -3569,12 +3555,41 @@ impl<'a> Checker<'a> {
         let mut out: Fields = Vec::new();
         for f in &p.fields {
             match f {
-                ProjField::Column(i) => {
-                    // A bare projection column is a column of the **driving**
-                    // binding. Joined tables reach the projection through
-                    // their `as one` / `as many` nested shape, so resolving
-                    // across every binding would make `id` ambiguous in every
-                    // joined query (queries.md §6.1).
+                ProjField::Column { binding, column: i } => {
+                    // A projection column is a column of the **driving**
+                    // binding, and it says so. Joined tables reach the
+                    // projection through their `as one` / `as many` nested
+                    // shape (queries.md §6.1).
+                    let driving = self
+                        .query
+                        .last()
+                        .and_then(|q| q.bindings.first())
+                        .map(|b| b.name.clone())
+                        .unwrap_or_else(|| object.to_string());
+                    match binding {
+                        None => {
+                            self.err_note(
+                                i.span,
+                                "E0904",
+                                format!("`{}` does not name its binding", i.name),
+                                format!("write `{driving}.{}`", i.name),
+                                "queries.md §2.4",
+                            );
+                        }
+                        Some(b) if b.name != driving => {
+                            self.err_note(
+                                b.span,
+                                "E0905",
+                                format!("`{}` is not this query's binding", b.name),
+                                format!(
+                                    "the projection reads `{driving}`; a joined table's \
+                                     columns go in its own nested shape"
+                                ),
+                                "queries.md §6.1",
+                            );
+                        }
+                        Some(_) => {}
+                    }
                     let ty = match self.column_of(object, &i.name) {
                         Some(t) => t,
                         None => {
@@ -3594,18 +3609,15 @@ impl<'a> Checker<'a> {
                     out.push((i.name.clone(), ty));
                 }
                 ProjField::Expr { alias, value, .. } => {
-                    // `org_id: id` — an alias of a driving column. Bare names
-                    // here are columns of the driving binding, same as
-                    // `ProjField::Column`; an aggregate over a joined table
-                    // qualifies (`count(I.id)`).
-                    let outer = self.scoped_to.take();
-                    if matches!(&*value.kind, ExprKind::Name(_)) {
-                        self.scoped_to = Some(object.to_string());
-                    }
+                    // `org_id: O.id` — an alias of a column, which names its
+                    // binding like every other column reference (queries.md
+                    // §2.4). A bare name here reaches `column()` and is
+                    // `E0904` with the binding it should have carried.
                     let ty = self.expr(value);
-                    self.scoped_to = outer;
-                    if let ExprKind::Name(n) = &*value.kind {
-                        self.reject_private(object, &n.name, value.span);
+                    if let ExprKind::Field { base, field } = &*value.kind {
+                        if matches!(&*base.kind, ExprKind::Name(_)) {
+                            self.reject_private(object, &field.name, value.span);
+                        }
                     }
                     out.push((alias.name.clone(), ty));
                 }
@@ -3656,7 +3668,17 @@ impl<'a> Checker<'a> {
             .fields
             .iter()
             .map(|f| match f {
-                ProjField::Column(i) => {
+                ProjField::Column { binding, column: i } => {
+                    if let Some(b) = binding {
+                        self.err_note(
+                            b.span,
+                            "E0905",
+                            format!("`{}` is not a binding here", b.name),
+                            "a nested shape is already scoped to its join, so its \
+                             fields are bare",
+                            "queries.md §6.1",
+                        );
+                    }
                     let ty = self.column_of(object, &i.name).unwrap_or_else(|| {
                         self.err(
                             i.span,
@@ -3741,7 +3763,7 @@ impl<'a> Checker<'a> {
                         plain.push((alias.name.clone(), *span));
                     }
                 }
-                ProjField::Column(i) => plain.push((i.name.clone(), i.span)),
+                ProjField::Column { column: i, .. } => plain.push((i.name.clone(), i.span)),
                 ProjField::Nested { alias, span, .. } => plain.push((alias.name.clone(), *span)),
             }
         }
@@ -3966,8 +3988,8 @@ impl<'a> Checker<'a> {
             );
             return;
         };
-        let equalities = equality_columns(filter);
-        if self.covers_unique(object, &equalities, filter) {
+        let equalities = equality_columns(filter, &s.binder.name);
+        if self.covers_unique(object, &equalities, filter, &s.binder.name) {
             return;
         }
         self.err_note(
@@ -3980,7 +4002,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    fn covers_unique(&self, object: &str, equalities: &HashSet<String>, filter: &Expr) -> bool {
+    fn covers_unique(
+        &self,
+        object: &str,
+        equalities: &HashSet<String>,
+        filter: &Expr,
+        binding: &str,
+    ) -> bool {
+        let binding = Some(binding);
         // Views inherit the driving table's keys through their projection
         // (queries.md §5.2.1).
         let (table, mapped): (Option<&crate::symbols::TableSym>, HashSet<String>) =
@@ -4023,7 +4052,7 @@ impl<'a> Checker<'a> {
             .collect();
         let conjuncts: Vec<String> = split_conjuncts(filter)
             .iter()
-            .map(|c| crate::model::canonical_expr(c, &model_table.columns, &enums))
+            .map(|c| crate::model::canonical_expr(c, &model_table.columns, &enums, binding))
             .collect();
         t.partial_uniques.iter().any(|(cols, pred)| {
             cols.iter().all(|c| mapped.contains(c))
@@ -4034,17 +4063,35 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// `where org_id == org_id` is now impossible to write by accident, but
-    /// it is still possible to write on purpose (names.md §5.3).
+    /// `where T.org_id == T.org_id` is now impossible to write by accident,
+    /// but it is still possible to write on purpose (queries.md §2.4).
     fn check_tautology(&mut self, e: &Expr) {
+        /// The binding and column of a qualified column reference.
+        fn qualified(e: &Expr) -> Option<(String, String)> {
+            match &*e.kind {
+                ExprKind::Name(n) => Some((String::new(), n.name.clone())),
+                ExprKind::Field { base, field } => match &*base.kind {
+                    ExprKind::Name(b) => Some((b.name.clone(), field.name.clone())),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
         if let ExprKind::Binary { op, lhs, rhs } = &*e.kind {
             if matches!(op, BinOp::Eq) {
-                if let (ExprKind::Name(a), ExprKind::Name(b)) = (&*lhs.kind, &*rhs.kind) {
-                    if a.name == b.name {
+                if let (Some(a), Some(b)) = (qualified(lhs), qualified(rhs)) {
+                    if a == b {
                         self.warn(
                             e.span,
                             "W0104",
-                            format!("`{} == {}` is always true", a.name, b.name),
+                            format!(
+                                "`{0} == {0}` is always true",
+                                if a.0.is_empty() {
+                                    a.1.clone()
+                                } else {
+                                    format!("{}.{}", a.0, a.1)
+                                }
+                            ),
                             "names.md §5.3",
                         );
                     }
@@ -4118,7 +4165,7 @@ impl<'a> Checker<'a> {
 
         self.query.push(QueryScope {
             bindings: vec![Binding {
-                name: object.clone(),
+                name: i.binder.name.clone(),
                 object: object.clone(),
                 one_field: None,
             }],
@@ -4200,7 +4247,7 @@ impl<'a> Checker<'a> {
     /// comparison, if there is one.
     fn untyped_operand(&self, lhs: &Expr, rhs: &Expr) -> Option<String> {
         [lhs, rhs].into_iter().find_map(|e| match &*e.kind {
-            ExprKind::PathParam(n) if self.untyped_params.contains(&n.name) => Some(n.name.clone()),
+            ExprKind::Local(n) if self.untyped_params.contains(&n.name) => Some(n.name.clone()),
             _ => None,
         })
     }
@@ -4299,7 +4346,7 @@ impl<'a> Checker<'a> {
 
         self.query.push(QueryScope {
             bindings: vec![Binding {
-                name: object.clone(),
+                name: u.binder.name.clone(),
                 object: object.clone(),
                 one_field: None,
             }],
@@ -4403,7 +4450,7 @@ impl<'a> Checker<'a> {
         }
         self.query.push(QueryScope {
             bindings: vec![Binding {
-                name: object.clone(),
+                name: d.binder.name.clone(),
                 object: object.clone(),
                 one_field: None,
             }],
@@ -4878,20 +4925,26 @@ fn contains_aggregate(e: &Expr) -> bool {
 }
 
 /// Columns constrained by equality against something that is not a column.
-fn equality_columns(e: &Expr) -> HashSet<String> {
+/// The columns of `binding` that the predicate pins to one value.
+///
+/// Of `binding`, not of anything in scope: the question is whether the
+/// *driving* row is unique, and `Joined.slug == "x"` says nothing about it.
+/// Counting a joined column here let a `first` pass over rows the predicate
+/// never narrowed.
+fn equality_columns(e: &Expr, binding: &str) -> HashSet<String> {
     let mut out = HashSet::new();
-    collect_equalities(e, &mut out);
+    collect_equalities(e, binding, &mut out);
     out
 }
 
-fn collect_equalities(e: &Expr, out: &mut HashSet<String>) {
+fn collect_equalities(e: &Expr, binding: &str, out: &mut HashSet<String>) {
     let ExprKind::Binary { op, lhs, rhs } = &*e.kind else {
         return;
     };
     match op {
         BinOp::And => {
-            collect_equalities(lhs, out);
-            collect_equalities(rhs, out);
+            collect_equalities(lhs, binding, out);
+            collect_equalities(rhs, binding, out);
         }
         BinOp::Eq => {
             // `col == <not a column, not null>` pins one value.
@@ -4900,8 +4953,10 @@ fn collect_equalities(e: &Expr, out: &mut HashSet<String>) {
                     out.insert(n.name.clone());
                 }
             }
-            if let ExprKind::Field { field, .. } = &*lhs.kind {
-                if !matches!(&*rhs.kind, ExprKind::Null) {
+            if let ExprKind::Field { base, field } = &*lhs.kind {
+                let of_the_driving_row =
+                    matches!(&*base.kind, ExprKind::Name(b) if b.name == binding);
+                if of_the_driving_row && !matches!(&*rhs.kind, ExprKind::Null) {
                     out.insert(field.name.clone());
                 }
             }

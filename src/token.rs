@@ -1,7 +1,7 @@
 //! v1 token set.
 //!
 //! Distinct from `crate::lexer` on purpose: the v1 grammar has a different
-//! keyword set, two sigils (`@`, `$`), doc comments as real tokens, and it
+//! keyword set, one sigil (`@`), doc comments as real tokens, and it
 //! keeps trivia so `jwc v1 fmt` can round-trip comments. The mechanism is
 //! the same hand-written scanner shape; the vocabulary is not.
 
@@ -39,10 +39,13 @@ impl Span {
 /// and carries `Line` through so a comment does not vanish on reformat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Trivia {
-    /// `-- text`
+    /// `// text`
     Line(String),
-    /// `--- text`
+    /// `/// text`
     Doc(String),
+    /// `/* text */`, one entry per line of the body. Blocks nest, so a
+    /// region containing a comment can be commented out whole.
+    Block(Vec<String>),
     /// One or more blank lines collapsed to a single marker.
     Blank,
 }
@@ -181,11 +184,11 @@ pub const REMOVED_KEYWORDS: &[(&str, &str)] = &[
     ),
     (
         "new",
-        "'new X from Y' was removed in 1.0 — write 'insert into App.s.X { ...y }'",
+        "'new X from Y' was removed in 1.0 — write 'insert X into App.s.X { ...@y }'",
     ),
     (
         "patch",
-        "'patch' was removed in 1.0 — write 'update App.s.X set …'",
+        "'patch' was removed in 1.0 — write 'update X of App.s.X set …'",
     ),
     (
         "mount",
@@ -201,9 +204,9 @@ pub const REMOVED_KEYWORDS: &[(&str, &str)] = &[
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Tok {
     Ident(String),
-    /// `@name` — path parameter (names.md §5.2).
-    PathParam(String),
-    /// `$name` — local or parameter (names.md §5.3).
+    /// `@name` — a local, a parameter or a path parameter. One sigil: at the
+    /// use site they are the same kind of thing, and a `let` may not shadow
+    /// any of them (names.md §5.2, §5.5).
     Local(String),
     Int(String),
     Decimal(String),
@@ -256,8 +259,7 @@ impl fmt::Display for Tok {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Tok::Ident(s) => write!(f, "`{s}`"),
-            Tok::PathParam(s) => write!(f, "`@{s}`"),
-            Tok::Local(s) => write!(f, "`${s}`"),
+            Tok::Local(s) => write!(f, "`@{s}`"),
             Tok::Int(s) | Tok::Decimal(s) => write!(f, "`{s}`"),
             Tok::Str(_) => write!(f, "a string literal"),
             Tok::RawStr(_) => write!(f, "a raw string literal"),

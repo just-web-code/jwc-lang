@@ -4,9 +4,9 @@ import app;
 import db.auth;
 import db.org;
 
---- Append-only. Every FK is `on delete set null` so a deleted org never
---- blocks the log, and every column that could be missing is nullable —
---- an `after` block cannot recover from a failed insert (middleware.md §5.5).
+/// Append-only. Every FK is `on delete set null` so a deleted org never
+/// blocks the log, and every column that could be missing is nullable —
+/// an `after` block cannot recover from a failed insert (middleware.md §5.5).
 table Events of App.audit {
     id         bigint primary key identity;
     org_id     bigint?;

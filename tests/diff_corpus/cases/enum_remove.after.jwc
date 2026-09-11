@@ -1,4 +1,4 @@
--- diag: E1102
+// diag: E1102
 
 namespace c;
 database App : Postgres;

@@ -26,12 +26,12 @@ A `service` is the unit of logic, and the unit a package exports:
 service OrgService {
     function create(req: OrgCreate, owner_id: bigint) {
         transaction {
-            let org = insert into App.org.Orgs { ...$req }
+            let org = insert Orgs into App.org.Orgs { ...@req }
                 as { id, slug, name, created_at };
 
-            insert into App.org.Members {
-                org_id     = $org.id,
-                account_id = $owner_id,
+            insert Members into App.org.Members {
+                org_id     = @org.id,
+                account_id = @owner_id,
                 role       = MemberRole.owner
             };
 
@@ -41,7 +41,7 @@ service OrgService {
 
     function detail(org_id: bigint) {
         return select O from App.org.Orgs
-            where id == $org_id
+            where id == @org_id
             as { id, slug, name }
             first or throw NotFound("organisation not found");
     }
@@ -70,7 +70,7 @@ declaration and not the body:
 ```jwc no-compile
 service Billing {
     function charge(invoice_id: bigint) raises (NotFound, PaymentDeclined) {
-        -- …
+        // …
     }
 }
 ```

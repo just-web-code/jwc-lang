@@ -32,7 +32,7 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ORDER BY t0.id) q
 
 -- ── Chains.reports_with_email ──
--- $1 = $pattern :: varchar(255)
+-- $1 = @pattern :: varchar(255)
 -- $2 = 100 :: int
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('id', t0.id::text, 'email', t0.email, 'reports', coalesce(t1_agg.data, '[]'::json)) AS j
   FROM s.accounts t0

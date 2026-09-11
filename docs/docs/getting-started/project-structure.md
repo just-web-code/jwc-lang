@@ -47,10 +47,10 @@ resolution beyond it.
 ```jwc no-compile
 namespace routes.orgs;
 
-import dto.org;              -- a namespace in this program
+import dto.org;              // a namespace in this program
 import middleware.auth;
 import services.org;
-import redis;                -- a dependency in the manifest
+import redis;                // a dependency in the manifest
 ```
 
 A name that is both a local namespace and a dependency is `E0203` — rename

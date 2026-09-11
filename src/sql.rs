@@ -140,6 +140,14 @@ impl<'a> Builder<'a> {
     fn set_expr(&mut self, t: &TableObj, e: &Expr, cast: &str) -> Option<String> {
         Some(match &*e.kind {
             ExprKind::Name(n) => quote_ident(&t.column(&n.name)?.physical),
+            // `T.value` — the binding is the table being written, so the
+            // column alone is what the UPDATE names (queries.md §2.4).
+            ExprKind::Field { base, field } if matches!(&*base.kind, ExprKind::Name(_)) => {
+                match t.column(&field.name) {
+                    Some(c) => quote_ident(&c.physical),
+                    None => self.bind(e, cast),
+                }
+            }
             ExprKind::Binary { op, lhs, rhs } => {
                 let sql_op = match op {
                     BinOp::Add => "+",
@@ -165,7 +173,7 @@ impl<'a> Builder<'a> {
                 .fields
                 .iter()
                 .filter_map(|f| match f {
-                    ProjField::Column(i) => Some(i.name.clone()),
+                    ProjField::Column { column: i, .. } => Some(i.name.clone()),
                     ProjField::Expr { alias, .. } => Some(alias.name.clone()),
                     ProjField::Nested { .. } => None,
                 })
@@ -186,7 +194,7 @@ impl<'a> Builder<'a> {
                 .fields
                 .iter()
                 .filter_map(|f| match f {
-                    ProjField::Column(i) => {
+                    ProjField::Column { column: i, .. } => {
                         let c = t.column(&i.name)?;
                         Some(self.json_entry(&i.name, c, alias))
                     }

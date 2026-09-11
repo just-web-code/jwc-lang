@@ -742,7 +742,7 @@ impl<'a> Compiler<'a> {
         let mut joins = String::new();
         for f in &projection.fields {
             match f {
-                ProjField::Column(i) => {
+                ProjField::Column { column: i, .. } => {
                     let c = root.column(&i.name)?;
                     columns.push(format!(
                         "{root_alias}.{} AS {}",
@@ -785,7 +785,9 @@ impl<'a> Compiler<'a> {
                         let crel = self.table(&child.object)?;
                         for nested in &shape.fields {
                             let (name, col) = match nested {
-                                ProjField::Column(i) => (i.name.clone(), i.name.clone()),
+                                ProjField::Column { column: i, .. } => {
+                                    (i.name.clone(), i.name.clone())
+                                }
                                 ProjField::Expr {
                                     alias: na, value, ..
                                 } => match &*value.kind {
@@ -883,7 +885,7 @@ impl<'a> Compiler<'a> {
             Some(p) => {
                 for f in &p.fields {
                     match f {
-                        ProjField::Column(i) => {
+                        ProjField::Column { column: i, .. } => {
                             let c = table.column(&i.name)?;
                             entries.push(json_entry(&i.name, &alias, c));
                         }
@@ -1021,6 +1023,29 @@ impl<'a> Compiler<'a> {
                 Some(format!("{alias}.{}", quote_ident(&c.physical)))
             }
             ExprKind::Field { base, field } => {
+                // `MA.org.name` — the binding, then the field a view
+                // flattened, then the column inside it. The leading binding
+                // is the one already in scope, so dropping it leaves
+                // `org.name`, which the two arms below handle. Written this
+                // way because a column names its binding (queries.md §2.4),
+                // and only the *first* segment is that binding.
+                if let ExprKind::Field {
+                    base: root,
+                    field: nested,
+                } = &*base.kind
+                {
+                    if let ExprKind::Name(b) = &*root.kind {
+                        if self.object_of(&b.name).is_some() {
+                            let object = self.object_of(&b.name)?;
+                            let rel = self.table(&object)?;
+                            let flat =
+                                format!("{}{}{}", nested.name, crate::views::FLAT, field.name);
+                            let c = rel.column(&flat)?;
+                            let alias = self.sql_alias(&b.name);
+                            return Some(format!("{alias}.{}", quote_ident(&c.physical)));
+                        }
+                    }
+                }
                 let ExprKind::Name(b) = &*base.kind else {
                     return None;
                 };
@@ -1381,7 +1406,7 @@ fn field_names(p: &ObjectShape) -> Vec<String> {
     p.fields
         .iter()
         .map(|f| match f {
-            ProjField::Column(i) => i.name.clone(),
+            ProjField::Column { column: i, .. } => i.name.clone(),
             ProjField::Expr { alias, .. } | ProjField::Nested { alias, .. } => alias.name.clone(),
         })
         .collect()
@@ -1627,8 +1652,7 @@ fn collect_expr<'a>(e: &'a Expr, label: &str, out: &mut Vec<Site<'a>>) {
         | ExprKind::Bool(_)
         | ExprKind::Null
         | ExprKind::Name(_)
-        | ExprKind::Local(_)
-        | ExprKind::PathParam(_) => {}
+        | ExprKind::Local(_) => {}
     }
 }
 
@@ -1690,14 +1714,24 @@ fn referenced(select: &SelectExpr, root: &str) -> Vec<String> {
     out
 }
 
+/// `a.b.c` for a field chain rooted at a plain name, `None` otherwise.
+fn dotted(e: &Expr) -> Option<String> {
+    match &*e.kind {
+        ExprKind::Name(n) => Some(n.name.clone()),
+        ExprKind::Field { base, field } => Some(format!("{}.{}", dotted(base)?, field.name)),
+        _ => None,
+    }
+}
+
 fn names(e: &Expr, out: &mut Vec<String>) {
     match &*e.kind {
         ExprKind::Name(n) => out.push(n.name.clone()),
-        // `org.name` on a view is a flattened column, which the base table
-        // does not have — so it stays out and the pushdown is refused.
-        ExprKind::Field { base, field } => {
-            if let ExprKind::Name(b) = &*base.kind {
-                out.push(format!("{}.{}", b.name, field.name));
+        // `NWO.org.name` on a view is a flattened column, which the base
+        // table does not have — so it goes in whole and the pushdown is
+        // refused. The binding at the head is stripped by the caller.
+        ExprKind::Field { .. } => {
+            if let Some(path) = dotted(e) {
+                out.push(path);
             }
         }
         ExprKind::Binary { lhs, rhs, .. } | ExprKind::Coalesce { lhs, rhs } => {

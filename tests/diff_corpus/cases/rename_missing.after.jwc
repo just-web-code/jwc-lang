@@ -1,6 +1,6 @@
--- ops: 2 add_column org.orgs.display_name
--- ops: 9 drop_column org.orgs.name
--- diag: E1103
+// ops: 2 add_column org.orgs.display_name
+// ops: 9 drop_column org.orgs.name
+// diag: E1103
 
 namespace c;
 database App : Postgres;

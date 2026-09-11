@@ -14,8 +14,8 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ) t1_agg ON true) q
 
 -- ── Invoices.recent ──
--- $1 = $org_id :: bigint
--- $2 = $size :: int
+-- $1 = @org_id :: bigint
+-- $2 = @size :: int
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (WITH page AS MATERIALIZED (
   SELECT p1.id FROM s.invoices p1
    WHERE p1.org_id = ($1::text)::bigint
@@ -28,8 +28,8 @@ SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number',
   ORDER BY t0.issued_at DESC, t0.id DESC) q
 
 -- ── Invoices.recent_inline ──
--- $1 = $org_id :: bigint
--- $2 = $size :: int
+-- $1 = @org_id :: bigint
+-- $2 = @size :: int
 -- $3 = 50 :: int
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (WITH page AS MATERIALIZED (
   SELECT p2.id FROM s.invoices p2
@@ -51,8 +51,8 @@ SELECT json_build_object('id', t0.id::text, 'number', t0.number, 'issued_at', t0
   ORDER BY t0.issued_at DESC, t0.id DESC) q
 
 -- ── Invoices.recent_by_number ──
--- $1 = $org_id :: bigint
--- $2 = $size :: int
+-- $1 = @org_id :: bigint
+-- $2 = @size :: int
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (WITH page AS MATERIALIZED (
   SELECT p1.id FROM s.invoices p1
    WHERE p1.org_id = ($1::text)::bigint
@@ -65,7 +65,7 @@ SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number',
   ORDER BY t0.number) q
 
 -- ── Invoices.one ──
--- $1 = $invoice_id :: bigint
+-- $1 = @invoice_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number', t0.number, 'issued_at', t0.issued_at, 'lines', t0.lines) AS j
   FROM s.invoice_detail t0
   WHERE t0.id = ($1::text)::bigint

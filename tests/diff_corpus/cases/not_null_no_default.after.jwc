@@ -1,5 +1,5 @@
--- ops: 2 add_column org.orgs.region
--- diag: E0440
+// ops: 2 add_column org.orgs.region
+// diag: E0440
 
 namespace c;
 database App : Postgres;

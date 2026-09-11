@@ -12,7 +12,7 @@ thumbnail, a nightly sweep.
 ```jwc no-compile
 job SendWelcome(account_id: bigint, email: text) retries 5 backoff "30s" {
     let account = select A from App.auth.Accounts
-        where id == $account_id
+        where id == @account_id
         first or throw NotFound("account not found");
 
     mail.send(email, "Welcome", "<p>salom</p>");
@@ -115,7 +115,7 @@ A program that declares no `job` starts no workers and creates no tables.
 ```jwc
 server {
     job_max_payload = 16384;
-    job_queue_limit = 50000;   -- 0 on either turns that bound off
+    job_queue_limit = 50000;   // 0 on either turns that bound off
 }
 ```
 

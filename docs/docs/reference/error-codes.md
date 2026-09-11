@@ -52,7 +52,6 @@ the same extraction, so neither can drift from it.
 |---|---|---|
 | `E0001` | any construct — expected a specific token, name, integer or string literal | `names.md` |
 | `E0002` | the top level — expected a declaration | `names.md` |
-| `E0003` | the top level — `route` outside a `routes` block | `names.md` |
 | `E0004` | a foreign key — expected `delete`/`update` after `on`, or a referential action | `names.md` |
 | `E0005` | an `error` declaration — expected an HTTP status code, or one outside `100..=599` | `names.md` |
 | `E0006` | a `service` body — expected `function` — a service holds nothing else | `names.md` |
@@ -61,7 +60,7 @@ the same extraction, so neither can drift from it.
 | `E0009` | a `route` header — not an HTTP method | `names.md` |
 | `E0010` | an `errorHandler` body — expected `catch` — a handler holds nothing else | `names.md` |
 | `E0011` | a type — expected a type argument, as in `varchar(120)` | `names.md` |
-| `E0012` | an object literal — expected `$name` after `...` | `names.md` |
+| `E0012` | an object literal — expected `@name` after `...` | `names.md` |
 | `E0013` | an object literal — expected an object key, or `:`/`=` after one | `names.md` |
 | `E0014` | an expression — expected an expression | `names.md` |
 | `E0015` | a query — `select` with no binder before `from` | `names.md` |
@@ -73,11 +72,12 @@ the same extraction, so neither can drift from it.
 | `E0021` | a `socket` with no handlers at all | `routing.md` |
 | `E0022` | `retries N` outside `1..=100` | `jobs.md` |
 | `E0100` | unexpected character | `names.md` |
+| `E0101` | unterminated block comment | `names.md` |
 | `E0102` | unterminated string | `names.md` |
 | `E0103` | literal newline inside a string literal | `names.md` |
 | `E0104` | doc comment attaches to nothing | `names.md` |
 | `E0105` | identifier starts with `_` | `names.md` |
-| `E0106` | `$` or `@` not followed immediately by a name | `names.md` |
+| `E0106` | `@` not followed immediately by a name | `names.md` |
 | `E0107` | integer literal out of `bigint` range | `names.md` |
 | `E0108` | `\u` not followed by `{XXXX}` | `names.md` |
 | `E0109` | unknown string escape | `names.md` |
@@ -92,11 +92,9 @@ the same extraction, so neither can drift from it.
 | `E0210` | bare identifier in a query clause is not a column but matches a local | `names.md` |
 | `E0211` | unknown name: not a column here, and not a local or declaration | `names.md` |
 | `E0212` | duplicate binding name in one query | `names.md` |
-| `E0213` | unqualified column is ambiguous across bindings | `names.md` |
 | `E0214` | `let` shadows an existing binding | `names.md` |
 | `E0215` | two `const` declarations with one name | `names.md` |
 | `E0216` | a `const` right-hand side is not a constant expression | `names.md` |
-| `E0220` | `@name` outside a route or middleware | `names.md` |
 | `E0225` | `socket.*` outside a socket handler | `routing.md` |
 | `E0230` | `file.*` / `directory.*` outside a plain `function` (§7e.1) | `builtins.md` |
 | `E0301` | unknown type | `types.md` |
@@ -215,6 +213,11 @@ the same extraction, so neither can drift from it.
 | `E0820` | `context.k` is not provided on every path | `middleware.md` |
 | `E0821` | `context.k = …` without a `provides` declaration | `middleware.md` |
 | `E0900` | removed keyword from the pre-1.0 language | `names.md` |
+| `E0901` | `--` where a comment was meant; comments are `//` | `names.md` |
+| `E0902` | a `for` binder without `let` | `names.md` |
+| `E0903` | `@name` — the sigil is `@` | `names.md` |
+| `E0904` | a column that does not name its binding | `queries.md` |
+| `E0905` | a projection field qualified with another query's binding | `queries.md` |
 | `E1001` | unknown error type in `throw` / `catch` | `errors.md` |
 | `E1002` | `raises` is not a superset of the inferred set | `errors.md` |
 | `E1003` | `raises` in application code | `errors.md` |
@@ -234,6 +237,7 @@ the same extraction, so neither can drift from it.
 | `E1205` | `page` used with no `cursor_secret` | `config.md` |
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block | `config.md` |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` | `config.md` |
+| `E1208` | `port` is not an integer literal | `config.md` |
 | `E1401` | `assert fails` without an error type | `testing.md` |
 | `E1402` | `with` on an `assert fails` whose message cannot be a literal | `testing.md` |
 | `E1501` | a package declares a schema object | `packages.md` |

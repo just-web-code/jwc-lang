@@ -9,14 +9,14 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ORDER BY t0.id) q
 
 -- ── Filters.by_statuses ──
--- $1 = $statuses :: s.status[]
+-- $1 = @statuses :: s.status[]
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'status', t0.status) AS j
   FROM s.invoices t0
   WHERE t0.status = ANY(($1::text)::s.status[])
   ORDER BY t0.id) q
 
 -- ── Filters.not_in ──
--- $1 = $statuses :: s.status[]
+-- $1 = @statuses :: s.status[]
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'status', t0.status) AS j
   FROM s.invoices t0
   WHERE t0.status <> ALL(($1::text)::s.status[])

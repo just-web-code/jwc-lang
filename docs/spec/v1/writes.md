@@ -25,13 +25,13 @@ never by a spread (types §9.4).
 ## 2. `insert`
 
 ```jwc
-insert into App.auth.Accounts {
-    ...$req,
-    password_hash = $password_hash
-} as { id, email, display_name, created_at };
+insert Accounts into App.auth.Accounts {
+    ...@req,
+    password_hash = @password_hash
+} as { Accounts.id, Accounts.email, Accounts.display_name, Accounts.created_at };
 ```
 
-2.1 Always exactly one row. Bulk insert is `for (line in $req.lines) { … }`,
+2.1 Always exactly one row. Bulk insert is `for (let line in @req.lines) { … }`,
 which emits one statement per element in the enclosing transaction. A
 multi-row form is `DEFERRED-8`.
 
@@ -43,11 +43,11 @@ form that fixes the sample's webhook TOCTOU (G8): select-then-insert is a
 race, `on conflict do nothing` is not.
 
 ```jwc
-let payment = insert into App.billing.Payments { ...$req, provider = "stripe" }
+let payment = insert Payments into App.billing.Payments { ...@req, provider = "stripe" }
     on conflict (provider_ref) do nothing
-    as { id };
+    as { Payments.id };
 
-if ($payment == null) { return { status: "duplicate" }; }
+if (@payment == null) { return { status: "duplicate" }; }
 ```
 
 2.4 `on conflict (cols) do update set …` is the upsert. `cols` must name a
@@ -61,10 +61,10 @@ exactly one unique constraint (`E0604`).
 ## 3. `update`
 
 ```jwc
-update App.org.Members
-    set role = $req.role
-    where org_id == $org_id and account_id == $account_id
-    as { org_id, account_id, role }
+update Members of App.org.Members
+    set role = @req.role
+    where Members.org_id == @org_id and Members.account_id == @account_id
+    as { Members.org_id, Members.account_id, Members.role }
     first;
 ```
 
@@ -126,9 +126,9 @@ RETURNING …;
 ## 5. `delete` (#6)
 
 ```jwc
-delete from App.org.Invites
-    where id == @invite_id and org_id == @org_id
-    as { id }
+delete Invites from App.org.Invites
+    where Invites.id == @invite_id and Invites.org_id == @org_id
+    as { Invites.id }
     first;
 ```
 
@@ -136,7 +136,7 @@ delete from App.org.Invites
 is what makes "404 if it did not exist" writable:
 
 ```jwc no-compile
-let gone = delete from App.org.Invites where … as { id } first
+let gone = delete Invites from App.org.Invites where … as { Invites.id } first
     or throw NotFound("taklifnoma topilmadi");
 ```
 
@@ -151,7 +151,7 @@ into `if (n == 0)`.
 ## 6. `raw` escape hatch
 
 ```jwc no-compile
-let rows = raw("select … from … where x = {}", $x);
+let rows = raw("select … from … where x = {}", @x);
 ```
 
 6.1 `raw(sql, args…)` is the only way to write SQL by hand. `{}` are
@@ -164,7 +164,7 @@ carries no type information to derive the cast from, so the **author**
 writes it:
 
 ```jwc no-compile
-raw("select … where org_id = ({})::bigint", $org_id)
+raw("select … where org_id = ({})::bigint", @org_id)
 ```
 
 Without the cast Postgres infers the column's type for the parameter and
@@ -205,7 +205,7 @@ feature to add next.
 ```jwc no-compile
 middleware AccessLog {
     after {
-        insert into App.audit.Requests {
+        insert Requests into App.audit.Requests {
             route  = request.route(),
             status = response.status(),
             micros = response.duration_us()
@@ -277,9 +277,10 @@ behind is visible before it starts dropping.
 
 ```jwc
 transaction {
-    let org = insert into App.org.Orgs { ...$req } as { id, slug, name, created_at };
-    insert into App.org.Members { org_id = $org.id, account_id = $owner_id, role = MemberRole.owner };
-    return $org;
+    let org = insert Orgs into App.org.Orgs { ...@req }
+        as { Orgs.id, Orgs.slug, Orgs.name, Orgs.created_at };
+    insert Members into App.org.Members { org_id = @org.id, account_id = @owner_id, role = MemberRole.owner };
+    return @org;
 }
 ```
 

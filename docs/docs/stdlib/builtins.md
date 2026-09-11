@@ -28,7 +28,7 @@ this page is the same set with the reasons.
 work:
 
 ```jwc no-compile
-serve(int(env("PORT") ?? "8080"));
+serve();
 ```
 
 `??` only fires on null.
@@ -74,7 +74,7 @@ here, so there is no layer that could escape by default, which is exactly
 why the primitive has to exist:
 
 ```jwc no-compile
-return html("<p>" + string.escape_html($comment) + "</p>");
+return html("<p>" + string.escape_html(@comment) + "</p>");
 ```
 
 Both quote styles are escaped, because which one closes an attribute is a

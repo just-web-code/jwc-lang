@@ -5,82 +5,88 @@ import db.auth;
 import dto.auth;
 import views.org;
 
---- A real Argon2id encoding of a password nobody has. `login` verifies
---- against it when the address is unknown, so the miss costs the same as a
---- hit — a decoy that failed to parse would return immediately and put the
---- timing signal straight back.
----
---- A constant rather than an `env`, because a deployment that forgot to set
---- one would silently lose the defence and nothing would say so.
+/// A real Argon2id encoding of a password nobody has. `login` verifies
+/// against it when the address is unknown, so the miss costs the same as a
+/// hit — a decoy that failed to parse would return immediately and put the
+/// timing signal straight back.
+///
+/// A constant rather than an `env`, because a deployment that forgot to set
+/// one would silently lose the defence and nothing would say so.
 function decoy_password_hash() -> text {
     return "$argon2id$v=19$m=19456,t=2,p=1$2w2b+Ihc9+eswxNKyuQUfQ$td4KgFPi6UJPiI5wMj2T2NJIHxv14N7qWP5zn5X6Do4";
 }
 
 service AuthService {
     function register(req: Register) {
-        let password_hash = hash.password($req.password);
+        let password_hash = hash.password(@req.password);
 
-        return insert into App.auth.Accounts {
-            ...$req except (password),
-            password_hash = $password_hash
-        } as { id, email, display_name, created_at };
+        return insert Accounts into App.auth.Accounts {
+            ...@req except (password),
+            password_hash = @password_hash
+        }
+            as {
+                Accounts.id,
+                Accounts.email,
+                Accounts.display_name,
+                Accounts.created_at
+            };
     }
 
-    --- 401, not 403: the caller is not authenticated yet (errors.md §1.2).
-    --- The same message for both failures, so the endpoint does not tell an
-    --- attacker which addresses exist.
-    ---
-    --- The same *message* is not enough on its own. An unknown address that
-    --- returned before hashing would answer in microseconds where a known
-    --- one takes an Argon2id verification, and the clock would say what the
-    --- sentence refuses to. So both branches verify: the miss against a
-    --- decoy, and the answer is decided afterwards.
+    /// 401, not 403: the caller is not authenticated yet (errors.md §1.2).
+    /// The same message for both failures, so the endpoint does not tell an
+    /// attacker which addresses exist.
+    ///
+    /// The same *message* is not enough on its own. An unknown address that
+    /// returned before hashing would answer in microseconds where a known
+    /// one takes an Argon2id verification, and the clock would say what the
+    /// sentence refuses to. So both branches verify: the miss against a
+    /// decoy, and the answer is decided afterwards.
     function login(req: Login) -> { token: text, expires_in: int } {
         let found = select A from App.auth.Accounts
-            where email == $req.email
-            as { id, password_hash }
+            where A.email == @req.email
+            as { A.id, A.password_hash }
             first;
 
         let stored = decoy_password_hash();
 
-        if ($found != null) {
-            $stored = $found.password_hash;
+        if (@found != null) {
+            @stored = @found.password_hash;
         }
 
-        let ok = hash.verify($req.password, $stored);
+        let ok = hash.verify(@req.password, @stored);
 
-        let account = $found or throw Unauthorized("email yoki parol xato");
+        let account = @found or throw Unauthorized("email yoki parol xato");
 
-        if (!$ok) {
+        if (!@ok) {
             throw Unauthorized("email yoki parol xato");
         }
 
         let secret = env("JWT_SECRET") or throw Unauthorized("server sozlanmagan");
         let ttl_minutes = int(env("JWT_TTL_MINUTES") ?? "60");
-        let subject = string.of($account.id);
-        let token = jwt.sign({ sub: $subject }, $secret, $ttl_minutes);
+        let subject = string.of(@account.id);
+        let token = jwt.sign({ sub: @subject }, @secret, @ttl_minutes);
 
-        return { token: $token, expires_in: $ttl_minutes * 60 };
+        return { token: @token, expires_in: @ttl_minutes * 60 };
     }
 
     function profile(account_id: bigint) {
         return select A from App.auth.Accounts
-            where id == $account_id
-            as { id, email, display_name, email_verified, created_at }
+            where A.id == @account_id
+            as { A.id, A.email, A.display_name, A.email_verified, A.created_at }
             first or throw NotFound("akkaunt topilmadi");
     }
 
     function update_profile(account_id: bigint, req: AccountEdit) {
-        return update App.auth.Accounts
-            set ...$req
-            where id == $account_id
-            as { id, email, display_name }
+        return update Accounts of App.auth.Accounts
+            set ...@req
+            where Accounts.id == @account_id
+            as { Accounts.id, Accounts.email, Accounts.display_name }
             first or throw NotFound("akkaunt topilmadi");
     }
 
     function orgs_of(account_id: bigint) {
         return select MA from App.org.MemberAccess
-            where account_id == $account_id
-            orderby org.name asc;
+            where MA.account_id == @account_id
+            orderby MA.org.name asc;
     }
 }

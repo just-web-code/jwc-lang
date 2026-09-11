@@ -1,4 +1,4 @@
--- ops: 2 alter_column_type org.orgs.name varchar(80) -> varchar(200)
+// ops: 2 alter_column_type org.orgs.name varchar(80) -> varchar(200)
 
 namespace c;
 database App : Postgres;

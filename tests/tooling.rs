@@ -147,7 +147,7 @@ fn deny_warnings_is_the_ci_shape() {
          service S {\n\
          \x20   function peek() {\n\
          \x20       let rows = select R from App.s.T;\n\
-         \x20       return debug.dump($rows);\n\
+         \x20       return debug.dump(@rows);\n\
          \x20   }\n\
          }\n",
     )
@@ -457,7 +457,7 @@ fn count(text: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// `created(json($row))` is the idiomatic 201, and it used to produce two
+/// `created(json(@row))` is the idiomatic 201, and it used to produce two
 /// wrong responses in the document: a `200` carrying the object (a status
 /// the route cannot answer) and a `201` carrying nothing (the status it
 /// does answer, with the body dropped). The inner `json` recorded its own
@@ -519,7 +519,7 @@ fn run_executes_main_and_exits() {
         "function main() {\n\
          \x20   console.write(\"Ismingiz: \");\n\
          \x20   let who = console.read();\n\
-         \x20   console.writeln(\"Salom, \" + ($who ?? \"notanish\"));\n\
+         \x20   console.writeln(\"Salom, \" + (@who ?? \"notanish\"));\n\
          \x20   console.writeln(42);\n\
          }\n",
     )

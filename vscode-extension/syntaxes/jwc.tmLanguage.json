@@ -16,61 +16,34 @@
       "include": "#numbers"
     },
     {
-      "include": "#route-binding"
+      "include": "#declarations"
     },
     {
-      "include": "#route-declaration"
+      "include": "#route-header"
     },
     {
-      "include": "#model-declaration"
+      "include": "#schema-header"
     },
     {
-      "include": "#function-declaration"
+      "include": "#placeholders"
     },
     {
-      "include": "#dome-declaration"
+      "include": "#builtin-namespaces"
     },
     {
-      "include": "#middleware-declaration"
-    },
-    {
-      "include": "#errorhandler-declaration"
-    },
-    {
-      "include": "#dbcontext-declaration"
-    },
-    {
-      "include": "#db-statements"
-    },
-    {
-      "include": "#db-select-expr"
-    },
-    {
-      "include": "#sql-clauses"
-    },
-    {
-      "include": "#sql-aggregations"
-    },
-    {
-      "include": "#fk-actions"
+      "include": "#builtin-functions"
     },
     {
       "include": "#validation-rules"
     },
     {
-      "include": "#new-entity"
+      "include": "#column-modifiers"
     },
     {
-      "include": "#control-flow"
-    },
-    {
-      "include": "#http-response-builtins"
+      "include": "#query-keywords"
     },
     {
       "include": "#type-names"
-    },
-    {
-      "include": "#field-modifiers"
     },
     {
       "include": "#boolean-null"
@@ -85,7 +58,7 @@
       "include": "#punctuation"
     },
     {
-      "include": "#field-access"
+      "include": "#type-references"
     },
     {
       "include": "#identifiers"
@@ -94,6 +67,13 @@
   "repository": {
     "comments": {
       "patterns": [
+        {
+          "include": "#block-comment"
+        },
+        {
+          "name": "comment.line.documentation.jwc",
+          "match": "///.*$"
+        },
         {
           "name": "comment.line.double-slash.jwc",
           "match": "//.*$"
@@ -104,7 +84,7 @@
       "patterns": [
         {
           "name": "string.quoted.raw.jwc",
-          "comment": "Raw string: r\"...\" \u2014 backslashes are literal.",
+          "comment": "r\"...\" — only \\\" is an escape; every other backslash is text.",
           "begin": "\\br\"",
           "end": "\"",
           "beginCaptures": {
@@ -116,74 +96,11 @@
             "0": {
               "name": "punctuation.definition.string.end.jwc"
             }
-          }
-        },
-        {
-          "name": "string.template.jwc",
-          "comment": "Backtick template string: `text ${expr} text`",
-          "begin": "`",
-          "end": "`",
-          "beginCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.template.begin.jwc"
-            }
-          },
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.template.end.jwc"
-            }
           },
           "patterns": [
             {
-              "name": "meta.template.expression.jwc",
-              "begin": "\\$\\{",
-              "end": "\\}",
-              "beginCaptures": {
-                "0": {
-                  "name": "punctuation.definition.template-expression.begin.jwc"
-                }
-              },
-              "endCaptures": {
-                "0": {
-                  "name": "punctuation.definition.template-expression.end.jwc"
-                }
-              },
-              "patterns": [
-                {
-                  "include": "#comments"
-                },
-                {
-                  "include": "#strings"
-                },
-                {
-                  "include": "#numbers"
-                },
-                {
-                  "include": "#http-response-builtins"
-                },
-                {
-                  "include": "#boolean-null"
-                },
-                {
-                  "include": "#keywords"
-                },
-                {
-                  "include": "#operators"
-                },
-                {
-                  "include": "#punctuation"
-                },
-                {
-                  "include": "#field-access"
-                },
-                {
-                  "include": "#identifiers"
-                }
-              ]
-            },
-            {
               "name": "constant.character.escape.jwc",
-              "match": "\\\\[\"\\\\nrt`$]"
+              "match": "\\\\\""
             }
           ]
         },
@@ -222,569 +139,277 @@
         }
       ]
     },
-    "route-binding": {
-      "comment": "route GET \"path\" -> handlerFn;",
-      "match": "\\b(route)\\s+(GET|POST|PUT|DELETE|PATCH|WS)\\s+(\"[^\"]*\")(?:\\s+(use)\\s+([A-Za-z_][A-Za-z0-9_,\\s]*))?\\s*(->)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*;",
-      "captures": {
-        "1": {
-          "name": "keyword.control.route.jwc"
-        },
-        "2": {
-          "name": "support.type.http-method.jwc"
-        },
-        "3": {
-          "name": "string.quoted.double.route-path.jwc"
-        },
-        "4": {
-          "name": "keyword.control.middleware.jwc"
-        },
-        "5": {
-          "name": "entity.name.type.middleware.jwc"
-        },
-        "6": {
-          "name": "keyword.operator.arrow.jwc"
-        },
-        "7": {
-          "name": "entity.name.function.jwc"
-        }
-      }
-    },
-    "route-declaration": {
-      "comment": "route GET|WS \"path\" [use Mw1, Mw2] { ... }",
-      "begin": "\\b(route)\\s+(GET|POST|PUT|DELETE|PATCH|WS)\\s+(\"[^\"]*\")",
-      "end": "(?<=})",
-      "beginCaptures": {
-        "1": {
-          "name": "keyword.control.route.jwc"
-        },
-        "2": {
-          "name": "support.type.http-method.jwc"
-        },
-        "3": {
-          "name": "string.quoted.double.route-path.jwc"
-        }
-      },
+    "declarations": {
       "patterns": [
         {
-          "include": "#comments"
-        },
-        {
-          "include": "#strings"
-        },
-        {
-          "include": "#numbers"
-        },
-        {
-          "include": "#db-statements"
-        },
-        {
-          "include": "#db-select-expr"
-        },
-        {
-          "include": "#sql-clauses"
-        },
-        {
-          "include": "#sql-aggregations"
-        },
-        {
-          "include": "#validation-rules"
-        },
-        {
-          "include": "#new-entity"
-        },
-        {
-          "include": "#control-flow"
-        },
-        {
-          "include": "#http-response-builtins"
-        },
-        {
-          "include": "#type-names"
-        },
-        {
-          "include": "#boolean-null"
-        },
-        {
-          "include": "#keywords"
-        },
-        {
-          "include": "#operators"
-        },
-        {
-          "include": "#punctuation"
-        },
-        {
-          "include": "#field-access"
-        },
-        {
-          "include": "#identifiers"
-        }
-      ]
-    },
-    "model-declaration": {
-      "comment": "entity Name of Ctx { ... } | class Name { ... }",
-      "begin": "\\b(entity|class)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(of)\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s*\\{",
-      "end": "\\}",
-      "beginCaptures": {
-        "1": {
-          "name": "keyword.declaration.entity.jwc"
-        },
-        "2": {
-          "name": "entity.name.type.jwc"
-        },
-        "3": {
-          "name": "storage.modifier.jwc"
-        },
-        "4": {
-          "name": "entity.name.type.dbcontext.jwc"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comments"
-        },
-        {
-          "include": "#fk-actions"
-        },
-        {
-          "include": "#type-names"
-        },
-        {
-          "include": "#field-modifiers"
-        },
-        {
-          "include": "#numbers"
-        },
-        {
-          "include": "#punctuation"
-        },
-        {
-          "include": "#field-access"
-        },
-        {
-          "include": "#identifiers"
-        }
-      ]
-    },
-    "function-declaration": {
-      "comment": "[async] function name(params) [: ReturnType] { ... }",
-      "begin": "\\b(?:(async)\\s+)?(function)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
-      "end": "(?<=})",
-      "beginCaptures": {
-        "1": {
-          "name": "keyword.control.async.jwc"
-        },
-        "2": {
-          "name": "storage.type.function.jwc"
-        },
-        "3": {
-          "name": "entity.name.function.jwc"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comments"
-        },
-        {
-          "include": "#strings"
-        },
-        {
-          "include": "#numbers"
-        },
-        {
-          "include": "#db-statements"
-        },
-        {
-          "include": "#db-select-expr"
-        },
-        {
-          "include": "#sql-clauses"
-        },
-        {
-          "include": "#sql-aggregations"
-        },
-        {
-          "include": "#validation-rules"
-        },
-        {
-          "include": "#new-entity"
-        },
-        {
-          "include": "#control-flow"
-        },
-        {
-          "include": "#http-response-builtins"
-        },
-        {
-          "include": "#type-names"
-        },
-        {
-          "include": "#boolean-null"
-        },
-        {
-          "include": "#keywords"
-        },
-        {
-          "include": "#operators"
-        },
-        {
-          "include": "#punctuation"
-        },
-        {
-          "include": "#field-access"
-        },
-        {
-          "include": "#identifiers"
-        }
-      ]
-    },
-    "middleware-declaration": {
-      "comment": "middleware Name { ... }",
-      "begin": "\\b(middleware)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\{",
-      "end": "(?<=})",
-      "beginCaptures": {
-        "1": {
-          "name": "keyword.control.middleware.jwc"
-        },
-        "2": {
-          "name": "entity.name.type.middleware.jwc"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comments"
-        },
-        {
-          "include": "#strings"
-        },
-        {
-          "include": "#numbers"
-        },
-        {
-          "include": "#db-statements"
-        },
-        {
-          "include": "#db-select-expr"
-        },
-        {
-          "include": "#sql-clauses"
-        },
-        {
-          "include": "#control-flow"
-        },
-        {
-          "include": "#http-response-builtins"
-        },
-        {
-          "include": "#boolean-null"
-        },
-        {
-          "include": "#keywords"
-        },
-        {
-          "include": "#operators"
-        },
-        {
-          "include": "#punctuation"
-        },
-        {
-          "include": "#field-access"
-        },
-        {
-          "include": "#identifiers"
-        }
-      ]
-    },
-    "errorhandler-declaration": {
-      "comment": "errorHandler (e) { ... }",
-      "begin": "\\b(errorHandler)\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\)\\s*\\{",
-      "end": "(?<=})",
-      "beginCaptures": {
-        "1": {
-          "name": "keyword.control.errorhandler.jwc"
-        },
-        "2": {
-          "name": "variable.parameter.jwc"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comments"
-        },
-        {
-          "include": "#strings"
-        },
-        {
-          "include": "#http-response-builtins"
-        },
-        {
-          "include": "#boolean-null"
-        },
-        {
-          "include": "#keywords"
-        },
-        {
-          "include": "#operators"
-        },
-        {
-          "include": "#punctuation"
-        },
-        {
-          "include": "#field-access"
-        },
-        {
-          "include": "#identifiers"
-        }
-      ]
-    },
-    "db-statements": {
-      "patterns": [
-        {
-          "comment": "insert VAR into CTX.TABLE",
-          "match": "\\b(insert)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(into)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+          "name": "meta.declaration.jwc",
+          "match": "\\b(database)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "keyword.control.db.jwc"
+              "name": "keyword.declaration.jwc"
             },
             "2": {
-              "name": "variable.jwc"
+              "name": "entity.name.type.database.jwc"
             },
             "3": {
-              "name": "keyword.control.db.jwc"
+              "name": "punctuation.separator.colon.jwc"
             },
             "4": {
-              "name": "variable.other.dbcontext.jwc"
-            },
-            "5": {
-              "name": "support.class.db-table.jwc"
+              "name": "support.type.engine.jwc"
             }
           }
         },
         {
-          "comment": "update VAR in CTX.TABLE",
-          "match": "\\b(update)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(in)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+          "name": "meta.declaration.jwc",
+          "match": "\\b(table|view)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(of)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "keyword.control.db.jwc"
-            },
-            "2": {
-              "name": "variable.jwc"
-            },
-            "3": {
-              "name": "keyword.control.db.jwc"
-            },
-            "4": {
-              "name": "variable.other.dbcontext.jwc"
-            },
-            "5": {
-              "name": "support.class.db-table.jwc"
-            }
-          }
-        },
-        {
-          "comment": "delete VAR from CTX.TABLE",
-          "match": "\\b(delete)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(from)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": {
-              "name": "keyword.control.db.jwc"
-            },
-            "2": {
-              "name": "variable.jwc"
-            },
-            "3": {
-              "name": "keyword.control.db.jwc"
-            },
-            "4": {
-              "name": "variable.other.dbcontext.jwc"
-            },
-            "5": {
-              "name": "support.class.db-table.jwc"
-            }
-          }
-        },
-        {
-          "comment": "delete from CTX.TABLE where ...",
-          "match": "\\b(delete)\\s+(from)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": {
-              "name": "keyword.control.db.jwc"
-            },
-            "2": {
-              "name": "keyword.control.db.jwc"
-            },
-            "3": {
-              "name": "variable.other.dbcontext.jwc"
-            },
-            "4": {
-              "name": "support.class.db-table.jwc"
-            }
-          }
-        }
-      ]
-    },
-    "db-select-expr": {
-      "comment": "select Entity [{ col1, col2 }] [with rel] from ctx.Table where ... first",
-      "patterns": [
-        {
-          "match": "\\b(select)\\s+(count|sum|avg|min|max)\\s*\\(",
-          "captures": {
-            "1": {
-              "name": "keyword.control.db.jwc"
-            },
-            "2": {
-              "name": "support.function.sql-aggregate.jwc"
-            }
-          }
-        },
-        {
-          "match": "\\b(select)\\s+([A-Za-z_][A-Za-z0-9_]*|\\*)\\s+(from)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": {
-              "name": "keyword.control.db.jwc"
+              "name": "keyword.declaration.jwc"
             },
             "2": {
               "name": "entity.name.type.jwc"
             },
             "3": {
-              "name": "keyword.control.db.jwc"
+              "name": "keyword.other.of.jwc"
             },
             "4": {
-              "name": "variable.other.dbcontext.jwc"
+              "name": "entity.name.type.database.jwc"
             },
             "5": {
-              "name": "support.class.db-table.jwc"
+              "name": "entity.name.namespace.schema.jwc"
             }
           }
         },
         {
-          "match": "\\b(select)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "name": "meta.declaration.jwc",
+          "match": "\\b(class|enum|error|service|middleware|job)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "keyword.control.db.jwc"
+              "name": "keyword.declaration.jwc"
             },
             "2": {
               "name": "entity.name.type.jwc"
             }
           }
-        }
-      ]
-    },
-    "sql-clauses": {
-      "patterns": [
-        {
-          "comment": "SQL clause / operator keywords (used inside select/update/delete/where)",
-          "name": "keyword.control.db.jwc",
-          "match": "\\b(from|into|where|orderby|limit|offset|first|with|like|ilike|between|asc|desc)\\b"
         },
         {
-          "comment": "is null / is not null",
-          "name": "keyword.control.db.jwc",
-          "match": "\\bis\\s+(?:not\\s+)?null\\b"
-        },
-        {
-          "comment": "in (...)",
-          "name": "keyword.control.db.jwc",
-          "match": "(?<=\\.[A-Za-z0-9_]|\\s)\\bin\\b(?=\\s*\\()"
-        }
-      ]
-    },
-    "sql-aggregations": {
-      "comment": "count(*), sum(...), avg(...), min(...), max(...) \u2014 when not preceded by 'select '",
-      "match": "\\b(count|sum|avg|min|max)\\s*\\(",
-      "captures": {
-        "1": {
-          "name": "support.function.sql-aggregate.jwc"
-        }
-      }
-    },
-    "fk-actions": {
-      "patterns": [
-        {
-          "name": "storage.modifier.jwc",
-          "match": "\\b(on\\s+delete)\\s+(cascade|restrict|set\\s+null|no\\s+action)\\b",
+          "name": "meta.declaration.jwc",
+          "match": "\\b(function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "storage.modifier.jwc"
+              "name": "storage.type.function.jwc"
             },
             "2": {
-              "name": "support.constant.fk-action.jwc"
+              "name": "entity.name.function.jwc"
             }
           }
         },
         {
-          "name": "storage.modifier.jwc",
-          "match": "\\b(references)\\s+([A-Z][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+          "name": "meta.declaration.jwc",
+          "match": "\\b(namespace|import)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
           "captures": {
             "1": {
-              "name": "storage.modifier.jwc"
+              "name": "keyword.control.import.jwc"
             },
             "2": {
-              "name": "entity.name.type.jwc"
+              "name": "entity.name.namespace.jwc"
+            }
+          }
+        },
+        {
+          "name": "keyword.declaration.jwc",
+          "match": "\\b(errorHandler|server|test)\\b"
+        }
+      ]
+    },
+    "route-header": {
+      "patterns": [
+        {
+          "name": "meta.route.jwc",
+          "match": "\\b(route)\\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.control.route.jwc"
+            },
+            "2": {
+              "name": "support.type.http-method.jwc"
             },
             "3": {
-              "name": "variable.other.property.jwc"
+              "name": "string.quoted.double.route-path.jwc"
+            }
+          }
+        },
+        {
+          "name": "meta.route.jwc",
+          "match": "\\b(routes|socket)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.control.route.jwc"
+            },
+            "2": {
+              "name": "string.quoted.double.route-path.jwc"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.route.jwc",
+          "match": "\\b(routes|route|socket)\\b"
+        }
+      ]
+    },
+    "schema-header": {
+      "patterns": [
+        {
+          "name": "meta.declaration.jwc",
+          "match": "\\b(schema)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(of)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.jwc"
+            },
+            "2": {
+              "name": "entity.name.namespace.schema.jwc"
+            },
+            "3": {
+              "name": "keyword.other.of.jwc"
+            },
+            "4": {
+              "name": "entity.name.type.database.jwc"
             }
           }
         }
       ]
     },
-    "validation-rules": {
-      "patterns": []
-    },
-    "control-flow": {
+    "placeholders": {
       "patterns": [
         {
-          "name": "keyword.control.jwc",
-          "match": "\\b(if|else|while|for|in|break|continue|return|let|transaction|throw)\\b"
-        },
-        {
-          "name": "keyword.control.import.jwc",
-          "match": "\\b(import|namespace|mount|group)\\b"
-        },
-        {
-          "name": "storage.modifier.visibility.jwc",
-          "match": "\\b(public|private)\\b"
+          "name": "variable.other.binding.jwc",
+          "match": "@[A-Za-z_][A-Za-z0-9_]*"
         }
       ]
     },
-    "http-response-builtins": {
+    "builtin-namespaces": {
       "patterns": [
         {
-          "comment": "HTTP response builders",
-          "match": "\\b(json|notFound|noContent|created|internalError|unauthorized|forbidden|badRequest|conflict|ok|accepted)\\s*\\(",
+          "name": "meta.builtin.jwc",
+          "match": "\\b(array|cache|console|crypto|date|debug|directory|file|hash|http|jwt|mail|redis|request|response|string)\\.([a-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "support.function.http-response.jwc"
-            }
-          }
-        },
-        {
-          "comment": "Request-scope variables / accessors",
-          "match": "\\b(body|params|headers|context)\\b(?=\\s*\\()",
-          "captures": {
-            "1": {
-              "name": "support.function.http.jwc"
-            }
-          }
-        },
-        {
-          "comment": "Generic stdlib builtins (recognised by name when invoked)",
-          "match": "\\b(console\\.write|console\\.error|console\\.read|file\\.read|file\\.write|file\\.append|file\\.exists|file\\.delete|file\\.copy|file\\.move|file\\.size|file\\.lines|directory\\.list|directory\\.create|directory\\.exists|directory\\.delete|dispatch|path_param|query_param|header|setContext|set_context|request_body|setConnectionString|set_connection_string|env|print|serve|now|unix_timestamp|uuid|hash_password|verify_password|jwt_sign|jwt_verify|send_email|http_get|http_post|ws_send|ws_recv|ws_close|cache_get|cache_set|cache_del|cache_clear|register_job_handler|enqueue|job_count|raw_sql|db_query|set_json_field|json_parse|json_stringify|length|len|first|last|lower|upper|trim|contains|starts_with|ends_with|replace|split|push|pop|keys|values)\\s*\\(",
-          "captures": {
-            "1": {
+              "name": "support.class.builtin.jwc"
+            },
+            "2": {
               "name": "support.function.builtin.jwc"
             }
           }
         }
       ]
     },
-    "type-names": {
-      "name": "storage.type.jwc",
-      "match": "\\b(int|bigint|bool|uuid|datetime|timestamp|json|text|varchar|decimal|double|string|float|List|Optional)\\b"
+    "builtin-functions": {
+      "patterns": [
+        {
+          "name": "support.function.response.jwc",
+          "match": "\\b(json|text|html|created|accepted|noContent|notFound|badRequest|unauthorized|forbidden|conflict|internalError|statusCode|redirect|serve)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.jwc",
+          "match": "\\b(env|int|bigint|smallint|numeric|boolean|uuid|timestamptz|enum|count|sum|avg|min|max|distinct)\\s*(?=\\()"
+        }
+      ]
     },
-    "field-modifiers": {
-      "name": "storage.modifier.jwc",
-      "match": "\\b(pk|nullable|autoincrement|auto_increment|serial|unique|of|via|on|at)\\b"
+    "validation-rules": {
+      "patterns": [
+        {
+          "name": "support.function.rule.jwc",
+          "match": "\\b(minLength|maxLength|minItems|maxItems|pattern|oneOf)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.rule.jwc",
+          "match": "\\brequired\\b"
+        }
+      ]
+    },
+    "column-modifiers": {
+      "patterns": [
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(primary)\\s+(key)\\b"
+        },
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(foreign)\\s+(key)\\b"
+        },
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(on)\\s+(update|delete)\\b"
+        },
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(no)\\s+(action)\\b"
+        },
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(set)\\s+(null)\\b"
+        },
+        {
+          "name": "storage.modifier.jwc",
+          "match": "\\b(identity|unique|private|server|default|references|check|index|cascade|restrict|transient)\\b"
+        }
+      ]
+    },
+    "query-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(group)\\s+(by)\\b"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(on)\\s+(conflict)\\b"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(do)\\s+(nothing|update)\\b"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(or)\\s+(throw)\\b"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(nulls)\\s+(first|last)\\b"
+        },
+        {
+          "name": "meta.page-clause.jwc",
+          "match": "\\b(page)\\b(?:\\s+(after)\\b)?",
+          "captures": {
+            "1": {
+              "name": "keyword.other.query.jwc"
+            },
+            "2": {
+              "name": "keyword.other.query.jwc"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(size|max)\\b(?=\\s+(?:@|[0-9]))"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\bin\\b(?=\\s*\\()"
+        },
+        {
+          "name": "keyword.other.query.jwc",
+          "match": "\\b(select|insert|into|update|delete|from|where|having|orderby|limit|offset|first|join|left|inner|cross|full|right|as|set|conflict|nothing|exists|except|buffered|under|asc|desc|like|ilike)\\b"
+        }
+      ]
+    },
+    "type-names": {
+      "patterns": [
+        {
+          "name": "support.type.jwc",
+          "match": "\\b(smallint|int|bigint|numeric|boolean|varchar|text|timestamptz|date|time|interval|uuid|jsonb|inet|bytea)\\b"
+        }
+      ]
     },
     "boolean-null": {
       "patterns": [
@@ -802,43 +427,47 @@
       "patterns": [
         {
           "name": "keyword.control.jwc",
-          "match": "\\b(transaction|assert|return|catch|throw|else|for|let|use|if)\\b"
+          "match": "\\b(if|else|for|while|break|continue|return|throw|catch|transaction|assert|dispatch)\\b"
         },
         {
           "name": "keyword.declaration.jwc",
-          "match": "\\b(errorHandler|middleware|namespace|database|function|service|import|routes|schema|server|class|error|route|table|enum|test|view)\\b"
+          "match": "\\b(let|use|with|raises|provides|requires|was|using|retries|backoff)\\b"
         },
         {
-          "name": "keyword.other.query.jwc",
-          "match": "\\b(conflict|nothing|orderby|delete|except|exists|having|insert|select|update|after|first|group|ilike|inner|limit|nulls|under|where|desc|from|into|join|left|like|page|size|with|and|asc|max|not|set|as|by|do|in|of|on|or)\\b"
-        },
-        {
-          "name": "keyword.other.schema.jwc",
-          "match": "\\b(references|transient|identity|provides|requires|restrict|cascade|default|foreign|primary|private|raises|unique|check|index|using|null|key|was|no)\\b"
-        },
-        {
-          "name": "constant.language.jwc",
-          "match": "\\b(false|true)\\b"
-        },
-        {
-          "name": "keyword.other.jwc",
-          "match": "\\b(cross|right|full)\\b"
+          "name": "keyword.operator.logical.jwc",
+          "match": "\\b(and|or|not)\\b"
         }
       ]
     },
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.arrow.jwc",
-          "match": "->"
+          "name": "keyword.operator.optional-compare.jwc",
+          "match": "==\\?"
         },
         {
           "name": "keyword.operator.comparison.jwc",
           "match": "(==|!=|<=|>=|<|>)"
         },
         {
+          "name": "keyword.operator.coalesce.jwc",
+          "match": "\\?\\?"
+        },
+        {
+          "name": "keyword.operator.spread.jwc",
+          "match": "\\.\\.\\."
+        },
+        {
+          "name": "keyword.operator.optional-assign.jwc",
+          "match": "=\\?"
+        },
+        {
           "name": "keyword.operator.logical.jwc",
-          "match": "(&&|\\|\\||!)(?!=)"
+          "match": "!(?!=)"
+        },
+        {
+          "name": "keyword.operator.optional.jwc",
+          "match": "\\?"
         },
         {
           "name": "keyword.operator.assignment.jwc",
@@ -847,14 +476,6 @@
         {
           "name": "keyword.operator.arithmetic.jwc",
           "match": "[+\\-*/%]"
-        },
-        {
-          "name": "keyword.operator.nullcoalesce.jwc",
-          "match": "\\?\\?"
-        },
-        {
-          "name": "keyword.operator.param.jwc",
-          "match": "@[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
         }
       ]
     },
@@ -902,24 +523,39 @@
         }
       ]
     },
-    "field-access": {
-      "comment": "var.field \u2014 second segment is the property",
-      "match": "([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
-      "captures": {
-        "1": {
-          "name": "variable.other.jwc"
-        },
-        "2": {
-          "name": "variable.other.property.jwc"
+    "type-references": {
+      "patterns": [
+        {
+          "name": "entity.name.type.jwc",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
-      }
+      ]
     },
     "identifiers": {
       "patterns": [
         {
-          "comment": "camelCase / snake_case \u2014 variables and functions",
-          "match": "\\b([a-z_][A-Za-z0-9_]*)\\b",
-          "name": "variable.other.jwc"
+          "name": "variable.other.jwc",
+          "match": "\\b[a-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.jwc",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.begin.jwc"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.end.jwc"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#block-comment"
         }
       ]
     }

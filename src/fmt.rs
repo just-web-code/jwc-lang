@@ -41,17 +41,25 @@ const INDENT: &str = "    ";
 /// — measure themselves against before choosing one line or several.
 const MARGIN: usize = 92;
 
-/// Every `--` and `---` comment in a source text, in order, rendered the
-/// way `Writer::attached` renders one.
+/// Every `//`, `///` and `/* */` comment in a source text, in order,
+/// rendered the way `Writer::attached` renders one.
 ///
 /// Rendered the same way on purpose: the comparison is between the input
 /// and the output of this printer, so a comment that only differs by the
 /// space the lexer strips is the *same* comment and must not read as a
 /// loss.
 ///
-/// Lexed rather than grepped: `"a -- b"` is a string, and a formatter that
+/// Lexed rather than grepped: `"a // b"` is a string, and a formatter that
 /// refused a file over a hyphen inside a literal would be its own kind of
 /// wrong.
+fn render_block(lines: &[String]) -> String {
+    match lines.len() {
+        0 => "/* */".to_string(),
+        1 => format!("/* {} */", lines[0]),
+        _ => format!("/*\n{}\n*/", lines.join("\n")),
+    }
+}
+
 pub fn comment_texts(src: &str) -> Vec<String> {
     fn render(marker: &str, body: &str) -> String {
         if body.is_empty() {
@@ -65,8 +73,9 @@ pub fn comment_texts(src: &str) -> Vec<String> {
     for t in &tokens {
         for tr in &t.leading {
             match tr {
-                Trivia::Doc(s) => out.push(render("---", s)),
-                Trivia::Line(s) => out.push(render("--", s)),
+                Trivia::Doc(s) => out.push(render("///", s)),
+                Trivia::Line(s) => out.push(render("//", s)),
+                Trivia::Block(lines) => out.push(render_block(lines)),
                 Trivia::Blank => {}
             }
         }
@@ -76,7 +85,7 @@ pub fn comment_texts(src: &str) -> Vec<String> {
 
 /// The comments in `before` that are not in `after`, as a multiset.
 ///
-/// A multiset and not a set: two identical `-- TODO` lines are two
+/// A multiset and not a set: two identical `// TODO` lines are two
 /// comments, and losing one of them is still losing one.
 pub fn comments_lost(before: &str, after: &str) -> Vec<String> {
     let mut have: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -146,19 +155,32 @@ impl Writer {
     }
 
     fn attached(&mut self, at: &Attached) {
+        for b in &at.blocks {
+            match b.len() {
+                0 => self.line("/* */"),
+                1 => self.line(&format!("/* {} */", b[0])),
+                _ => {
+                    self.line("/*");
+                    for l in b {
+                        self.line(l);
+                    }
+                    self.line("*/");
+                }
+            }
+        }
         for c in &at.comments {
             let s = if c.is_empty() {
-                "--".to_string()
+                "//".to_string()
             } else {
-                format!("-- {c}")
+                format!("// {c}")
             };
             self.line(&s);
         }
         for d in &at.docs {
             let s = if d.is_empty() {
-                "---".to_string()
+                "///".to_string()
             } else {
-                format!("--- {d}")
+                format!("/// {d}")
             };
             self.line(&s);
         }
@@ -577,12 +599,54 @@ impl Writer {
         self.line("}");
     }
 
+    /// A top-level `route` / `socket`, printed at column zero.
+    ///
+    /// The body rendering is the same as inside a block; only the wrapper
+    /// and its indent are absent.
+    fn bare_route(&mut self, n: &RoutesDecl) {
+        for r in &n.routes {
+            let uses = if r.uses.is_empty() {
+                String::new()
+            } else {
+                format!(" use {}", names(&r.uses))
+            };
+            self.line(&format!(
+                "route {} {}{uses} {{",
+                r.method.name,
+                quote(&r.suffix)
+            ));
+            self.depth += 1;
+            self.block(&r.body);
+            self.depth -= 1;
+            self.line("}");
+        }
+        for sk in &n.sockets {
+            let uses = if sk.uses.is_empty() {
+                String::new()
+            } else {
+                format!(" use {}", names(&sk.uses))
+            };
+            self.line(&format!("socket {}{uses} {{", quote(&sk.suffix)));
+            self.depth += 1;
+            self.socket_arms(sk);
+            self.depth -= 1;
+            self.line("}");
+        }
+    }
+
     fn routes(&mut self, n: &RoutesDecl) {
         let uses = if n.uses.is_empty() {
             String::new()
         } else {
             format!(" use {}", names(&n.uses))
         };
+        // A bare declaration is printed back as one. Wrapping it in the
+        // `routes "" { }` it desugars to would be `jwc fmt` rewriting the
+        // source into a form the author deliberately did not write.
+        if n.bare {
+            self.bare_route(n);
+            return;
+        }
         self.line(&format!("routes {}{uses} {{", quote(&n.prefix)));
         self.depth += 1;
         for (i, r) in n.routes.iter().enumerate() {
@@ -617,41 +681,48 @@ impl Writer {
             };
             self.line(&format!("socket {}{suses} {{", quote(&sk.suffix)));
             self.depth += 1;
-            let mut first = true;
-            if let Some(b) = &sk.on_open {
-                self.line("on open {");
-                self.depth += 1;
-                self.block(b);
-                self.depth -= 1;
-                self.line("}");
-                first = false;
-            }
-            if let Some((binder, b)) = &sk.on_message {
-                if !first {
-                    self.blank();
-                }
-                self.line(&format!("on message ({}) {{", binder.name));
-                self.depth += 1;
-                self.block(b);
-                self.depth -= 1;
-                self.line("}");
-                first = false;
-            }
-            if let Some(b) = &sk.on_close {
-                if !first {
-                    self.blank();
-                }
-                self.line("on close {");
-                self.depth += 1;
-                self.block(b);
-                self.depth -= 1;
-                self.line("}");
-            }
+            self.socket_arms(sk);
             self.depth -= 1;
             self.line("}");
         }
         self.depth -= 1;
         self.line("}");
+    }
+
+    /// `on open` / `on message` / `on close`, in that order, blank-line
+    /// separated. Shared by the grouped and the bare form so the two
+    /// cannot drift into printing a socket body two ways.
+    fn socket_arms(&mut self, sk: &SocketDecl) {
+        let mut first = true;
+        if let Some(b) = &sk.on_open {
+            self.line("on open {");
+            self.depth += 1;
+            self.block(b);
+            self.depth -= 1;
+            self.line("}");
+            first = false;
+        }
+        if let Some((binder, b)) = &sk.on_message {
+            if !first {
+                self.blank();
+            }
+            self.line(&format!("on message ({}) {{", binder.name));
+            self.depth += 1;
+            self.block(b);
+            self.depth -= 1;
+            self.line("}");
+            first = false;
+        }
+        if let Some(b) = &sk.on_close {
+            if !first {
+                self.blank();
+            }
+            self.line("on close {");
+            self.depth += 1;
+            self.block(b);
+            self.depth -= 1;
+            self.line("}");
+        }
     }
 
     fn error_handler(&mut self, n: &ErrorHandlerDecl) {
@@ -744,7 +815,7 @@ impl Writer {
                 let t = match target {
                     AssignTarget::Local { name, sigil } => {
                         if *sigil {
-                            format!("${}", name.name)
+                            format!("@{}", name.name)
                         } else {
                             name.name.clone()
                         }
@@ -752,7 +823,7 @@ impl Writer {
                     AssignTarget::Context(i) => format!("context.{}", i.name),
                     AssignTarget::Field { base, sigil, path } => {
                         let head = if *sigil {
-                            format!("${}", base.name)
+                            format!("@{}", base.name)
                         } else {
                             base.name.clone()
                         };
@@ -792,7 +863,11 @@ impl Writer {
                 body,
                 ..
             } => {
-                self.line(&format!("for ({} in {}) {{", binder.name, expr(iterable)));
+                self.line(&format!(
+                    "for (let {} in {}) {{",
+                    binder.name,
+                    expr(iterable)
+                ));
                 self.depth += 1;
                 self.block(body);
                 self.depth -= 1;
@@ -1137,7 +1212,7 @@ impl Writer {
 
     fn insert_stmt(&mut self, prefix: &str, i: &InsertExpr, suffix: &str) {
         let inline = obj_entries_text(&i.values);
-        let head = format!("{prefix}insert into {}", i.table.text());
+        let head = format!("{prefix}insert {} into {}", i.binder.name, i.table.text());
         let mut tail: Vec<String> = Vec::new();
         if let Some(c) = &i.conflict {
             let cols = if c.columns.is_empty() {
@@ -1220,7 +1295,11 @@ impl Writer {
     }
 
     fn update_stmt(&mut self, prefix: &str, u: &UpdateExpr, suffix: &str) {
-        self.line(&format!("{prefix}update {}", u.table.text()));
+        self.line(&format!(
+            "{prefix}update {} of {}",
+            u.binder.name,
+            u.table.text()
+        ));
         self.depth += 1;
         let sets = set_items_text(&u.sets);
         if sets.len() <= 72 {
@@ -1245,7 +1324,11 @@ impl Writer {
     }
 
     fn delete_stmt(&mut self, prefix: &str, d: &DeleteExpr, suffix: &str) {
-        self.line(&format!("{prefix}delete from {}", d.table.text()));
+        self.line(&format!(
+            "{prefix}delete {} from {}",
+            d.binder.name,
+            d.table.text()
+        ));
         self.depth += 1;
         self.write_filter_projection_tail(
             d.filter.as_ref(),
@@ -1364,7 +1447,7 @@ impl Writer {
         if shape
             .fields
             .iter()
-            .all(|f| matches!(f, ProjField::Column(_)))
+            .all(|f| matches!(f, ProjField::Column { .. }))
             && shape_inline_len(shape) <= 72
         {
             let inner = shape
@@ -1636,7 +1719,10 @@ fn shape_inline_len(s: &ObjectShape) -> usize {
 
 fn proj_field_text(f: &ProjField) -> String {
     match f {
-        ProjField::Column(i) => i.name.clone(),
+        ProjField::Column { binding, column } => match binding {
+            Some(b) => format!("{}.{}", b.name, column.name),
+            None => column.name.clone(),
+        },
         ProjField::Expr { alias, value, .. } => format!("{}: {}", alias.name, expr(value)),
         ProjField::Nested { alias, shape, .. } => format!(
             "{}: {{ {} }}",
@@ -1678,9 +1764,9 @@ fn obj_entries_text(entries: &[ObjEntry]) -> String {
             }
             ObjEntry::Spread { source, except, .. } => {
                 if except.is_empty() {
-                    format!("...${}", source.name)
+                    format!("...@{}", source.name)
                 } else {
-                    format!("...${} except ({})", source.name, names(except))
+                    format!("...@{} except ({})", source.name, names(except))
                 }
             }
         })
@@ -1721,9 +1807,9 @@ fn set_items_text(items: &[SetItem]) -> String {
             ),
             SetItem::Spread { source, except, .. } => {
                 if except.is_empty() {
-                    format!("...${}", source.name)
+                    format!("...@{}", source.name)
                 } else {
-                    format!("...${} except ({})", source.name, names(except))
+                    format!("...@{} except ({})", source.name, names(except))
                 }
             }
         })
@@ -1790,8 +1876,7 @@ pub fn expr(e: &Expr) -> String {
         ExprKind::Bool(b) => b.to_string(),
         ExprKind::Null => "null".into(),
         ExprKind::Name(i) => i.name.clone(),
-        ExprKind::Local(i) => format!("${}", i.name),
-        ExprKind::PathParam(i) => format!("@{}", i.name),
+        ExprKind::Local(i) => format!("@{}", i.name),
         ExprKind::Field { base, field } => format!("{}.{}", wrap(base, 10), field.name),
         ExprKind::Index { base, index } => format!("{}[{}]", wrap(base, 10), expr(index)),
         ExprKind::Call {
@@ -1854,7 +1939,8 @@ pub fn expr(e: &Expr) -> String {
         ExprKind::Select(s) => select_inline(s),
         ExprKind::Insert(i) => {
             let mut out = format!(
-                "insert into {} {{ {} }}",
+                "insert {} into {} {{ {} }}",
+                i.binder.name,
                 i.table.text(),
                 obj_entries_text(&i.values)
             );
@@ -1883,7 +1969,12 @@ pub fn expr(e: &Expr) -> String {
             out
         }
         ExprKind::Update(u) => {
-            let mut out = format!("update {} set {}", u.table.text(), set_items_text(&u.sets));
+            let mut out = format!(
+                "update {} of {} set {}",
+                u.binder.name,
+                u.table.text(),
+                set_items_text(&u.sets)
+            );
             if let Some(f) = &u.filter {
                 out.push_str(&format!(" where {}", expr(f)));
             }
@@ -1899,7 +1990,7 @@ pub fn expr(e: &Expr) -> String {
             out
         }
         ExprKind::Delete(d) => {
-            let mut out = format!("delete from {}", d.table.text());
+            let mut out = format!("delete {} from {}", d.binder.name, d.table.text());
             if let Some(f) = &d.filter {
                 out.push_str(&format!(" where {}", expr(f)));
             }

@@ -1,4 +1,4 @@
--- ops: 2 rename_column org.orgs.name -> display_name
+// ops: 2 rename_column org.orgs.name -> display_name
 
 namespace c;
 database App : Postgres;

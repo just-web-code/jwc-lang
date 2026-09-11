@@ -1,7 +1,7 @@
---- Two collections projected side by side. Under `json_agg` over a plain
---- join this is the classic wrong answer: each collection multiplies the
---- other's rows, so three tags and two notes report six of each. Two
---- independent laterals do not interact.
+/// Two collections projected side by side. Under `json_agg` over a plain
+/// join this is the classic wrong answer: each collection multiplies the
+/// other's rows, so three tags and two notes report six of each. Two
+/// independent laterals do not interact.
 namespace two_collections;
 
 database App : Postgres;
@@ -36,8 +36,8 @@ view OrgBoard of App.s {
         left join App.s.Tags T on T.org_id == O.id
             as many tags orderby label asc
         as {
-            id,
-            name,
+            O.id,
+            O.name,
             notes: { id, body },
             tags: { id, label },
         }

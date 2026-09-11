@@ -168,6 +168,30 @@ pub fn load(ws: &Workspace) -> Result<Program> {
         }
     }
 
+    // `JWC_SWAGGER` wins over the source, so an operator can switch the
+    // reference on for a staging deployment and off for production
+    // without either being a different build.
+    if let Ok(v) = std::env::var("JWC_SWAGGER") {
+        server.swagger = normalise_swagger_path(v);
+    }
+
+    // Rendered now, while the analysis that describes the routes is still
+    // in hand.
+    let swagger_page = server.swagger.as_ref().map(|_| {
+        let doc = crate::openapi::document_for(
+            ws,
+            built.model.database.as_deref(),
+            &symbols,
+            &checked,
+            &wired,
+            None,
+        );
+        Arc::new((
+            crate::swagger::render(&doc),
+            serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
+        ))
+    });
+
     Ok(Program {
         model: built.model,
         symbols,
@@ -182,6 +206,7 @@ pub fn load(ws: &Workspace) -> Result<Program> {
         errors: error_defs,
         server,
         open_sockets: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        swagger_page,
     })
 }
 
@@ -237,6 +262,14 @@ pub(crate) fn read_server_config(s: &ServerDecl) -> ServerConfig {
                 if let Some(v) = config_string(&a.value) {
                     c.bind = v;
                 }
+            }
+            "port" => {
+                if let ExprKind::Int(n) = &*a.value.kind {
+                    c.port = n.parse().unwrap_or(c.port);
+                }
+            }
+            "swagger" => {
+                c.swagger = config_string(&a.value).and_then(normalise_swagger_path);
             }
             "strict_slash" => {
                 if let ExprKind::Bool(b) = &*a.value.kind {
@@ -402,6 +435,26 @@ fn config_duration(e: &Expr) -> Option<std::time::Duration> {
 /// A secret written as a literal is a secret in the repository, so the
 /// sample uses `env`; both are read here because the spec allows both and
 /// a local run should not need a `.env` to boot.
+/// A `swagger` value into the path it serves at, or `None` for off.
+///
+/// `""` is off, so `server { swagger = env("JWC_SWAGGER") ?? "" }` is a
+/// program whose reference is on wherever the variable is set and absent
+/// everywhere else, without the source changing between deployments.
+/// A path is anchored with a leading `/` and carries no trailing one, so
+/// `docs`, `/docs` and `/docs/` all name the same endpoint rather than
+/// three near-misses that 404.
+fn normalise_swagger_path(v: String) -> Option<String> {
+    let v = v.trim().trim_end_matches('/');
+    if v.is_empty() {
+        return None;
+    }
+    Some(if v.starts_with('/') {
+        v.to_string()
+    } else {
+        format!("/{v}")
+    })
+}
+
 fn config_string(e: &Expr) -> Option<String> {
     match &*e.kind {
         ExprKind::Str(s) => Some(s.clone()),
@@ -665,6 +718,39 @@ async fn operational(program: &Program, incoming: &Incoming) -> Option<Response>
                         ),
                     ]),
                 )
+            })
+        }
+
+        // The API reference, where `server { swagger }` put it. GET only
+        // and no middleware, like the three above: a reference an
+        // operator cannot reach without first satisfying the
+        // application's own auth is a reference for the people who
+        // already know the API.
+        p if program.server.swagger.as_deref() == Some(p) => {
+            program.swagger_page.as_ref().map(|page| Response {
+                status: 200,
+                headers: vec![("content-type".into(), "text/html; charset=utf-8".into())],
+                body: page.0.clone(),
+                bytes: None,
+            })
+        }
+
+        // The document the page was rendered from, for a client
+        // generator. Same walk, same bytes as `jwc openapi`.
+        p if program
+            .server
+            .swagger
+            .as_ref()
+            .is_some_and(|s| p == format!("{s}/openapi.json")) =>
+        {
+            program.swagger_page.as_ref().map(|page| Response {
+                status: 200,
+                headers: vec![(
+                    "content-type".into(),
+                    "application/json; charset=utf-8".into(),
+                )],
+                body: page.1.clone(),
+                bytes: None,
             })
         }
 
@@ -1699,16 +1785,37 @@ fn percent_decode(s: &str) -> String {
 ///
 /// `main` is an ordinary body, so it runs on an ordinary Vm. A program with
 /// no `main`, or one whose `main` never reaches `serve`, keeps 8080.
-/// The port `main` asked for, or `None` when it never called `serve(...)`.
+/// The port the deployment and the program agree on.
 ///
-/// `Option`, not a defaulted `u16`: "the program did not ask for a
-/// server" and "the program asked for 8080" are different facts, and
-/// `jwc run` needs to tell them apart — it starts a listener only for the
-/// first. Defaulting here is what made `jwc run` on a serving program
-/// exit silently.
-pub async fn declared_port(program: &Arc<Program>) -> Result<Option<u16>> {
+/// Only where, never whether: `wants_serve` answers the second question,
+/// and a program that never calls `serve()` has no listener to give a port
+/// to.
+///
+/// `JWC_PORT`, then `PORT`, then `server { port }`. `PORT` is honoured
+/// unprefixed because every platform that injects a port injects that one —
+/// the same pair `JWC_DATABASE_URL` and `DATABASE_URL` make. `--port` is
+/// applied by the caller, above both.
+pub fn resolved_port(cfg: &crate::exec::ServerConfig) -> u16 {
+    for name in ["JWC_PORT", "PORT"] {
+        if let Ok(v) = std::env::var(name) {
+            if let Ok(p) = v.trim().parse::<u16>() {
+                if p != 0 {
+                    return p;
+                }
+            }
+        }
+    }
+    cfg.port
+}
+
+/// Whether `main` asked to listen.
+///
+/// `main` runs at boot either way: a program that prints a line and exits
+/// is as valid as a server, and which one it is falls out of whether
+/// `serve()` ran.
+pub async fn wants_serve(program: &Arc<Program>) -> Result<bool> {
     let Some(main) = program.functions.get("main") else {
-        return Ok(None);
+        return Ok(false);
     };
 
     // `main` runs before any request exists. The synthetic one carries the
@@ -1740,7 +1847,7 @@ pub async fn declared_port(program: &Arc<Program>) -> Result<Option<u16>> {
         }
         crate::exec::Abort::Fault(f) => anyhow!("main() failed at boot: {f}"),
     })?;
-    Ok(vm.serve_port)
+    Ok(vm.serve_called)
 }
 
 /// `DbError` has no `Display`: it is a domain error the response mapper
@@ -2304,6 +2411,7 @@ mod route_matching {
             errors: HashMap::new(),
             server: ServerConfig::default(),
             open_sockets: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            swagger_page: None,
         }
     }
 

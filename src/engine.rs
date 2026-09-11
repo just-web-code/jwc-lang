@@ -290,6 +290,158 @@ pub async fn get_connection() -> Result<PgConn> {
 /// connection pool entirely. TLS settings are re-read from the env each call so
 /// the migrate CLI behaves consistently with the runtime engine.
 pub async fn connect_for_migrations(url: &str) -> Result<TokioClient> {
+    match connect_for_migrations_raw(url).await {
+        Ok(client) => Ok(client),
+        Err(e) => Err(explain_missing_database(url, e).await),
+    }
+}
+
+/// The SQLSTATE Postgres answers with when the database named in the
+/// connection string is not there: `invalid_catalog_name`.
+const INVALID_CATALOG_NAME: &str = "3D000";
+
+/// Turn "database X does not exist" into something that says what to do.
+///
+/// Postgres answers a missing database with `FATAL: database "X" does not
+/// exist` and nothing else. Passing that through leaves the reader with a
+/// true sentence and no next step, and one very common cause is invisible
+/// in it: `CREATE DATABASE MyWallet` without quotes creates `mywallet`,
+/// because an unquoted identifier is folded to lower case, and the URL
+/// path is not. The connection then fails naming `MyWallet` while
+/// `mywallet` sits next to it.
+///
+/// So the check that costs one extra connection is worth it: look in
+/// `pg_database` for a name that differs only in case, and say which of
+/// the two situations this is. Any failure to reach the maintenance
+/// database is swallowed — this is a diagnostic, and a diagnostic that
+/// can itself fail with a second error helps nobody.
+async fn explain_missing_database(url: &str, err: anyhow::Error) -> anyhow::Error {
+    let missing = match sqlstate_of(&err) {
+        Some(code) if code == INVALID_CATALOG_NAME => match dbname_of(url) {
+            Some(name) => name,
+            None => return err,
+        },
+        _ => return err,
+    };
+
+    let twin = case_folded_twin(url, &missing).await;
+    let quoted = crate::naming::quote_ident(&missing);
+
+    match twin {
+        Some(found) => anyhow!(
+            "database `{missing}` does not exist, but `{found}` does — the two \
+             differ only in case.\n\n\
+             `CREATE DATABASE {missing}` without quotes creates `{found}`: \
+             Postgres folds an unquoted identifier to lower case, and the \
+             database name in a URL is taken literally. So the database is \
+             there under the folded name and the URL asks for the written \
+             one.\n\n\
+             Point DATABASE_URL at `{found}`, or create the other one with \
+             the name quoted:\n\
+             \x20   createdb {quoted}\n\
+             \x20   psql -c 'CREATE DATABASE {quoted}'"
+        ),
+        None => anyhow!(
+            "database `{missing}` does not exist.\n\n\
+             `jwc migrate up` applies migrations to a database; it does not \
+             create one, because a typo in DATABASE_URL would then be \
+             answered by a new empty database rather than by this \
+             message.\n\n\
+             Create it:\n\
+             \x20   createdb {quoted}\n\
+             \x20   psql -c 'CREATE DATABASE {quoted}'\n\n\
+             Or have this command do it: `jwc migrate up --create-db`."
+        ),
+    }
+}
+
+/// The SQLSTATE of the first `tokio_postgres` error in the chain.
+fn sqlstate_of(err: &anyhow::Error) -> Option<String> {
+    err.chain()
+        .filter_map(|c| c.downcast_ref::<tokio_postgres::Error>())
+        .find_map(|pg| pg.code().map(|c| c.code().to_string()))
+}
+
+/// The database name a connection string asks for.
+fn dbname_of(url: &str) -> Option<String> {
+    url.parse::<tokio_postgres::Config>()
+        .ok()?
+        .get_dbname()
+        .map(|s| s.to_string())
+}
+
+/// A database whose name differs from `missing` only in case, if there is
+/// one. `None` covers both "there is not" and "could not look".
+async fn case_folded_twin(url: &str, missing: &str) -> Option<String> {
+    let client = connect_for_migrations_raw(&maintenance_url(url)?)
+        .await
+        .ok()?;
+    let rows = client
+        .query(
+            "SELECT datname FROM pg_database \
+             WHERE lower(datname) = lower($1) AND datname <> $1",
+            &[&missing],
+        )
+        .await
+        .ok()?;
+    rows.first().map(|r| r.get::<_, String>(0))
+}
+
+/// The same connection string pointed at `postgres`, the database every
+/// server has and that `createdb` itself connects to.
+fn maintenance_url(url: &str) -> Option<String> {
+    let cfg = url.parse::<tokio_postgres::Config>().ok()?;
+    let db = cfg.get_dbname()?;
+    // Replace only the path segment, so user, password, host, port and
+    // every query parameter (`sslmode`, above all) survive untouched.
+    let (head, tail) = url.rsplit_once(&format!("/{db}"))?;
+    Some(format!("{head}/postgres{tail}"))
+}
+
+/// `CREATE DATABASE` the one named in `url`, unless the server has it.
+///
+/// Returns the name it created, or `None` when the server already had
+/// it. `CREATE DATABASE` cannot run inside a
+/// transaction and cannot run on the database it is creating, so this
+/// connects to `postgres` — which is what `createdb` does too.
+///
+/// The name is quoted, so a database written `MyWallet` is created as
+/// `MyWallet` and not folded to `mywallet`. Two of these racing is a
+/// `duplicate_database`, which is this function's own success condition
+/// reached by someone else, so it reads as "already there".
+pub async fn create_database_if_absent(url: &str) -> Result<Option<String>> {
+    const DUPLICATE_DATABASE: &str = "42P04";
+
+    let name = dbname_of(url)
+        .ok_or_else(|| anyhow!("DATABASE_URL names no database, so there is none to create"))?;
+    let maintenance = maintenance_url(url)
+        .ok_or_else(|| anyhow!("could not derive a maintenance connection from DATABASE_URL"))?;
+    let client = connect_for_migrations_raw(&maintenance)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to connect to `postgres` to create `{name}` ({})",
+                scrub_database_url(&maintenance)
+            )
+        })?;
+
+    let exists = client
+        .query("SELECT 1 FROM pg_database WHERE datname = $1", &[&name])
+        .await
+        .with_context(|| "Failed to list databases")?;
+    if !exists.is_empty() {
+        return Ok(None);
+    }
+
+    let stmt = format!("CREATE DATABASE {}", crate::naming::quote_ident(&name));
+    match client.execute(stmt.as_str(), &[]).await {
+        Ok(_) => Ok(Some(name)),
+        Err(e) if e.code().map(|c| c.code()) == Some(DUPLICATE_DATABASE) => Ok(None),
+        Err(e) => Err(anyhow::Error::new(e).context(format!("Failed to create database `{name}`"))),
+    }
+}
+
+async fn connect_for_migrations_raw(url: &str) -> Result<TokioClient> {
     if should_use_tls() {
         let connector = build_tls_connector()?;
         let (client, connection) = tokio_postgres::connect(url, connector)

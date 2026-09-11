@@ -51,8 +51,8 @@ them:
 
 | | |
 |---|---|
-| Line comment | `--`, **not** `//`. `//` is division, twice. |
-| Doc comment | `---`, attaches to the next declaration, reaches Postgres as `COMMENT ON` |
+| Line comment | `//` |
+| Doc comment | `///`, attaches to the next declaration, reaches Postgres as `COMMENT ON` |
 | Logical operators | `and`, `or`, `not`. `&&` and `\|\|` do not exist; `!` is `not` |
 | Strings | `"…"` with escapes, `r"…"` raw (no escapes but `\"`) |
 | Newline in a string | an **error**. Use `\n` |
@@ -67,12 +67,11 @@ expects that keyword.
 
 | | |
 |---|---|
-| `$name` | a local, parameter, or `let` binding |
-| `@name` | a path parameter, from the route pattern |
-| bare `name` | **inside a query clause**: a column. Elsewhere: the local |
+| `B.column` | a column of binding `B` — **required** inside a query clause |
+| `@name` | a local, parameter, or path parameter |
+| bare `name` | outside a query clause: the local. Inside one: `E0904` |
 
-`$` is **required inside query clauses** and optional everywhere else.
-This compiles:
+The sigil is optional outside a query clause. This compiles:
 
 ```jwc
 namespace ex1;
@@ -80,14 +79,14 @@ namespace ex1;
 service Greeter {
     function hello(who: text) {
         let name = who;
-        return "salom, " + $name;
+        return "salom, " + @name;
     }
 }
 ```
 
-Inside a `where` / `set` / `as` clause the distinction is load-bearing:
-`email` is the *column*, `$email` is your variable, and writing the wrong
-one is a different query, not an error.
+Inside a `where` / `as` clause the distinction is load-bearing: `U.email`
+is the *column* and `@email` is your variable. Writing the wrong one is a
+different query, not an error — which is why each says which it is.
 
 ---
 
@@ -108,9 +107,9 @@ schema notes of App;
 server {
     max_body_bytes  = 262144;
     request_timeout = "30s";
-    -- Required by any query that uses `page`: the cursor is a
-    -- client-supplied predicate, and unsigned it is a second filter
-    -- nobody checked.
+    // Required by any query that uses `page`: the cursor is a
+    // client-supplied predicate, and unsigned it is a second filter
+    // nobody checked.
     cursor_secret   = env("CURSOR_SECRET");
 }
 
@@ -132,34 +131,34 @@ class NoteCreate {
 service NoteService {
     function list(size: int) {
         return select N from App.notes.Notes
-            where archived == false
-            as { id, title, created_at }
-            orderby created_at desc, id desc
-            page size $size max 100;
+            where N.archived == false
+            as { N.id, N.title, N.created_at }
+            orderby N.created_at desc, N.id desc
+            page size @size max 100;
     }
 
     function get(id: bigint) {
         return select N from App.notes.Notes
-            where id == $id
-            as { id, title, body, created_at }
+            where N.id == @id
+            as { N.id, N.title, N.body, N.created_at }
             first or throw NotFound("bunday eslatma yo'q");
     }
 
     function create(req: NoteCreate) {
-        return insert into App.notes.Notes { ...$req } as { id, title, created_at };
+        return insert Notes into App.notes.Notes { ...@req } as { Notes.id, Notes.title, Notes.created_at };
     }
 }
 
 routes "/api/v1/notes" {
     route GET "" {
         let items = NoteService.list(20);
-        return json($items);
+        return json(@items);
     }
 
     route POST "" {
         let req = request.body() as NoteCreate;
-        let note = NoteService.create($req);
-        return created(json($note));
+        let note = NoteService.create(@req);
+        return created(json(@note));
     }
 
     route GET "{id: bigint}" {
@@ -168,7 +167,7 @@ routes "/api/v1/notes" {
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 
@@ -235,17 +234,17 @@ class Row { id bigint required; }
 
 service S {
     function a(r: Row?) {
-        if ($r == null) { throw NotFound("yo'q"); }
-        return $r.id;
+        if (@r == null) { throw NotFound("yo'q"); }
+        return @r.id;
     }
 
     function b(r: Row?) {
-        if ($r != null) { return $r.id; }
+        if (@r != null) { return @r.id; }
         return 0;
     }
 
     function c(r: Row?) {
-        if ($r == null) { return 0; } else { return $r.id; }
+        if (@r == null) { return 0; } else { return @r.id; }
     }
 }
 ```
@@ -303,25 +302,25 @@ table Orders of App.shop {
 service Reports {
     function big(floor: numeric) {
         return select O from App.shop.Orders
-            where total > $floor
-            as { id, customer, total }
-            orderby total desc
+            where O.total > @floor
+            as { O.id, O.customer, O.total }
+            orderby O.total desc
             limit 50;
     }
 
     function one(id: bigint) {
         return select O from App.shop.Orders
-            where id == $id
-            as { id, customer, total }
+            where O.id == @id
+            as { O.id, O.customer, O.total }
             first or throw NotFound("buyurtma yo'q");
     }
 
-    --- Aggregates + `group by`, and no `as many` in the same query:
-    --- the grouping already fixes the cardinality (queries.md §6.2).
+    /// Aggregates + `group by`, and no `as many` in the same query:
+    /// the grouping already fixes the cardinality (queries.md §6.2).
     function per_customer() {
         return select O from App.shop.Orders
             group by O.customer
-            as { customer, orders: count(O.id), spend: sum(O.total) };
+            as { O.customer, orders: count(O.id), spend: sum(O.total) };
     }
 }
 ```
@@ -339,7 +338,7 @@ service Reports {
 ### Pagination is keyset, not offset
 
 ```jwc no-compile
-page after $cursor size $size max 100
+page after @cursor size @size max 100
 ```
 
 The cursor is signed with `CURSOR_SECRET`, because a cursor is a position
@@ -366,26 +365,27 @@ class ItemNew { name varchar(80) required; }
 
 service Stock {
     function add(req: ItemNew) {
-        return insert into App.shop.Items { ...$req } as { id, name };
+        return insert Items into App.shop.Items { ...@req } as { Items.id, Items.name };
     }
 
     function bump(id: bigint, by: int) {
-        return update App.shop.Items
-            set stock = stock + $by
-            where id == $id
-            as { id, stock }
+        return update Items of App.shop.Items
+            set stock = Items.stock + @by
+            where Items.id == @id
+            as { Items.id, Items.stock }
             first or throw NotFound("mahsulot yo'q");
     }
 
     function drop(id: bigint) {
-        delete from App.shop.Items where id == $id;
+        delete Items from App.shop.Items where Items.id == @id;
     }
 }
 ```
 
-`...$req` spreads a validated class into the write. In `set`, a bare
-`stock` is the *column's current value* and `$by` is your variable — so
-`set stock = stock + $by` is the atomic increment, not a read-modify-write.
+`...@req` spreads a validated class into the write. A `set` target is a
+column of the table being written, so it takes no qualifier — but the value
+beside it is an ordinary expression: `set stock = T.stock + @by` is the
+atomic increment, not a read-modify-write.
 
 ---
 
@@ -413,10 +413,10 @@ routes "/api/v1/orgs/{org_id: bigint}" use RequireAuth, Audit {
 `statusCode`, `redirect`, `content`, `text`, `html`.
 
 ```jwc no-compile
-return json($org);
-return created(json($org)) with { Location: "/api/v1/orgs/" + string.of($org.id) };
-return text("hello");                 -- text/plain
-return html("<h1>hi</h1>");           -- text/html
+return json(@org);
+return created(json(@org)) with { Location: "/api/v1/orgs/" + string.of(@org.id) };
+return text("hello");                 // text/plain
+return html("<h1>hi</h1>");           // text/html
 return noContent();
 ```
 
@@ -427,9 +427,9 @@ return noContent();
 ```jwc no-compile
 middleware RequireAuth provides account_id: bigint {
     let header = request.header("Authorization") or throw Unauthorized("token kerak");
-    let claims = jwt.verify(string.strip_prefix($header, "Bearer "), $secret)
+    let claims = jwt.verify(string.strip_prefix(@header, "Bearer "), @secret)
         or throw Unauthorized("token yaroqsiz");
-    context.account_id = bigint($claims.sub);
+    context.account_id = bigint(@claims.sub);
 }
 
 middleware RequireOrgMember(@org_id: bigint) requires RequireAuth provides org_id: bigint {
@@ -470,7 +470,7 @@ default status needs no arm at all.
 **There is one local recovery form**, and it is postfix:
 
 ```jwc no-compile
-let payment = insert into App.billing.Payments { ...$req } as { id }
+let payment = insert Payments into App.billing.Payments { ...@req } as { id }
     catch Conflict (err) { return { status: "duplicate" }; };
 ```
 
@@ -498,14 +498,14 @@ service Loops {
         let total = 0;
         let i = 0;
 
-        while (i < $n) {
+        while (i < @n) {
             i += 1;
             if (i == 3) { continue; }
             if (i > LIMIT) { break; }
             total += i;
         }
 
-        for (x in [1, 2, 3]) {
+        for (let x in [1, 2, 3]) {
             total += x;
         }
 
@@ -513,7 +513,7 @@ service Loops {
         cfg.b.c = 20;
         cfg.fresh = 30;
 
-        return $total;
+        return @total;
     }
 }
 ```
@@ -575,7 +575,7 @@ compose with timestamps inside a query:
 
 **`hash.password` for secrets a human chose; `hash.sha256` for
 high-entropy tokens the server generated.** A salted KDF cannot serve
-`where token_hash == $h`, because every call produces a different string.
+`where A.token_hash == @h`, because every call produces a different string.
 `hash.sha1` and `hash.md5` are for reading a checksum someone else
 produced — never for a password.
 
@@ -657,8 +657,8 @@ jwc build --release           # a native binary
 
 ## Mistakes agents actually make
 
-**Writing `//` for a comment.** It is `--`. `//` lexes as two divisions
-and the error appears somewhere else entirely.
+**Writing `--` for a comment.** It is `//`. `--` lexes as a minus sign
+followed by a negation, and the error appears somewhere else entirely.
 
 **Writing `&&` / `||` / `!`.** Use `and`, `or`, `not`. (`!` does work as a
 prefix; `&&` and `||` do not exist at all.)
@@ -670,11 +670,12 @@ return. Everything else belongs in `service` or `middleware`.
 The error model turns it into a 401 in one place; returning a response
 gets `W0801` and bypasses the handler.
 
-**Forgetting the binder.** `select O from App.s.T` — the `O` is required.
+**Forgetting the binder.** Every query binds one: `select O from App.s.T`,
+`insert O into App.s.T`, `update O of App.s.T`, `delete O from App.s.T`.
 
-**Forgetting `$` inside a query clause.** In `where email == $email` the
-bare `email` is the column and `$email` is your variable. Swapping them
-compiles to a different query, and `where email == email` is always true.
+**Forgetting the qualifier inside a query clause.** In
+`where O.email == @email` the `O.email` is the column and `@email` is your
+variable. A bare `email` there is `E0904`.
 
 **Reading a field of a `T?`.** `first` answers `T?`. Use `or throw`, or
 one of the three narrowing shapes.
@@ -688,7 +689,7 @@ opaque. Name the fields you read.
 **Expecting `async` / `await`.** The runtime is async; the language is
 not. Every call is written as if synchronous.
 
-**Adding an `offset` for pagination.** Use `page after $cursor size $size`.
+**Adding an `offset` for pagination.** Use `page after @cursor size @size`.
 
 **Hand-writing SQL migrations.** `jwc migrate new <name>` diffs the
 schema against the last snapshot and writes them. Read the generated SQL

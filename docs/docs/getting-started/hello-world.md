@@ -69,21 +69,21 @@ class NewGreeting {
 routes "/greetings" {
     route GET "" {
         return json(select G from App.hello.Greetings
-            as { id, who, said_at }
-            orderby said_at desc, id desc
+            as { G.id, G.who, G.said_at }
+            orderby G.said_at desc, G.id desc
             limit 50);
     }
 
     route POST "" {
         let req = request.body() as NewGreeting;
 
-        return created(json(insert into App.hello.Greetings { ...$req }
-            as { id, who, said_at }));
+        return created(json(insert Greetings into App.hello.Greetings { ...@req }
+            as { Greetings.id, Greetings.who, Greetings.said_at }));
     }
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 
@@ -96,9 +96,14 @@ mismatch is `W0102`.
 export DATABASE_URL=postgres://jwc:jwc@localhost:5432/app
 
 jwc migrate new init     # writes migrations/0001_init.{up,down}.sql
-jwc migrate up           # applies it
+jwc migrate up --create-db   # creates the database, then applies it
 jwc migrate verify       # every constraint and index is where it should be
 ```
+
+Drop `--create-db` once the database exists; `createdb app` is the same
+step by hand. A name with a capital in it has to be quoted —
+`createdb "MyApp"` — because an unquoted `CREATE DATABASE MyApp` is folded
+to `myapp` while the name in the URL is not.
 
 On Windows, `export` is not a command — PowerShell sets it like this:
 

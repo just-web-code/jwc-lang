@@ -5,10 +5,10 @@ import db.auth;
 
 enum MemberRole of App.org { owner, admin, member, viewer }
 
---- Tenant. Every billing and audit row hangs off one of these.
+/// Tenant. Every billing and audit row hangs off one of these.
 table Orgs of App.org {
     id         bigint primary key identity;
-    --- URL-safe handle. Immutable after creation.
+    /// URL-safe handle. Immutable after creation.
     slug       varchar(40) unique : "bu slug band", pattern(r"^[a-z0-9-]{3,40}$") : "slug faqat kichik harf, raqam va tire";
     name       varchar(120) minLength(2) : "nom kamida 2 ta belgi bo'lsin";
     created_at timestamptz default now();

@@ -2,8 +2,8 @@ namespace physical;
 
 database App : Postgres;
 
---- Physical-name overrides and the touch trigger. `Order` is a Postgres
---- reserved word, so it must come out quoted (names.md §4.2).
+/// Physical-name overrides and the touch trigger. `Order` is a Postgres
+/// reserved word, so it must come out quoted (names.md §4.2).
 schema reporting of App as "rpt";
 
 table OrgWithMembers of App.reporting as "tbl_org_members" was "old_org_members" {

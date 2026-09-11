@@ -278,9 +278,9 @@ Rules:
 ## 7. Doc comments → `COMMENT ON` (N10)
 
 ```jwc
---- Tenant. One row per paying organisation.
+/// Tenant. One row per paying organisation.
 table Orgs of App.org {
-    --- URL-safe handle, immutable after creation.
+    /// URL-safe handle, immutable after creation.
     slug varchar(40) unique : "bu slug band";
 }
 ```
