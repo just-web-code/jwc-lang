@@ -2808,7 +2808,11 @@ fn emit_update(u: &crate::ast::UpdateExpr, ctx: &mut Ctx) -> Result<String> {
             // falls back to selecting the row as it stands rather than
             // emitting an empty SET, and so does this.
             let probe = crate::ast::SelectExpr {
-                binder: crate::ast::Ident::new("x", u.span),
+                // The update's own binder: the projection is written
+                // against it, so `as { Accounts.id }` resolves only where
+                // `Accounts` is bound (queries.md §2.4). The same fix the
+                // interpreter's probe takes — two copies of one fallback.
+                binder: u.binder.clone(),
                 source: u.table.clone(),
                 joins: vec![],
                 filter: u.filter.clone(),
