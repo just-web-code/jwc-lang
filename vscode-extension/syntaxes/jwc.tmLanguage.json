@@ -282,11 +282,7 @@
     "placeholders": {
       "patterns": [
         {
-          "name": "variable.other.local.jwc",
-          "match": "\\$[A-Za-z_][A-Za-z0-9_]*"
-        },
-        {
-          "name": "variable.parameter.path.jwc",
+          "name": "variable.other.binding.jwc",
           "match": "@[A-Za-z_][A-Za-z0-9_]*"
         }
       ]
@@ -395,7 +391,7 @@
         },
         {
           "name": "keyword.other.query.jwc",
-          "match": "\\b(size|max)\\b(?=\\s+(?:\\$|[0-9]))"
+          "match": "\\b(size|max)\\b(?=\\s+(?:@|[0-9]))"
         },
         {
           "name": "keyword.other.query.jwc",

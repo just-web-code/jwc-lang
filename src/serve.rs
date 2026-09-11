@@ -1785,14 +1785,11 @@ fn percent_decode(s: &str) -> String {
 ///
 /// `main` is an ordinary body, so it runs on an ordinary Vm. A program with
 /// no `main`, or one whose `main` never reaches `serve`, keeps 8080.
-/// The port `main` asked for, or `None` when it never called `serve(...)`.
-///
-/// `Option`, not a defaulted `u16`: "the program did not ask for a
-/// server" and "the program asked for 8080" are different facts, and
-/// `jwc run` needs to tell them apart — it starts a listener only for the
-/// first. Defaulting here is what made `jwc run` on a serving program
-/// exit silently.
 /// The port the deployment and the program agree on.
+///
+/// Only where, never whether: `wants_serve` answers the second question,
+/// and a program that never calls `serve()` has no listener to give a port
+/// to.
 ///
 /// `JWC_PORT`, then `PORT`, then `server { port }`. `PORT` is honoured
 /// unprefixed because every platform that injects a port injects that one —

@@ -29,7 +29,7 @@ view CustomerTotals of App.s {
         left join App.s.Orders O on O.customer_id == C.id as group
         group by C.id, C.name
         as {
-            customer_id: id,
+            customer_id: C.id,
             C.name,
             order_count: count(O.id),
             paid_count:  count(O.id where O.status == OrderStatus.paid),
@@ -50,7 +50,7 @@ view BusyCustomers of App.s {
         left join App.s.Orders O on O.customer_id == C.id as group
         group by C.id
         having count(O.id) > 2
-        as { customer_id: id, order_count: count(O.id) }
+        as { customer_id: C.id, order_count: count(O.id) }
 }
 
 /// Two bare joins fan out, so a plain `count` over either one counts the
@@ -70,7 +70,7 @@ view CustomerActivity of App.s {
         left join App.s.Notes N on N.customer_id == C.id as group
         group by C.id
         as {
-            customer_id: id,
+            customer_id: C.id,
             orders: count.distinct(O.id),
             notes:  count.distinct(N.id)
         }

@@ -237,6 +237,7 @@ the same extraction, so neither can drift from it.
 | `E1205` | `page` used with no `cursor_secret` | `config.md` |
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block | `config.md` |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` | `config.md` |
+| `E1208` | `port` is not an integer literal | `config.md` |
 | `E1401` | `assert fails` without an error type | `testing.md` |
 | `E1402` | `with` on an `assert fails` whose message cannot be a literal | `testing.md` |
 | `E1501` | a package declares a schema object | `packages.md` |

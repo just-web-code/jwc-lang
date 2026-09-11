@@ -1106,7 +1106,7 @@ impl<'a> Builder<'a> {
     }
 
     fn canonical_predicate(&self, e: &Expr, columns: &[ColumnObj]) -> String {
-        canonical_expr(e, columns, &self.enums)
+        canonical_expr(e, columns, &self.enums, None)
     }
 
     fn const_default(&self, e: &Expr, ty: &SqlType) -> Option<String> {
@@ -1343,10 +1343,15 @@ fn walk_names(e: &Expr, f: &mut impl FnMut(&str)) {
 /// The canonicaliser. Public so migrations can reuse it verbatim — a
 /// predicate that canonicalises differently between `gen-sql` and
 /// `migrate new` would produce a phantom diff.
+/// `binding` is the query's driving binder, when there is one. A DDL
+/// predicate has none — a `unique (…) where …` names columns and nothing
+/// else — so the schema side passes `None` and any `x.y` there stays
+/// qualified rather than collapsing onto a column of this table.
 pub fn canonical_expr(
     e: &Expr,
     columns: &[ColumnObj],
     enums: &BTreeMap<String, EnumObj>,
+    binding: Option<&str>,
 ) -> String {
     match &*e.kind {
         ExprKind::Binary { op, lhs, rhs } => {
@@ -1354,23 +1359,29 @@ pub fn canonical_expr(
             let is_null_lhs = matches!(&*lhs.kind, ExprKind::Null);
             match op {
                 BinOp::Eq if is_null_rhs => {
-                    return format!("{} IS NULL", canonical_expr(lhs, columns, enums))
+                    return format!("{} IS NULL", canonical_expr(lhs, columns, enums, binding))
                 }
                 BinOp::Eq if is_null_lhs => {
-                    return format!("{} IS NULL", canonical_expr(rhs, columns, enums))
+                    return format!("{} IS NULL", canonical_expr(rhs, columns, enums, binding))
                 }
                 BinOp::Ne if is_null_rhs => {
-                    return format!("{} IS NOT NULL", canonical_expr(lhs, columns, enums))
+                    return format!(
+                        "{} IS NOT NULL",
+                        canonical_expr(lhs, columns, enums, binding)
+                    )
                 }
                 BinOp::Ne if is_null_lhs => {
-                    return format!("{} IS NOT NULL", canonical_expr(rhs, columns, enums))
+                    return format!(
+                        "{} IS NOT NULL",
+                        canonical_expr(rhs, columns, enums, binding)
+                    )
                 }
                 BinOp::And | BinOp::Or => {
                     // Sort operands so `a and b` and `b and a` are the same
                     // predicate, and therefore the same index name.
                     let mut parts = [
-                        canonical_expr(lhs, columns, enums),
-                        canonical_expr(rhs, columns, enums),
+                        canonical_expr(lhs, columns, enums, binding),
+                        canonical_expr(rhs, columns, enums, binding),
                     ];
                     parts.sort();
                     let sep = if matches!(op, BinOp::And) {
@@ -1406,13 +1417,13 @@ pub fn canonical_expr(
             };
             format!(
                 "{} {sql_op} {}",
-                canonical_expr(lhs, columns, enums),
-                canonical_expr(rhs, columns, enums)
+                canonical_expr(lhs, columns, enums, binding),
+                canonical_expr(rhs, columns, enums, binding)
             )
         }
         ExprKind::Unary { op, rhs } => match op {
-            UnaryOp::Not => format!("NOT ({})", canonical_expr(rhs, columns, enums)),
-            UnaryOp::Neg => format!("-{}", canonical_expr(rhs, columns, enums)),
+            UnaryOp::Not => format!("NOT ({})", canonical_expr(rhs, columns, enums, binding)),
+            UnaryOp::Neg => format!("-{}", canonical_expr(rhs, columns, enums, binding)),
         },
         ExprKind::Name(n) => match columns.iter().find(|c| c.declared == n.name) {
             Some(c) => naming::quote_ident(&c.physical),
@@ -1421,17 +1432,20 @@ pub fn canonical_expr(
         // An enum member reduces to its physical literal (schema.md §4.3).
         ExprKind::Field { base, field } => match &*base.kind {
             ExprKind::Name(n) if enums.contains_key(&n.name) => sql_string(&field.name),
-            // `T.status` — a query binding qualifying a column. DDL has no
-            // bindings, so the canonical form is the column alone; without
-            // this a qualified predicate stops matching the partial unique
-            // it was written against.
-            ExprKind::Name(_) => match columns.iter().find(|c| c.declared == field.name) {
-                Some(c) => naming::quote_ident(&c.physical),
-                None => naming::quote_ident(&naming::physical(&field.name)),
-            },
+            // `T.status` — the *driving* binding qualifying a column. DDL
+            // has no bindings, so the canonical form is the column alone.
+            // Only the driving one: `Joined.status` names another table's
+            // column, and collapsing it here would let a joined predicate
+            // satisfy this table's partial unique.
+            ExprKind::Name(b) if Some(b.name.as_str()) == binding => {
+                match columns.iter().find(|c| c.declared == field.name) {
+                    Some(c) => naming::quote_ident(&c.physical),
+                    None => naming::quote_ident(&naming::physical(&field.name)),
+                }
+            }
             _ => format!(
                 "{}.{}",
-                canonical_expr(base, columns, enums),
+                canonical_expr(base, columns, enums, binding),
                 naming::quote_ident(&field.name)
             ),
         },
@@ -1445,11 +1459,11 @@ pub fn canonical_expr(
             negated,
         } => format!(
             "{} {}IN ({})",
-            canonical_expr(lhs, columns, enums),
+            canonical_expr(lhs, columns, enums, binding),
             if *negated { "NOT " } else { "" },
             items
                 .iter()
-                .map(|i| canonical_expr(i, columns, enums))
+                .map(|i| canonical_expr(i, columns, enums, binding))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1461,7 +1475,7 @@ pub fn canonical_expr(
             format!(
                 "{name}({})",
                 args.iter()
-                    .map(|a| canonical_expr(a, columns, enums))
+                    .map(|a| canonical_expr(a, columns, enums, binding))
                     .collect::<Vec<_>>()
                     .join(", ")
             )

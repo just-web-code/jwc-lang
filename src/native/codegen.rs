@@ -546,11 +546,15 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // is a function of the compile-time analysis, which a running native
     // binary does not carry. Same `document_for` the interpreter and
     // `jwc openapi` call, so all three answer with the same bytes.
-    let (swagger_path, swagger_html, swagger_json) = match &server.swagger {
-        Some(path) => {
-            // Only when the reference is asked for: a second type-check
-            // pass on every build to bake a page nobody serves is time
-            // spent for nothing.
+    // Baked whether or not the source asks for it, because `JWC_SWAGGER`
+    // may ask at run time and the two backends answer the same or the
+    // invariant is gone: the interpreter renders on demand, and a native
+    // binary with nothing baked served an empty 200 instead. The cost is
+    // one more check pass at build time; the route names it carries are in
+    // the router already.
+    let (swagger_path, swagger_html, swagger_json) = {
+        let path = server.swagger.clone().unwrap_or_default();
+        {
             let checked = crate::check::check(ws, &symbols, &built.model);
             let doc = crate::openapi::document_for(
                 ws,
@@ -561,14 +565,11 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
                 None,
             );
             (
-                path.clone(),
+                path,
                 crate::swagger::render(&doc),
                 serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
             )
         }
-        // Not asked for, so nothing is baked in — an off switch that still
-        // carried the page would put every route name in the binary.
-        None => (String::new(), String::new(), String::new()),
     };
     out.push_str(&format!(
         "\nconst JWC_SOURCE_SWAGGER: &str = {};\n\
@@ -874,6 +875,10 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
         // `serve::serve` builds the pool before it binds; a binary that
         // waited for the first query would answer `/readyz` 200 with no
         // connection behind it.
+        //
+        // Before `main`, because `main` is an ordinary body and may query:
+        // `cmd::run` initialises the engine before evaluating it, and a
+        // binary that did not would panic on the pool this side only.
         "    jwc_db_init().await;\n"
     } else {
         ""
@@ -923,8 +928,8 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
          \nasync fn jwc_main_body() {{\n\
          \x20   jwc_install_panic_hook();\n\
          \x20   jwc_load_dotenv();\n\
-         {user_main}\
          {db_boot}\
+         {user_main}\
          {jobs_boot}\
          {listen}}}\n",
         stack = crate::cmd::WORKER_STACK_BYTES,

@@ -49,7 +49,7 @@ view OrgBillingSummary of App.billing {
         left join App.billing.Invoices I on I.org_id == O.id as group
         group by O.id, O.slug
         as {
-            org_id: id,
+            org_id: O.id,
             O.slug,
             invoice_count: count(I.id),
             open_count: count(I.id where I.status == InvoiceStatus.open),

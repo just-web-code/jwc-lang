@@ -39,4 +39,17 @@ service First {
     function view_inherits_the_driving_key(id: bigint) {
         return select V from App.s.OrgList where V.id == @id first;
     }
+
+    // `Orgs.slug` is unique, and the predicate pins a `slug` — but the
+    // *other* binding's. It says nothing about how many `O` rows match, so
+    // `first` is still `E0520`. The analysis reads the binding, not just
+    // the column name; without that the self-join's `slug` satisfied the
+    // driving table's own `unique (slug)`.
+    function a_joined_equality_does_not_narrow_the_driving_row(slug: text) {
+        return select O from App.s.Orgs                        // expect: E0520
+            left join App.s.Orgs Other on Other.id == O.id as one twin
+            where Other.slug == @slug
+            as { O.id, O.name }
+            first;
+    }
 }

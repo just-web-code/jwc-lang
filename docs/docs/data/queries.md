@@ -29,19 +29,19 @@ names the expected position, and `jwc fmt` normalises to it.
 ## The binder, and why it exists
 
 ```jwc no-compile
-select N from App.notes.Notes where org_id == @org_id
+select N from App.notes.Notes where N.org_id == @org_id
 ```
 
-`N` binds the row, and every column in a clause says so: `N.org_id`.
-`@name` is a local. That is the whole of the rule that makes
+`N` binds the row, and every column in a clause says so. `@name` is a
+local. That is the whole of the rule that makes
 
 ```jwc no-compile
-where org_id == @org_id
+where N.org_id == @org_id
 ```
 
 mean what it looks like. In SQL, `WHERE org_id = org_id` is a tautology
 that matches every row; here the two sides cannot be confused, because
-they are spelled differently.
+they are spelled differently. A bare `org_id` is `E0904`.
 
 ## Projections are the response boundary
 
@@ -111,9 +111,9 @@ happened to produce, and that answer changes under load.
 
 ```jwc no-compile
 select N from App.notes.Notes
-    where org_id == @org_id
-    as { id, title, created_at }
-    orderby created_at asc, id asc
+    where N.org_id == @org_id
+    as { N.id, N.title, N.created_at }
+    orderby N.created_at asc, N.id asc
     page after @cursor size @size
 ```
 

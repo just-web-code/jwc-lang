@@ -22,7 +22,23 @@ fn repo_root() -> PathBuf {
 fn generate(dir: &str) -> String {
     let ws = Workspace::load(repo_root().join(dir)).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     jwc::native::codegen_for_test(&ws).expect("codegen")
+}
+
+/// `codegen_for_test` lowers without checking, so a fixture the compiler
+/// rejects still produced Rust and the assertions below still passed. Every
+/// fixture in this file goes through the checker first.
+fn checked(ws: &Workspace) {
+    let built = jwc::model::build(ws);
+    let sym = jwc::symbols::build(ws, &built.model);
+    let errors: Vec<String> = jwc::check::check(ws, &sym, &built.model)
+        .diags
+        .iter()
+        .filter(|(_, d)| d.severity == jwc::diag::Severity::Error)
+        .map(|(_, d)| format!("{}: {}", d.code, d.message))
+        .collect();
+    assert!(errors.is_empty(), "the fixture must compile: {errors:?}");
 }
 
 #[test]
@@ -300,15 +316,16 @@ fn an_optional_assignment_compiles_one_statement_per_combination() {
          \x20   route PATCH \"{id: int}\" {\n\
          \x20       let p = request.body() as Patch;\n\
          \x20       return json(update Notes of App.s.Notes set title =? @p.title, body =? @p.body \
-         where id == @id as { id, title, body } first or throw NotFound(\"yo'q\"));\n\
+         where Notes.id == @id as { Notes.id, Notes.title, Notes.body } first or throw NotFound(\"yo'q\"));\n\
          \x20   }\n\
          }\n\
-         function main() { serve(8080); }\n",
+         function main() { serve(); }\n",
     )
     .expect("write");
 
     let ws = jwc::workspace::Workspace::load(&dir).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -347,16 +364,17 @@ fn a_page_reads_its_cursor_once_and_signs_the_next_one() {
          table Notes of App.s { id int primary key identity; title varchar(80); }\n\
          routes \"/notes\" {\n\
          \x20   route GET \"\" {\n\
-         \x20       return json(select N from App.s.Notes as { id, title } \
-         orderby id asc page after request.query(\"cursor\") size 20);\n\
+         \x20       return json(select N from App.s.Notes as { N.id, N.title } \
+         orderby N.id asc page after request.query(\"cursor\") size 20);\n\
          \x20   }\n\
          }\n\
-         function main() { serve(8080); }\n",
+         function main() { serve(); }\n",
     )
     .expect("write");
 
     let ws = jwc::workspace::Workspace::load(&dir).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -391,16 +409,17 @@ fn a_spread_takes_its_columns_from_the_declared_type() {
          class Patch { title varchar(80); body text; }\n\
          service NoteService {\n\
          \x20   function update(id: int, req: Patch) {\n\
-         \x20       return update Notes of App.s.Notes set ...@req where id == @id \
-         as { id, title, body } first or throw NotFound(\"yo'q\");\n\
+         \x20       return update Notes of App.s.Notes set ...@req where Notes.id == @id \
+         as { Notes.id, Notes.title, Notes.body } first or throw NotFound(\"yo'q\");\n\
          \x20   }\n\
          }\n\
-         function main() { serve(8080); }\n",
+         function main() { serve(); }\n",
     )
     .expect("write");
 
     let ws = jwc::workspace::Workspace::load(&dir).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -433,12 +452,13 @@ fn with_headers_replaces_rather_than_appends() {
          \x20       return json({ ok: true }) with { \"Cache-Control\": \"public\" };\n\
          \x20   }\n\
          }\n\
-         function main() { serve(8080); }\n",
+         function main() { serve(); }\n",
     )
     .expect("write");
 
     let ws = jwc::workspace::Workspace::load(&dir).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -710,13 +730,14 @@ fn an_insert_spreading_a_class_lowers() {
          }\n\
          service S {\n\
          \x20   function make(req: NoteNew) {\n\
-         \x20       return insert Notes into App.s.Notes { ...@req } as { id, title };\n\
+         \x20       return insert Notes into App.s.Notes { ...@req } as { Notes.id, Notes.title };\n\
          \x20   }\n\
          }\n",
     )
     .expect("write");
     let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    checked(&ws);
     let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
 
     // A required field costs no presence bit — validation ran before the

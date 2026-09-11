@@ -663,11 +663,23 @@ fn view_sym(s: &Symbols, v: &ViewDecl, loc: Loc) -> ViewSym {
                     shape.push((i.name.clone(), ty));
                 }
                 ProjField::Expr { alias, value, .. } => {
-                    // `org_id: id` — an alias of a driving column keeps its
-                    // uniqueness (queries.md §5.2.1).
-                    if let ExprKind::Name(src) = &*value.kind {
-                        if let Some(ty) = s.tables.get(&driving).and_then(|t| t.column(&src.name)) {
-                            inherited.insert(alias.name.clone(), src.name.clone());
+                    // `org_id: O.id` — an alias of a driving column keeps
+                    // its uniqueness (queries.md §5.2.1). The column names
+                    // its binding like every other one (§2.4), so the source
+                    // is the field of `Binding.column`, not a bare name.
+                    let source = match &*value.kind {
+                        ExprKind::Name(src) => Some(src.name.clone()),
+                        ExprKind::Field { base, field }
+                            if matches!(&*base.kind, ExprKind::Name(b)
+                                if b.name == v.body.binder.name) =>
+                        {
+                            Some(field.name.clone())
+                        }
+                        _ => None,
+                    };
+                    if let Some(src) = source {
+                        if let Some(ty) = s.tables.get(&driving).and_then(|t| t.column(&src)) {
+                            inherited.insert(alias.name.clone(), src);
                             shape.push((alias.name.clone(), ty.clone()));
                             continue;
                         }

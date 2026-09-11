@@ -106,7 +106,7 @@ default.
 | `max_page_size` | `int` | 100 | ceiling for `page … size` (queries §9.2) |
 | `strict_slash` | `boolean` | true | `/x/` → 308 → `/x` |
 | `bind` | `text` | `"0.0.0.0"` | the address the listener binds |
-| `port` | `int` | 8080 | the port the listener binds (§3.2.2) |
+| `port` | `int` | 8080 | the port the listener binds; an integer literal, `E1208` otherwise (§3.2.2) |
 | `cursor_secret` | `text` | — | HMAC key for keyset cursors; **required** if any query uses `page` (`E1205`) |
 | `trusted_proxies` | `inet[]` | `[]` | see §3.3 |
 | `shutdown_grace` | duration | `20s` | drain window on SIGTERM |
@@ -445,3 +445,4 @@ under `jwc serve` and could not be built.
 | `E1205` | `page` used with no `cursor_secret` |
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` |
+| `E1208` | `port` is not an integer literal |

@@ -73,7 +73,7 @@ load-bearing: `U.email` is the *column* and `@email` is your variable. A bare
 write — is not spellable by accident.
 
 ```jwc no-compile
-select A from App.auth.Accounts where email == @email as { id } first;
+select A from App.auth.Accounts where A.email == @email as { A.id } first;
 ```
 
 Both spellings compile everywhere the sigil is optional, and `jwc fmt`

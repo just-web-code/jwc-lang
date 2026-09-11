@@ -3609,18 +3609,15 @@ impl<'a> Checker<'a> {
                     out.push((i.name.clone(), ty));
                 }
                 ProjField::Expr { alias, value, .. } => {
-                    // `org_id: id` — an alias of a driving column. Bare names
-                    // here are columns of the driving binding, same as
-                    // `ProjField::Column`; an aggregate over a joined table
-                    // qualifies (`count(I.id)`).
-                    let outer = self.scoped_to.take();
-                    if matches!(&*value.kind, ExprKind::Name(_)) {
-                        self.scoped_to = Some(object.to_string());
-                    }
+                    // `org_id: O.id` — an alias of a column, which names its
+                    // binding like every other column reference (queries.md
+                    // §2.4). A bare name here reaches `column()` and is
+                    // `E0904` with the binding it should have carried.
                     let ty = self.expr(value);
-                    self.scoped_to = outer;
-                    if let ExprKind::Name(n) = &*value.kind {
-                        self.reject_private(object, &n.name, value.span);
+                    if let ExprKind::Field { base, field } = &*value.kind {
+                        if matches!(&*base.kind, ExprKind::Name(_)) {
+                            self.reject_private(object, &field.name, value.span);
+                        }
                     }
                     out.push((alias.name.clone(), ty));
                 }
@@ -3671,7 +3668,17 @@ impl<'a> Checker<'a> {
             .fields
             .iter()
             .map(|f| match f {
-                ProjField::Column { column: i, .. } => {
+                ProjField::Column { binding, column: i } => {
+                    if let Some(b) = binding {
+                        self.err_note(
+                            b.span,
+                            "E0905",
+                            format!("`{}` is not a binding here", b.name),
+                            "a nested shape is already scoped to its join, so its \
+                             fields are bare",
+                            "queries.md §6.1",
+                        );
+                    }
                     let ty = self.column_of(object, &i.name).unwrap_or_else(|| {
                         self.err(
                             i.span,
@@ -3981,8 +3988,8 @@ impl<'a> Checker<'a> {
             );
             return;
         };
-        let equalities = equality_columns(filter);
-        if self.covers_unique(object, &equalities, filter) {
+        let equalities = equality_columns(filter, &s.binder.name);
+        if self.covers_unique(object, &equalities, filter, &s.binder.name) {
             return;
         }
         self.err_note(
@@ -3995,7 +4002,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    fn covers_unique(&self, object: &str, equalities: &HashSet<String>, filter: &Expr) -> bool {
+    fn covers_unique(
+        &self,
+        object: &str,
+        equalities: &HashSet<String>,
+        filter: &Expr,
+        binding: &str,
+    ) -> bool {
+        let binding = Some(binding);
         // Views inherit the driving table's keys through their projection
         // (queries.md §5.2.1).
         let (table, mapped): (Option<&crate::symbols::TableSym>, HashSet<String>) =
@@ -4038,7 +4052,7 @@ impl<'a> Checker<'a> {
             .collect();
         let conjuncts: Vec<String> = split_conjuncts(filter)
             .iter()
-            .map(|c| crate::model::canonical_expr(c, &model_table.columns, &enums))
+            .map(|c| crate::model::canonical_expr(c, &model_table.columns, &enums, binding))
             .collect();
         t.partial_uniques.iter().any(|(cols, pred)| {
             cols.iter().all(|c| mapped.contains(c))
@@ -4911,20 +4925,26 @@ fn contains_aggregate(e: &Expr) -> bool {
 }
 
 /// Columns constrained by equality against something that is not a column.
-fn equality_columns(e: &Expr) -> HashSet<String> {
+/// The columns of `binding` that the predicate pins to one value.
+///
+/// Of `binding`, not of anything in scope: the question is whether the
+/// *driving* row is unique, and `Joined.slug == "x"` says nothing about it.
+/// Counting a joined column here let a `first` pass over rows the predicate
+/// never narrowed.
+fn equality_columns(e: &Expr, binding: &str) -> HashSet<String> {
     let mut out = HashSet::new();
-    collect_equalities(e, &mut out);
+    collect_equalities(e, binding, &mut out);
     out
 }
 
-fn collect_equalities(e: &Expr, out: &mut HashSet<String>) {
+fn collect_equalities(e: &Expr, binding: &str, out: &mut HashSet<String>) {
     let ExprKind::Binary { op, lhs, rhs } = &*e.kind else {
         return;
     };
     match op {
         BinOp::And => {
-            collect_equalities(lhs, out);
-            collect_equalities(rhs, out);
+            collect_equalities(lhs, binding, out);
+            collect_equalities(rhs, binding, out);
         }
         BinOp::Eq => {
             // `col == <not a column, not null>` pins one value.
@@ -4933,8 +4953,10 @@ fn collect_equalities(e: &Expr, out: &mut HashSet<String>) {
                     out.insert(n.name.clone());
                 }
             }
-            if let ExprKind::Field { field, .. } = &*lhs.kind {
-                if !matches!(&*rhs.kind, ExprKind::Null) {
+            if let ExprKind::Field { base, field } = &*lhs.kind {
+                let of_the_driving_row =
+                    matches!(&*base.kind, ExprKind::Name(b) if b.name == binding);
+                if of_the_driving_row && !matches!(&*rhs.kind, ExprKind::Null) {
                     out.insert(field.name.clone());
                 }
             }

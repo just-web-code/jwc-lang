@@ -28,6 +28,6 @@ service GroupAlias {
     function aliasing_does_not_group() {
         return select N from App.s.Notes
             group by N.org_id
-            as { N.org_id, text: body, n: count(N.id) };   // expect: E0531
+            as { N.org_id, text: N.body, n: count(N.id) };   // expect: E0531
     }
 }

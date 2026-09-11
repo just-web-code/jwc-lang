@@ -16,8 +16,9 @@ Every `.jwc` construct in [the v1 grammar](https://jwc.1kb.uz): declarations
 (`database`, `schema`, `table`, `view`, `enum`, `class`, `error`, `service`,
 `middleware`, `routes`, `route`, `socket`, `errorHandler`, `server`, `job`,
 `test`), the query clauses, the scalar dictionary, the validation rules, and
-the two sigils that are easy to misread without colour — `$local` for a
-binding and `@name` for a path parameter.
+the two things that are easy to misread without colour — `B.column` for a
+column of binding `B`, and `@name` for a local, a parameter or a path
+parameter.
 
 Comments are `//` for a line and `///` for a doc comment, which attaches to
 the declaration, column or field below it.
