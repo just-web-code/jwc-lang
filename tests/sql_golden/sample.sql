@@ -23,7 +23,11 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'email', t0.e
   LIMIT 1) q
 
 -- ── AuthService.orgs_of ──
--- not compilable yet: this query is not expressible yet
+-- $1 = @account_id :: bigint
+SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('org_id', t0.org_id::text, 'account_id', t0.account_id::text, 'role', t0.role, 'org', t0.org) AS j
+  FROM org.member_access t0
+  WHERE t0.account_id = ($1::text)::bigint
+  ORDER BY t0.org__name) q
 
 -- ── BillingService.plans ──
 -- $1 = true :: boolean

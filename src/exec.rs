@@ -1702,7 +1702,10 @@ impl<'a> Vm<'a> {
         // the current row instead of emitting an empty SET.
         if sets.is_empty() {
             let probe = SelectExpr {
-                binder: Ident::new("x", u.span),
+                // The update's own binder, because the projection is
+                // written against it: `as { Accounts.id }` resolves only
+                // where `Accounts` is bound (queries.md §2.4).
+                binder: u.binder.clone(),
                 source: u.table.clone(),
                 joins: vec![],
                 filter: u.filter.clone(),
@@ -1841,6 +1844,11 @@ impl<'a> Vm<'a> {
         };
         match &*e.kind {
             ExprKind::Name(n) => t.column(&n.name).is_some(),
+            // `T.value` — the binding qualifying the column, which is how a
+            // column is written everywhere else in a query (queries.md §2.4).
+            ExprKind::Field { base, field } => {
+                matches!(&*base.kind, ExprKind::Name(_)) && t.column(&field.name).is_some()
+            }
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.reads_a_column(table, lhs) || self.reads_a_column(table, rhs)
             }

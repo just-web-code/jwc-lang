@@ -86,4 +86,6 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ) t2_agg ON true) q
 
 -- ── ByOrgName.unbounded ──
--- not compilable yet: this query is not expressible yet
+SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number', t0.number, 'issued_at', t0.issued_at, 'org', t0.org, 'lines', t0.lines) AS j
+  FROM s.invoice_with_org t0
+  ORDER BY t0.org__name) q

@@ -1023,6 +1023,29 @@ impl<'a> Compiler<'a> {
                 Some(format!("{alias}.{}", quote_ident(&c.physical)))
             }
             ExprKind::Field { base, field } => {
+                // `MA.org.name` — the binding, then the field a view
+                // flattened, then the column inside it. The leading binding
+                // is the one already in scope, so dropping it leaves
+                // `org.name`, which the two arms below handle. Written this
+                // way because a column names its binding (queries.md §2.4),
+                // and only the *first* segment is that binding.
+                if let ExprKind::Field {
+                    base: root,
+                    field: nested,
+                } = &*base.kind
+                {
+                    if let ExprKind::Name(b) = &*root.kind {
+                        if self.object_of(&b.name).is_some() {
+                            let object = self.object_of(&b.name)?;
+                            let rel = self.table(&object)?;
+                            let flat =
+                                format!("{}{}{}", nested.name, crate::views::FLAT, field.name);
+                            let c = rel.column(&flat)?;
+                            let alias = self.sql_alias(&b.name);
+                            return Some(format!("{alias}.{}", quote_ident(&c.physical)));
+                        }
+                    }
+                }
                 let ExprKind::Name(b) = &*base.kind else {
                     return None;
                 };

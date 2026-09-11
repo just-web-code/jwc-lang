@@ -3730,3 +3730,81 @@ fn the_served_json_content_type_is_the_canonical_one() {
         );
     }
 }
+
+/// `set value = T.value + 1` is an increment the database performs.
+///
+/// Two halves had to agree and did not: `reads_a_column` decides whether the
+/// expression belongs in the database at all, and `set_expr` lowers it when
+/// it does. Both matched only a bare `value`, so once a column carried its
+/// binding (queries.md §2.4) the qualified form fell through to the
+/// interpreter, evaluated to null, and faulted on `Null + Int(1)` — a
+/// read-modify-write turned into a crash, which is the race `writes.md §2.3`
+/// exists to avoid.
+///
+/// No database: this is the SQL the builder writes, which is where the bug
+/// was. The behaviour is covered by `http_golden` against a real Postgres.
+#[test]
+fn a_qualified_self_reference_in_a_set_stays_in_the_database() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace n;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Counters of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   name varchar(40) unique;\n\
+         \x20   value bigint default 0;\n\
+         }\n\
+         service S {\n\
+         \x20   function bump() {\n\
+         \x20       return update C of App.s.Counters\n\
+         \x20           set value = C.value + 1\n\
+         \x20           where C.name == \"invoice\"\n\
+         \x20           as { C.value } first;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .expect("write");
+    let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
+    assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    let built = jwc::model::build(&ws);
+
+    let update = ws
+        .files
+        .iter()
+        .flat_map(|f| f.program.decls.iter())
+        .find_map(|d| match d {
+            jwc::ast::Decl::Service(s) => s.functions.iter().find_map(|f| {
+                f.body.iter().find_map(|st| match st {
+                    jwc::ast::Stmt::Return { value: Some(e), .. } => match &*e.kind {
+                        jwc::ast::ExprKind::Update(u) => Some((**u).clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+            }),
+            _ => None,
+        })
+        .expect("the update");
+
+    let mut b = jwc::sql::Builder::new(&built.model);
+    let sql = b
+        .update(
+            &update,
+            &[(
+                "value".to_string(),
+                jwc::sql::SetValue::Sql(match &update.sets[0] {
+                    jwc::ast::SetItem::Set { value, .. } => value.clone(),
+                    _ => panic!("the set item"),
+                }),
+            )],
+        )
+        .expect("the update must be expressible")
+        .sql;
+
+    assert!(
+        sql.contains("SET value = (value + "),
+        "the column must be read in SQL, not bound as a value:\n{sql}"
+    );
+}

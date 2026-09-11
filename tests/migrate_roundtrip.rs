@@ -116,7 +116,7 @@ impl Gen {
             "enum Plan of App.org {{ {} }}\n\n",
             members.join(", ")
         ));
-        s.push_str(&format!("--- {}\ntable Orgs of App.org {{\n", self.comment));
+        s.push_str(&format!("/// {}\ntable Orgs of App.org {{\n", self.comment));
         s.push_str("    id         bigint primary key identity;\n");
         s.push_str("    slug       varchar(40) unique;\n");
         s.push_str("    plan       Plan;\n");
