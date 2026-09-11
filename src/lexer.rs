@@ -6,7 +6,8 @@
 //!   (names.md §2.6);
 //! * `@name` and `$name` are single tokens — `@ name` does not lex
 //!   (names.md §2.5);
-//! * `---` doc comments and `--` line comments are kept as [`Trivia`] on the
+//! * `///` doc, `//` line and nested `/* */` block comments are kept as
+//!   [`Trivia`] on the
 //!   following token, so `jwc v1 fmt` can round-trip them;
 //! * `r"..."` raw strings do no escape processing except `\"`.
 
@@ -82,8 +83,8 @@ impl<'a> Lexer<'a> {
             if newlines > 1 {
                 self.pending.push(Trivia::Blank);
             }
-            if self.peek() == b'-' && self.peek_at(1) == b'-' {
-                let doc = self.peek_at(2) == b'-';
+            if self.peek() == b'/' && self.peek_at(1) == b'/' {
+                let doc = self.peek_at(2) == b'/';
                 self.i += if doc { 3 } else { 2 };
                 let start = self.i;
                 while self.i < self.src.len() && self.peek() != b'\n' {
@@ -95,6 +96,55 @@ impl<'a> Lexer<'a> {
                 } else {
                     Trivia::Line(body)
                 });
+                continue;
+            }
+            if self.peek() == b'/' && self.peek_at(1) == b'*' {
+                let open = self.i;
+                self.i += 2;
+                let start = self.i;
+                // Nested, like Rust's: commenting out a region that already
+                // contains a comment is the whole reason to have these.
+                let mut depth = 1usize;
+                let mut closed = false;
+                while self.i < self.src.len() {
+                    if self.peek() == b'/' && self.peek_at(1) == b'*' {
+                        depth += 1;
+                        self.i += 2;
+                        continue;
+                    }
+                    if self.peek() == b'*' && self.peek_at(1) == b'/' {
+                        depth -= 1;
+                        self.i += 2;
+                        if depth == 0 {
+                            closed = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    self.i += 1;
+                }
+                let end = if closed { self.i - 2 } else { self.i };
+                let body: Vec<String> = self.text[start..end]
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .skip_while(|l| l.is_empty())
+                    .collect();
+                let mut body = body;
+                while body.last().is_some_and(|l| l.is_empty()) {
+                    body.pop();
+                }
+                if !closed {
+                    self.diags.push(
+                        Diagnostic::error(
+                            "E0101",
+                            Span::new(open, self.i),
+                            "unterminated block comment",
+                        )
+                        .note("a `/*` needs a matching `*/`; they nest")
+                        .clause("names.md §1.7"),
+                    );
+                }
+                self.pending.push(Trivia::Block(body));
                 continue;
             }
             break;
@@ -174,11 +224,21 @@ impl<'a> Lexer<'a> {
                 self.i += 1;
             }
             let name = self.text[nstart..self.i].to_string();
-            return Some(if sigil == b'@' {
-                Tok::PathParam(name)
-            } else {
-                Tok::Local(name)
-            });
+            if sigil == b'$' {
+                // One sigil for everything bound outside a query: a local, a
+                // parameter and a path parameter are the same kind of thing
+                // at the use site (names.md §5.2).
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0903",
+                        Span::new(start, self.i),
+                        format!("`${name}` — the sigil is `@`"),
+                    )
+                    .note(format!("write `@{name}`"))
+                    .clause("names.md §5.2"),
+                );
+            }
+            return Some(Tok::Local(name));
         }
 
         // Punctuation, longest match first.
@@ -427,15 +487,29 @@ mod tests {
     }
 
     #[test]
-    fn sigils_are_single_tokens() {
+    fn the_sigil_is_one_token() {
         assert_eq!(
-            toks("@org_id $req"),
+            toks("@org_id @req"),
             vec![
-                Tok::PathParam("org_id".into()),
+                Tok::Local("org_id".into()),
                 Tok::Local("req".into()),
                 Tok::Eof
             ]
         );
+    }
+
+    #[test]
+    fn the_old_sigil_names_the_one_that_replaced_it() {
+        let (t, d) = Lexer::new("$req").tokenize();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].code, "E0903");
+        assert!(
+            d[0].note.as_deref().is_some_and(|n| n.contains("@req")),
+            "{:?}",
+            d[0].note
+        );
+        // Still lexed, so one `$` does not cascade into a second error.
+        assert_eq!(t[0].tok, Tok::Local("req".into()));
     }
 
     #[test]
@@ -474,13 +548,52 @@ mod tests {
 
     #[test]
     fn doc_and_line_comments_become_trivia() {
-        let (t, d) = Lexer::new("--- doc\n-- plain\ntable").tokenize();
+        let (t, d) = Lexer::new("/// doc\n// plain\ntable").tokenize();
         assert!(d.is_empty());
         assert_eq!(
             t[0].leading,
             vec![Trivia::Doc("doc".into()), Trivia::Line("plain".into())]
         );
         assert_eq!(t[0].tok, Tok::Ident("table".into()));
+    }
+
+    #[test]
+    fn block_comments_nest_and_keep_their_lines() {
+        let (t, d) = Lexer::new("/* a\n/* inner */\nb */\ntable").tokenize();
+        assert!(d.is_empty(), "{d:?}");
+        assert_eq!(
+            t[0].leading,
+            vec![Trivia::Block(vec![
+                "a".into(),
+                "/* inner */".into(),
+                "b".into()
+            ])]
+        );
+        assert_eq!(t[0].tok, Tok::Ident("table".into()));
+    }
+
+    #[test]
+    fn a_block_comment_swallows_a_line_comment_and_not_a_string() {
+        // The point of nesting: a region with comments in it can be
+        // commented out whole.
+        let (t, _) = Lexer::new("/* // not a line comment */ table").tokenize();
+        assert_eq!(
+            t[0].leading,
+            vec![Trivia::Block(vec!["// not a line comment".into()])]
+        );
+
+        // And the other direction: `/*` inside a literal is text.
+        let (t, d) = Lexer::new(r#""a /* b" table"#).tokenize();
+        assert!(d.is_empty(), "{d:?}");
+        assert_eq!(t[0].tok, Tok::Str("a /* b".into()));
+    }
+
+    #[test]
+    fn an_unclosed_block_comment_is_named_and_does_not_hang() {
+        let (t, d) = Lexer::new("table /* off the end").tokenize();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].code, "E0101");
+        assert_eq!(t.last().map(|t| &t.tok), Some(&Tok::Eof));
     }
 
     #[test]

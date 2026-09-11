@@ -106,7 +106,7 @@ schema org of App;
 
 enum Plan of App.org { free, pro }
 
---- Tenants.
+/// Tenants.
 table Orgs of App.org {
     id   bigint primary key identity;
     slug varchar(40) unique;
@@ -130,7 +130,7 @@ schema org of App;
 
 enum Plan of App.org { free, pro, enterprise }
 
---- Tenants, one per customer.
+/// Tenants, one per customer.
 table Orgs of App.org {
     id     bigint primary key identity;
     slug   varchar(40) unique;
@@ -734,4 +734,110 @@ async fn adoption_reports_a_wrong_constraint_name_instead_of_refusing() {
         .expect("rename back");
     let problems = apply::verify(&client, &snap).await.expect("verify");
     assert!(problems.is_empty(), "{problems:?}");
+}
+
+/// A database that is not there is an error that says how to make one.
+///
+/// Postgres answers `FATAL: database "X" does not exist` and stops. That
+/// is true and it is where the reader stops too: nothing in it says
+/// whether `jwc` was supposed to create the database, or what to run.
+#[tokio::test]
+async fn a_missing_database_says_how_to_create_it() {
+    let (url, _guard) = db!("a_missing_database_says_how_to_create_it");
+    let absent = swap_dbname(&url, "jwc_no_such_database_xyz");
+
+    let err = jwc::engine::connect_for_migrations(&absent)
+        .await
+        .expect_err("a database that does not exist cannot be connected to");
+    let msg = format!("{err:#}");
+
+    assert!(
+        msg.contains("jwc_no_such_database_xyz") && msg.contains("does not exist"),
+        "the error must name the database:\n{msg}"
+    );
+    assert!(
+        msg.contains("createdb"),
+        "the error must name the command that creates one:\n{msg}"
+    );
+    assert!(
+        msg.contains("--create-db"),
+        "the error must name the flag that does it here:\n{msg}"
+    );
+}
+
+/// A database whose name differs only in case is named in the error.
+///
+/// `CREATE DATABASE MyWallet` without quotes creates `mywallet`, because
+/// an unquoted identifier folds to lower case and the name in a URL does
+/// not. The connection then fails naming `MyWallet` with `mywallet` next
+/// to it, and the reader is told a database is missing while looking at
+/// it in `\l`.
+#[tokio::test]
+async fn a_database_that_differs_only_in_case_is_named() {
+    let (url, _guard) = db!("a_database_that_differs_only_in_case_is_named");
+    let client = connect(&url).await;
+
+    // The folded name is what an unquoted CREATE DATABASE would leave.
+    let _ = client.execute("CREATE DATABASE jwc_case_twin", &[]).await;
+
+    let asked = swap_dbname(&url, "JWC_Case_Twin");
+    let err = jwc::engine::connect_for_migrations(&asked)
+        .await
+        .expect_err("the written name is not the folded one");
+    let msg = format!("{err:#}");
+
+    let _ = client.execute("DROP DATABASE jwc_case_twin", &[]).await;
+
+    assert!(
+        msg.contains("jwc_case_twin") && msg.contains("JWC_Case_Twin"),
+        "the error must name both the database asked for and the one that \
+         is there:\n{msg}"
+    );
+    assert!(
+        msg.contains("case"),
+        "the error must say the two differ in case:\n{msg}"
+    );
+}
+
+/// `--create-db` creates the name as written, not as folded.
+#[tokio::test]
+async fn create_db_uses_the_name_as_written() {
+    let (url, _guard) = db!("create_db_uses_the_name_as_written");
+    let client = connect(&url).await;
+    let _ = client.execute("DROP DATABASE \"JWC_Written\"", &[]).await;
+
+    let target = swap_dbname(&url, "JWC_Written");
+    let made = jwc::engine::create_database_if_absent(&target)
+        .await
+        .expect("create");
+    assert_eq!(made.as_deref(), Some("JWC_Written"));
+
+    let found: i64 = client
+        .query_one(
+            "SELECT count(*) FROM pg_database WHERE datname = 'JWC_Written'",
+            &[],
+        )
+        .await
+        .expect("count")
+        .get(0);
+    assert_eq!(found, 1, "the database must carry the name as written");
+
+    // Asked for again, it is already there and nothing is created.
+    let again = jwc::engine::create_database_if_absent(&target)
+        .await
+        .expect("second call");
+    assert_eq!(again, None, "a second call must be a no-op");
+
+    let _ = client.execute("DROP DATABASE \"JWC_Written\"", &[]).await;
+}
+
+/// Point a connection string at a different database, leaving user,
+/// password, host, port and every query parameter alone.
+fn swap_dbname(url: &str, name: &str) -> String {
+    let cfg: tokio_postgres::Config = url.parse().expect("a parseable DATABASE_URL");
+    let current = cfg.get_dbname().expect("a database in the URL");
+    let (head, tail) = url
+        .rsplit_once(&format!("/{current}"))
+        .expect("the database name in the path");
+    format!("{head}/{name}{tail}")
 }

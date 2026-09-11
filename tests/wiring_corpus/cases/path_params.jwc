@@ -1,50 +1,50 @@
 namespace path_params;
 
--- names.md §6.2.3 — `redis.*` is a package namespace, so using it takes
--- an import.
+// names.md §6.2.3 — `redis.*` is a package namespace, so using it takes
+// an import.
 import redis;
 
 import prelude;
 
--- routing.md §3.1 and §5.4 — two ways a route can be quietly wrong.
+// routing.md §3.1 and §5.4 — two ways a route can be quietly wrong.
 service Notes {
     function by_org(org_id: bigint) -> { id: bigint }[] {
         return select N from App.s.Notes
-            where org_id == $org_id
-            as { id }
-            orderby id asc;
+            where N.org_id == @org_id
+            as { N.id }
+            orderby N.id asc;
     }
 }
 
--- An untyped `{name}` is text, and this language does not coerce it to
--- the column's type. The error says which word is missing rather than
--- that two types do not compare.
+// An untyped `{name}` is text, and this language does not coerce it to
+// the column's type. The error says which word is missing rather than
+// that two types do not compare.
 routes "/untyped/{org_id}" {
     route GET "" {
         let notes = select N from App.s.Notes
-            where org_id == @org_id           -- expect: E0376
-            as { id }
-            orderby id asc;
+            where N.org_id == @org_id           // expect: E0376
+            as { N.id }
+            orderby N.id asc;
 
-        return json($notes);
+        return json(@notes);
     }
 }
 
--- One word fixes it.
+// One word fixes it.
 routes "/typed/{org_id: bigint}" {
     route GET "" {
         return json(Notes.by_org(@org_id));
     }
 }
 
--- `request.route()` gives one bucket per endpoint; `request.path()` gives
--- one per id, so a caller walking ids is never limited.
+// `request.route()` gives one bucket per endpoint; `request.path()` gives
+// one per id, so a caller walking ids is never limited.
 middleware PathKeyed {
     let key = "rl:" + request.path();
 
-    let allowed = redis.rate_limit($key, 100, 60);   -- expect: W0602
+    let allowed = redis.rate_limit(@key, 100, 60);   // expect: W0602
 
-    if (!$allowed) {
+    if (!@allowed) {
         throw TooManyRequests("ko'p");
     }
 }
@@ -52,9 +52,9 @@ middleware PathKeyed {
 middleware RouteKeyed {
     let key = "rl:" + request.route();
 
-    let allowed = redis.rate_limit($key, 100, 60);
+    let allowed = redis.rate_limit(@key, 100, 60);
 
-    if (!$allowed) {
+    if (!@allowed) {
         throw TooManyRequests("ko'p");
     }
 }

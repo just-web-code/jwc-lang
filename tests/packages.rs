@@ -134,7 +134,7 @@ fn a_declared_raise_set_may_widen_but_not_narrow() {
                      error B(message: text) = 419 : \"b\";\n\
                      service Demo {\n\
                      \x20   function both(flag: boolean) -> text raises (A) {\n\
-                     \x20       if ($flag) { throw A(\"a\"); }\n\
+                     \x20       if (@flag) { throw A(\"a\"); }\n\
                      \x20       throw B(\"b\");\n\
                      \x20   }\n\
                      }\n";
@@ -189,7 +189,7 @@ fn a_vendored_package_does_not_collide_with_itself() {
         "namespace greet;\n\
          service Greet {\n\
          \x20   function hello(who: text) {\n\
-         \x20       return \"salom, \" + $who;\n\
+         \x20       return \"salom, \" + @who;\n\
          \x20   }\n\
          }\n",
     )

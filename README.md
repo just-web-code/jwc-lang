@@ -30,14 +30,14 @@ class NoteInput {
 service NoteService {
     function list() {
         return select N from App.app.Notes
-            as { id, title, created_at }
-            orderby created_at desc, id desc
+            as { N.id, N.title, N.created_at }
+            orderby N.created_at desc, N.id desc
             limit 50;
     }
 
     function create(req: NoteInput) {
-        return insert into App.app.Notes { ...$req }
-            as { id, title, body, created_at };
+        return insert Notes into App.app.Notes { ...@req }
+            as { Notes.id, Notes.title, Notes.body, Notes.created_at };
     }
 }
 

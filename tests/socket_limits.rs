@@ -26,7 +26,7 @@ server {
 routes "/" {
     socket "ws" {
         on message (text) {
-            socket.send("len=" + string.of(string.len($text)));
+            socket.send("len=" + string.of(string.len(@text)));
         }
     }
 }

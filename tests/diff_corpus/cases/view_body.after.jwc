@@ -1,6 +1,6 @@
--- ops: 0 drop_view org.org_summary
--- ops: 8 create_view org.org_summary
--- ops: 8 comment_on org.org_summary
+// ops: 0 drop_view org.org_summary
+// ops: 8 create_view org.org_summary
+// ops: 8 comment_on org.org_summary
 
 namespace c;
 database App : Postgres;
@@ -12,7 +12,7 @@ table Orgs of App.org {
     name varchar(80)?;
 }
 
---- Orgs, flattened.
+/// Orgs, flattened.
 view OrgSummary of App.org {
-    select O from App.org.Orgs as { id, slug, name };
+    select O from App.org.Orgs as { O.id, O.slug, O.name };
 }

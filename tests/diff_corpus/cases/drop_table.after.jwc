@@ -1,4 +1,4 @@
--- ops: 9 drop_table org.notes
+// ops: 9 drop_table org.notes
 
 namespace c;
 database App : Postgres;

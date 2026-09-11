@@ -3,6 +3,151 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.3] — freeze candidate — 2026-09-11
+
+Five syntax decisions, each one removing a place where the language asked
+the reader to know something the text did not say.
+
+### BREAKING: comments are `//` and `///`
+
+`--` came from SQL, and it was the last SQL-shaped thing in a language whose
+blocks are `{ }` and whose operators are `==` and `and`. It also carried a
+trap — `a--b` is a comment, `a - -b` is subtraction — and the VS Code
+grammar had never been updated to paint it, so a comment went unpainted
+while illegal `//` was painted as one.
+
+`--` where a declaration, member or statement belongs is now `E0901`, naming
+`//`. In an expression `a -- b` is still `a - (-b)` and parses.
+
+Block comments arrive with it: `/* … */`, **nested**, so a region that
+already contains a comment can be commented out whole. An unclosed one is
+`E0101`. `jwc fmt` prints all three back, and a block comment the AST cannot
+carry is named rather than deleted, the way `//` already was.
+
+### BREAKING: one sigil, `@`
+
+`$name` was a local and `@name` a path parameter. At the use site they are
+the same kind of thing — a value bound outside the query — and a `let` may
+not shadow a parameter or a path parameter anyway (`E0214`), so the two
+namespaces were already disjoint. Now `@name` is all three, resolved by
+scope. `$name` is `E0903`, naming `@name`.
+
+### BREAKING: a column names its binding, and every query binds one
+
+`select T from App.s.Todos where id == @id as { id, title }` used the binder
+`T` for nothing. Now it is `where T.id == @id as { T.id, T.title }`, and an
+unqualified column is `E0904` naming the binding it should have carried.
+
+Which meant the other three query forms needed a binder too:
+
+```
+select T from App.s.Todos
+insert T into App.s.Todos { … }
+update T of   App.s.Todos set …
+delete T from App.s.Todos
+```
+
+The two positions that are not references keep taking no qualifier: a `set`
+target and an `insert` object key name a column of the table being written —
+as in SQL, where `UPDATE t AS a SET a.x = 1` is an error. A nested `as one`
+/ `as many` shape also stays bare; its binding is named by the join.
+
+`E0213` (unqualified column ambiguous across bindings) and `E0220` (`@name`
+outside a route) are retired: neither condition can arise now.
+
+Three analyses had to learn the qualified form, and each was found by a test
+rather than by reading:
+
+- `canonical_expr` reduced `T.status` to `"todos"."status"` while the DDL
+  holds `"status"`, so a partial unique index stopped matching the predicate
+  written against it and `first` became `E0520`.
+- The pushdown analysis collects the columns a page's filter and order name;
+  `NWO.org.name` is a field chain rooted at a binding, and it saw nothing at
+  all, so a page it must refuse was accepted.
+- `W0104` (`x == x` is always true) matched only bare names.
+
+### BREAKING: `for (let x in xs)`
+
+The loop binder was the one name in the language that appeared without being
+declared. Without `let` it is `E0902`.
+
+### BREAKING: the port is `server { port }`, and `serve()` takes no argument
+
+`serve(int(env("PORT") ?? "8080"))` was three calls to say "8080 by
+default", with the default written as text because `env()` answers `text?`.
+Worse, it put the port outside the `server { }` block that holds `bind` —
+the other half of the same address — and outside the `JWC_*` registry, so
+nothing could override it and `jwc`'s own config table never listed it. It
+also meant the compiler ran `main()` at boot to discover a number.
+
+Two questions, now spelled apart. `server { port }` says where:
+
+```
+--port  →  JWC_PORT  →  PORT  →  server { port }  →  8080
+```
+
+`PORT` unprefixed because a platform that injects a port injects that name —
+the pair `JWC_DATABASE_URL` and `DATABASE_URL` already make. And `serve()`
+in `main` says whether: a program that never calls it is an ordinary
+program, and `jwc serve` says so rather than binding a port nobody asked
+for. Two inferences are gone with it — "a program with no `main` listens on
+8080", and the native backend's "it declares routes, so it is a server",
+which had a console binary sitting on a socket after printing its output.
+
+### The language server did not start in any editor
+
+`vscode-languageclient` appends `--stdio` for `TransportKind.stdio`, as
+neovim, helix and emacs all do. `jwc lsp` took no arguments, so clap exited
+2 before the server started and the editor reported `write EPIPE`. It is
+accepted and ignored now.
+
+`tests/lsp.rs` spawned `jwc lsp` — the way it is typed at a shell, not the
+way a client spawns it — which is why the suite was green throughout. It
+spawns `--stdio` now, and checks both spellings.
+
+### The editor assets described the pre-1.0 language
+
+Nothing linked them to the compiler, so they went on describing `entity`,
+`dbcontext`, `dome` and `mount` through a whole major version: **34 of 35
+snippets did not compile**, the TextMate grammar matched `//` for comments
+and carried three `include`s naming rules that did not exist, and the README
+promised an `F2` rename the language server does not implement.
+
+All three are rewritten, and `tests/editor_assets.rs` is the link: every
+snippet is compiled by `jwc check`, the comment rule is checked against the
+lexer, every `include` must name a rule, and no asset may name a keyword
+`names.md §2.8` removed.
+
+### `enum(E, x)` did not compile natively
+
+Its first argument is a type name, and a type is not a value. The native
+backend emitted every argument of a call before looking at which call it
+was, so the bare `E` reached the expression emitter and failed there, while
+`jwc serve` ran the same program. An optional enum filter is the only way
+the language has to write one — `==?` needs a `T?` and `boolean(x)` is not
+nullable — so this was every such filter.
+
+### `migrate up` names the database it cannot find
+
+Connecting to a database that does not exist answered with the driver's
+`3D000`. It now names the database, and when one differs only in case —
+`createdb MyWallet` makes `mywallet`, because Postgres folds an unquoted
+identifier while a URL path is literal — it names both. `migrate up
+--create-db` creates it first, quoting the name as written.
+
+### `jwc swagger` was a second OpenAPI generator
+
+The 0.9 command rendered the reference from its own document, kept in step
+with `jwc openapi` by hand. There is one generator now, and the reference is
+served by the program itself: `server { swagger = "/docs" }`, or
+`JWC_SWAGGER` over it, in both backends. The command remains for the case
+where a document is wanted without a running server.
+
+### `route` and `socket` outside a `routes` block
+
+A single-file program had to wrap one route in a block that adds nothing.
+`route GET "/x" { … }` at the top level is a route at that path.
+
 ## [1.0.0-rc.2] — freeze candidate — 2026-09-09
 
 The same freeze candidate, built for every platform it claims.
@@ -1052,7 +1197,7 @@ const LIMITS = [10, 50, 100];
 let o = { "a": 1, "b": { "c": 2 } };
 o.a = PAGE_SIZE;
 o.b.c = 20;
-o.fresh = 1;          -- a key that was not there is added
+o.fresh = 1;          // a key that was not there is added
 ```
 
 ### `const`
@@ -1363,7 +1508,7 @@ not paid for by anything:
 ```jwc
 function main() {
     for (attempt in [1, 2, 3, 4, 5]) {
-        console.writeln("Attempt #" + string.of(attempt));   -- was $attempt
+        console.writeln("Attempt #" + string.of(attempt));   // was $attempt
     }
 }
 ```

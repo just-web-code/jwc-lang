@@ -61,12 +61,12 @@ jwc build --release --target x86_64-unknown-linux-musl
 have it already (`rustup target add <triple>`). The binary lands under
 `bin/<triple>/<profile>/` so several targets coexist.
 
-`jwc run` calls the program's `main()` and exits. Nothing listens, and a
-program that declares no `database` needs no `DATABASE_URL` — that is what
-makes a program which only prints something you can actually run. A `main`
-that calls `serve(...)` still starts a server, because that is what the
-call means; `run` only declines to start one on the program's behalf. A
-program with no `main` is `jwc serve`'s job, and `run` says so.
+`jwc run` calls the program's `main()` and exits. A program that declares
+no `database` needs no `DATABASE_URL` — that is what makes a program which
+only prints something you can actually run. A `main` that calls `serve()`
+starts a server, because that is what the call means; one that does not
+prints what it prints and returns. Nothing is inferred from the program
+having routes.
 
 `jwc build` produces one statically-linkable binary with no runtime
 dependency on the compiler. It needs a Rust toolchain, because that is
@@ -76,10 +76,9 @@ It runs `jwc check` first and builds nothing if that fails — testing only
 that the source parses would let a program with type errors, one
 `jwc check` exits 1 on, compile to a release binary and run.
 
-The binary listens when the program is a server: it declares a `route` or
-a `socket`, or its `main` calls `serve(port)`. A program with neither is a
-console program, and the binary returns when `main` does rather than
-binding a port behind it.
+The binary listens when `main` calls `serve()`. A program that never does
+is a console program — declaring routes is not asking to listen — and the
+binary returns when `main` does rather than binding a port behind it.
 
 The two backends are held to the same answers: the release check builds
 each real application both ways, runs the same requests against both, and
@@ -91,7 +90,7 @@ A binary that quietly dropped a query would be a far worse outcome than
 one that will not build.
 
 The refusals that remain are about a **shape known only at run time**.
-`insert into T { ...$req }` and `update T set ...$req` both compile —
+`insert T into App.s.T { ...@req }` and `update T of App.s.T set ...@req` both compile —
 which fields the value could carry is its declared `class`, and each
 combination of present optional fields becomes its own statement — but a
 spread of a local with no declared type does not, and says so by name.
@@ -141,12 +140,21 @@ pipeline configured against `jwc serve` reads `jwc build` output unchanged.
 jwc migrate new <name>       # diff against the last snapshot
 jwc migrate list             # the files on disk, in order — offline
 jwc migrate up               # apply what is pending
+jwc migrate up --create-db   # create the database first, if it is not there
 jwc migrate status           # applied, pending, drifted
 jwc migrate verify           # constraints and indexes, by name
 jwc migrate down             # roll back, newest first
 jwc migrate baseline         # adopt a database that already has the tables
 jwc gen-sql                  # the whole schema as DDL, to stdout
 ```
+
+`--create-db` creates the database named in `DATABASE_URL` and then
+applies. It is off by default because a typo in that URL would otherwise
+be answered by a new empty database that migrates cleanly, which looks
+exactly like success. Without the flag a missing database is an error
+naming it — and naming the database that differs from it only in case, if
+there is one, since an unquoted `CREATE DATABASE MyApp` creates `myapp`
+and a URL asking for `MyApp` then does not match it.
 
 `migrate list` says what is **written**; `migrate status` says what is
 **applied**. Only the second needs a database, which is why the first
@@ -189,6 +197,13 @@ jwc swagger                  # a browsable reference on http://127.0.0.1:8099
 jwc swagger --port 9000
 jwc swagger --out api.html   # the page as one file, instead of serving
 ```
+
+The running server can serve the same page itself, which is usually what
+you want: `server { swagger = "/docs" }` puts it on `/docs`, and the
+document on `/docs/openapi.json`. `JWC_SWAGGER=/docs` does it without
+touching the source. Off unless asked for (config §4.0.8). `jwc swagger`
+stays for the case where there is no server to run — reading an API in a
+checkout, or writing the page to a file with `--out`.
 
 `jwc swagger` renders the same document `jwc openapi` emits — there is
 one generator, not two. The page is self-contained: no CDN, no vendored
@@ -272,12 +287,12 @@ See [Editor setup](../getting-started/editor-setup.md).
 ## Which build is this?
 
 ```bash
-jwc --version              # jwc 1.0.0-rc.2
+jwc --version              # jwc 1.0.0-rc.3
 jwc --version --verbose    # ...plus the triple, profile, commit and rustc
 ```
 
 ```
-jwc 1.0.0-rc.2
+jwc 1.0.0-rc.3
 build target:  x86_64-unknown-linux-gnu
 build profile: release
 git commit:    629ee9d3eaa2

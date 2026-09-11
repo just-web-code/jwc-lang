@@ -1,7 +1,7 @@
---- An `as one` that hangs off an `as many`: the inner join belongs inside
---- the collection's lateral, not beside the driving table. Attaching it to
---- the root would join accounts to orgs and produce the wrong account per
---- member (N12).
+/// An `as one` that hangs off an `as many`: the inner join belongs inside
+/// the collection's lateral, not beside the driving table. Attaching it to
+/// the root would join accounts to orgs and produce the wrong account per
+/// member (N12).
 namespace nested;
 
 database App : Postgres;
@@ -34,8 +34,8 @@ view OrgRoster of App.s {
         left join App.s.Accounts A on A.id == M.account_id
             as one account under members
         as {
-            id,
-            name,
+            O.id,
+            O.name,
             members: { id, role, account: { id, email } },
         }
 }

@@ -1,6 +1,6 @@
---- A minimal app whose one endpoint goes through the `raw()` valve
---- (writes.md §6). The sample deliberately has none — zero is the healthy
---- number — so the valve needs its own fixture to be run at all.
+/// A minimal app whose one endpoint goes through the `raw()` valve
+/// (writes.md §6). The sample deliberately has none — zero is the healthy
+/// number — so the valve needs its own fixture to be run at all.
 namespace raw_app;
 
 database App : Postgres;
@@ -18,14 +18,17 @@ server {
 }
 
 service Reports {
-    --- A window function: the reason the valve exists. The compiler has
-    --- no syntax for it and is not growing one (ROADMAP §7).
-    ---
-    --- The `::bigint` is the author's: `{}` binds as text, like every
-    --- parameter in the language, and hand-written SQL has no type
-    --- information to derive the cast from (writes.md §6.1).
+    /// A window function: the reason the valve exists. The compiler has
+    /// no syntax for it and is not growing one (ROADMAP §7).
+    ///
+    /// The `::bigint` is the author's: `{}` binds as text, like every
+    /// parameter in the language, and hand-written SQL has no type
+    /// information to derive the cast from (writes.md §6.1).
     function ranked(org_id: bigint) {
-        return raw("select id, body, row_number() over (order by id) as rn from s.notes where org_id = ({})::bigint order by id", $org_id);
+        return raw(
+            "select id, body, row_number() over (order by id) as rn from s.notes where org_id = ({})::bigint order by id",
+            @org_id
+        );
     }
 }
 

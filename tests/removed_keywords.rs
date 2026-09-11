@@ -1,4 +1,4 @@
-//! `E0900` — the pre-1.0 vocabulary.
+//! `E0900` — the pre-1.0 vocabulary, and `E0901` — its comment syntax.
 //!
 //! ROADMAP's criterion for v0.21.0 is "10 `E0900` tests for the old
 //! grammar's 10 keywords". Each case checks the code *and* that the message
@@ -58,13 +58,13 @@ removed!(
 );
 removed!(
     new_points_at_insert,
-    "function f() { let a = new Todo from $req; }",
-    "insert into App.s.X"
+    "function f() { let a = new Todo from @req; }",
+    "insert X into App.s.X"
 );
 removed!(
     patch_points_at_update,
-    "function f() { patch $todo from $req; }",
-    "update App.s.X set"
+    "function f() { patch @todo from @req; }",
+    "update X of App.s.X set"
 );
 removed!(
     mount_points_at_full_paths,
@@ -109,4 +109,69 @@ fn every_removed_keyword_has_a_test() {
             "`{kw}` message should name the replacement, not just the removal: {msg}"
         );
     }
+}
+
+/// `E0901` — `--` where a comment was meant.
+///
+/// The same principle as `E0900`: a reader whose file predates the change
+/// gets told what to write, not that something is missing.
+#[test]
+fn a_dash_comment_names_the_slash_that_replaced_it() {
+    for src in [
+        "-- a comment where a declaration goes\ndatabase App : Postgres;\n",
+        "database App : Postgres;\nschema s of App;\n\
+         table T of App.s {\n-- about the key\nid bigint primary key identity;\n}\n",
+        "database App : Postgres;\nfunction f() {\n-- about the statement\nreturn 1;\n}\n",
+    ] {
+        let p = jwc::parse_str("<old>", src);
+        let d = p
+            .diags
+            .iter()
+            .find(|d| d.code == "E0901")
+            .unwrap_or_else(|| panic!("no E0901 for:\n{src}\ngot:\n{}", p.render_all()));
+        assert!(
+            d.note.as_deref().is_some_and(|n| n.contains("//")),
+            "the note must name `//`: {:?}",
+            d.note
+        );
+    }
+}
+
+/// And the arithmetic it must not claim.
+#[test]
+fn subtracting_a_negative_is_not_a_comment() {
+    // `a -- b` is `a - (-b)`. The check only fires once the parser has
+    // already failed on the `-`, which cannot happen in an expression.
+    let src = "database App : Postgres;\n\
+               function f() {\n    let a = 5;\n    let b = 3;\n    return @a -- @b;\n}\n";
+    let p = jwc::parse_str("<arith>", src);
+    assert!(
+        !p.diags.iter().any(|d| d.code == "E0901"),
+        "arithmetic was read as a comment:\n{}",
+        p.render_all()
+    );
+}
+
+/// `E0902` — a `for` binder is declared, like every other name.
+#[test]
+fn a_for_binder_without_let_names_the_let() {
+    let src = "database App : Postgres;\n\
+               function f() {\n    for (x in [1, 2]) {\n        return x;\n    }\n}\n";
+    let p = jwc::parse_str("<for>", src);
+    let d = p
+        .diags
+        .iter()
+        .find(|d| d.code == "E0902")
+        .unwrap_or_else(|| panic!("no E0902:\n{}", p.render_all()));
+    assert!(
+        d.note
+            .as_deref()
+            .is_some_and(|n| n.contains("for (let x in xs)")),
+        "the note must show the form: {:?}",
+        d.note
+    );
+
+    let ok = "database App : Postgres;\n\
+              function f() {\n    for (let x in [1, 2]) {\n        return x;\n    }\n}\n";
+    assert!(!jwc::parse_str("<for>", ok).has_errors());
 }

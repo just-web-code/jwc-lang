@@ -225,6 +225,14 @@ pub const REGISTRY: &[EnvVar] = &[
         doc: "Request body cap (bytes); 0 disables.",
     },
     EnvVar {
+        name: "JWC_SWAGGER",
+        parse_kind: ParseKind::Str,
+        default: "server { swagger }, else off",
+        doc: "Path the API reference is served at, e.g. `/docs`; empty is off. \
+              Wins over `server { swagger }` in both backends. The page lists \
+              every route, parameter and error, so it is off unless asked for.",
+    },
+    EnvVar {
         name: "JWC_MAX_SOCKETS",
         parse_kind: ParseKind::Usize,
         default: "server { max_sockets }, else half the descriptor limit (512 on Windows)",
@@ -310,6 +318,15 @@ pub const REGISTRY: &[EnvVar] = &[
     // from the boot table and from config.md. Found by
     // `every_env_var_the_code_reads_is_registered_and_the_other_way_round`,
     // not by anyone reading the code.
+    EnvVar {
+        name: "JWC_PORT",
+        parse_kind: ParseKind::U16,
+        default: "server { port }, else 8080",
+        doc: "Port the listener binds. `PORT` is read too, and `JWC_PORT` wins \
+              over it — the same pair `JWC_DATABASE_URL` and `DATABASE_URL` \
+              make, because a platform that injects one of these injects \
+              `PORT`. Both win over `server { port }`; `--port` wins over both.",
+    },
     EnvVar {
         name: "JWC_BIND_HOST",
         parse_kind: ParseKind::Str,

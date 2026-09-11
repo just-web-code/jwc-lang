@@ -1,23 +1,23 @@
 namespace sigils;
 
--- Inside a query clause a bare name is a column and nothing else, so a local
--- read there carries `$`. Outside one there is no column to be confused with
--- and the sigil is optional (names.md §5.3).
+// Inside a query clause a bare name is a column and nothing else, so a local
+// read there carries `$`. Outside one there is no column to be confused with
+// and the sigil is optional (names.md §5.3).
 service Sigils {
     function tenancy_filter(org_id: bigint) {
-        return select N from App.s.Notes where org_id == $org_id;
+        return select N from App.s.Notes where N.org_id == @org_id;
     }
 
     function missing_sigil(org_id: bigint) {
-        return select N from App.s.Notes where body == org_id;   -- expect: E0376
+        return select N from App.s.Notes where N.body == N.org_id;   // expect: E0376
     }
 
     function tautology(org_id: bigint) {
-        return select N from App.s.Notes where org_id == org_id; -- expect: W0104
+        return select N from App.s.Notes where N.org_id == N.org_id; // expect: W0104
     }
 
     function unknown_column(org_id: bigint) {
-        return select N from App.s.Notes where nope == $org_id;  -- expect: E0211
+        return select N from App.s.Notes where nope == @org_id;  // expect: E0211
     }
 
     function local_without_sigil_outside_a_query() {
@@ -27,10 +27,10 @@ service Sigils {
 
     function local_with_sigil_outside_a_query() {
         let x = 1;
-        return $x;
+        return @x;
     }
 
     function unknown_name_outside_a_query() {
-        return nope;                                             -- expect: E0211
+        return nope;                                             // expect: E0211
     }
 }

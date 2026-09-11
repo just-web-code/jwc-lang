@@ -1,7 +1,7 @@
 namespace app;
 
---- A schema whose physical names are reserved SQL words, reached through
---- `as "…"` — which is what a port onto an existing database needs.
+/// A schema whose physical names are reserved SQL words, reached through
+/// `as "…"` — which is what a port onto an existing database needs.
 
 database App : Postgres;
 schema s of App;
@@ -12,8 +12,8 @@ table Users of App.s as "user" {
     created_at timestamptz default now();
 }
 
---- `order` is reserved too, and it points at the reserved-named table, so
---- this covers the foreign-key resolution as well.
+/// `order` is reserved too, and it points at the reserved-named table, so
+/// this covers the foreign-key resolution as well.
 table Orders of App.s as "order" {
     id      bigint primary key identity;
     user_id bigint;
@@ -28,19 +28,19 @@ class NewUser {
 
 service Accounts {
     function register(req: NewUser) {
-        return insert into App.s.Users { ...$req } as { id, email };
+        return insert Users into App.s.Users { ...@req } as { Users.id, Users.email };
     }
 
     function rename(id: bigint, email: text) {
-        return update App.s.Users
-            set email = $email
-            where id == $id
-            as { id, email }
+        return update Users of App.s.Users
+            set email = @email
+            where Users.id == @id
+            as { Users.id, Users.email }
             first or throw NotFound("yo'q");
     }
 
     function remove(id: bigint) {
-        return delete from App.s.Users where id == $id as { id } first
+        return delete Users from App.s.Users where Users.id == @id as { Users.id } first
             or throw NotFound("yo'q");
     }
 }
@@ -54,7 +54,7 @@ routes "/accounts" {
 routes "/accounts/{id: bigint}" {
     route PATCH "" {
         let req = request.body() as NewUser;
-        return json(Accounts.rename(@id, $req.email));
+        return json(Accounts.rename(@id, @req.email));
     }
 
     route DELETE "" {
@@ -63,5 +63,5 @@ routes "/accounts/{id: bigint}" {
 }
 
 function main() {
-    serve(8080);
+    serve();
 }

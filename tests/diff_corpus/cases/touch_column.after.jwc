@@ -1,6 +1,6 @@
--- ops: 2 add_column org.orgs.updated_at
--- ops: 6 create_function org.tg_orgs__touch
--- ops: 6 create_trigger org.orgs.tg_orgs__touch
+// ops: 2 add_column org.orgs.updated_at
+// ops: 6 create_function org.tg_orgs__touch
+// ops: 6 create_trigger org.orgs.tg_orgs__touch
 
 namespace c;
 database App : Postgres;

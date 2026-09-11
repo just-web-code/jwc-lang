@@ -133,6 +133,15 @@ pub struct Program {
     /// servers in one test binary would share a budget neither declared,
     /// and the symptom is a cap that admits one fewer than it says.
     pub open_sockets: Arc<std::sync::atomic::AtomicUsize>,
+    /// The API reference, rendered once at load, when `server { swagger }`
+    /// asks for one.
+    ///
+    /// Built here rather than per request because the OpenAPI document is
+    /// a function of `Symbols`, `Wired` and `Checked` — compile-time
+    /// artifacts that a running server has no reason to keep otherwise.
+    /// The pair is `(html, json)`: the page is self-contained, and the
+    /// document beside it is what a client generator reads.
+    pub swagger_page: Option<Arc<(String, String)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -163,7 +172,18 @@ pub struct ServerConfig {
     /// is what keeps a development machine off its own LAN, and there was
     /// no way to ask for that while the address was hardcoded.
     pub bind: String,
+    /// The port the program declares (`server { port }`, config.md §3.2).
+    /// `JWC_PORT`, then `PORT`, then `--port` win over it at boot — the
+    /// same order every other key in this block is overridden in.
+    pub port: u16,
     pub trusted_proxies: Vec<String>,
+    /// Where the API reference is served, or `None` for nowhere.
+    ///
+    /// `server { swagger = "/docs" }`, overridden by `JWC_SWAGGER`. Off
+    /// unless asked for: the page lists every route, its parameters and
+    /// its error set, which is a map of the attack surface handed to
+    /// anyone who can reach the port.
+    pub swagger: Option<String>,
     /// config.md §3.4 — when present, `OPTIONS` is answered for every
     /// declared route and the headers go on every response. When absent, no
     /// CORS header is emitted at all.
@@ -306,7 +326,9 @@ impl Default for ServerConfig {
             cursor_secret: String::new(),
             strict_slash: true,
             bind: "0.0.0.0".into(),
+            port: 8080,
             trusted_proxies: Vec::new(),
+            swagger: None,
             cors: None,
             headers: SecurityHeaders::default(),
             tls: None,
@@ -485,7 +507,9 @@ pub struct Vm<'a> {
     /// Set by `serve(port)` in `main()`. The call is the program's own
     /// declaration of where it listens, so `main` is evaluated at boot and
     /// this is what it left behind.
-    pub serve_port: Option<u16>,
+    /// `serve()` ran. It is what makes a program a server: without the
+    /// call, `main` is an ordinary program and nothing listens.
+    pub serve_called: bool,
     depth: u32,
     calls: u32,
 }
@@ -510,7 +534,7 @@ impl<'a> Vm<'a> {
             context: HashMap::new(),
             response_status: None,
             response_micros: None,
-            serve_port: None,
+            serve_called: false,
             extra_headers: Vec::new(),
             socket_out: None,
             depth: 0,
@@ -973,13 +997,8 @@ impl<'a> Vm<'a> {
             ExprKind::Local(i) => self
                 .lookup(&i.name)
                 .cloned()
-                .ok_or_else(|| fault(format!("unknown local `${}`", i.name)))?,
-
-            ExprKind::PathParam(i) => self
-                .params
-                .get(&i.name)
-                .cloned()
-                .ok_or_else(|| fault(format!("unknown path parameter `@{}`", i.name)))?,
+                .or_else(|| self.params.get(&i.name).cloned())
+                .ok_or_else(|| fault(format!("unknown name `@{}`", i.name)))?,
 
             // Outside a query clause a bare name is a local when one is in
             // scope — the sigil is optional there (names.md §5.3). Anything

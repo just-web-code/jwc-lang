@@ -58,22 +58,26 @@ fn the_route_is_registered_with_its_parameter_types() {
 }
 
 #[test]
-fn the_port_comes_from_the_program_not_the_environment() {
+fn the_port_is_the_declared_one_and_serve_decides_whether_to_listen() {
     let rust = generate("tests/native_codegen");
 
-    // config.md §3.2.2 — `serve(port)` in `main` is where a program says
-    // where it listens, and the interpreter evaluates `main` at boot for
-    // exactly that. Reading `PORT` from the environment here instead would
-    // make the two backends disagree about a program that hardcodes it.
+    // config.md §3.2.2 — `server { port }` is where a program says where it
+    // listens and `serve()` is whether it listens at all. Both backends read
+    // the same two things, so a program cannot mean one port under
+    // `jwc serve` and another under `jwc build`.
     assert!(rust.contains("async fn jwc_user_main() -> JwcResult {"));
     assert!(
-        rust.contains("JWC_SERVE_PORT.store("),
-        "`serve(n)` should record the port"
+        rust.contains("JWC_SERVE_CALLED.store(true,"),
+        "`serve()` should record that this program listens"
     );
     assert!(
-        !rust.contains("std::env::var(\"PORT\")"),
-        "the environment must not override what the program declared"
+        rust.contains("const JWC_SOURCE_PORT: u16 ="),
+        "`server {{ port }}` should be carried into the crate"
     );
+    // The env wins over the source value, the way it does for every other
+    // key in the block — and `PORT` is honoured because the platforms that
+    // inject a port inject that name.
+    assert!(rust.contains("\"JWC_PORT\", \"PORT\""));
 }
 
 #[test]
@@ -295,7 +299,7 @@ fn an_optional_assignment_compiles_one_statement_per_combination() {
          routes \"/notes\" {\n\
          \x20   route PATCH \"{id: int}\" {\n\
          \x20       let p = request.body() as Patch;\n\
-         \x20       return json(update App.s.Notes set title =? $p.title, body =? $p.body \
+         \x20       return json(update Notes of App.s.Notes set title =? @p.title, body =? @p.body \
          where id == @id as { id, title, body } first or throw NotFound(\"yo'q\"));\n\
          \x20   }\n\
          }\n\
@@ -387,7 +391,7 @@ fn a_spread_takes_its_columns_from_the_declared_type() {
          class Patch { title varchar(80); body text; }\n\
          service NoteService {\n\
          \x20   function update(id: int, req: Patch) {\n\
-         \x20       return update App.s.Notes set ...$req where id == $id \
+         \x20       return update Notes of App.s.Notes set ...@req where id == @id \
          as { id, title, body } first or throw NotFound(\"yo'q\");\n\
          \x20   }\n\
          }\n\
@@ -530,7 +534,7 @@ fn a_program_without_a_main_still_generates_a_crate_that_compiles() {
     assert_calls_resolve(&rust);
 }
 
-/// names.md §5.3 — outside a query clause `$x` and `x` are the same
+/// names.md §5.3 — outside a query clause `@x` and `x` are the same
 /// reference. The interpreter reaches that through one `lookup`; codegen
 /// reaches it through a scope stack it keeps itself, which is exactly the
 /// kind of second implementation that drifts. Pinning it as *byte-identical
@@ -540,7 +544,7 @@ fn the_sigil_changes_nothing_the_native_backend_emits() {
     const BARE: &str = "namespace n;\n\
          function total(base: int) -> int {\n\
          \x20   let n = base;\n\
-         \x20   for (r in [1, 2, 3]) {\n\
+         \x20   for (let r in [1, 2, 3]) {\n\
          \x20       n = n + r;\n\
          \x20   }\n\
          \x20   return n;\n\
@@ -551,15 +555,15 @@ fn the_sigil_changes_nothing_the_native_backend_emits() {
          }\n";
     const SIGILED: &str = "namespace n;\n\
          function total(base: int) -> int {\n\
-         \x20   let n = $base;\n\
-         \x20   for (r in [1, 2, 3]) {\n\
-         \x20       $n = $n + $r;\n\
+         \x20   let n = @base;\n\
+         \x20   for (let r in [1, 2, 3]) {\n\
+         \x20       @n = @n + @r;\n\
          \x20   }\n\
-         \x20   return $n;\n\
+         \x20   return @n;\n\
          }\n\
          function main() {\n\
          \x20   let x = total(2);\n\
-         \x20   console.writeln(string.of($x));\n\
+         \x20   console.writeln(string.of(@x));\n\
          }\n";
 
     let emit = |source: &str| {
@@ -678,7 +682,7 @@ fn a_program_with_no_mount_does_not_carry_the_asset_runtime() {
     assert_calls_resolve(&rust);
 }
 
-/// `insert into T { ...$req }` compiles.
+/// `insert into T { ...@req }` compiles.
 ///
 /// It is the shape the `api` template writes, and the one writes.md
 /// teaches — and the native backend refused it: "the column list depends
@@ -706,7 +710,7 @@ fn an_insert_spreading_a_class_lowers() {
          }\n\
          service S {\n\
          \x20   function make(req: NoteNew) {\n\
-         \x20       return insert into App.s.Notes { ...$req } as { id, title };\n\
+         \x20       return insert Notes into App.s.Notes { ...@req } as { id, title };\n\
          \x20   }\n\
          }\n",
     )
@@ -746,7 +750,7 @@ fn an_insert_spreading_an_untyped_local_is_refused_by_name() {
          service S {\n\
          \x20   function make() {\n\
          \x20       let row = { title: \"x\" };\n\
-         \x20       return insert into App.s.Notes { ...$row } as { id };\n\
+         \x20       return insert Notes into App.s.Notes { ...@row } as { id };\n\
          \x20   }\n\
          }\n",
     )
@@ -755,9 +759,54 @@ fn an_insert_spreading_an_untyped_local_is_refused_by_name() {
     assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
     let err = jwc::native::codegen_for_test(&ws).expect_err("no declared shape");
     let msg = format!("{err}");
-    assert!(msg.contains("cannot see the shape of `$row`"), "{msg}");
+    assert!(msg.contains("cannot see the shape of `@row`"), "{msg}");
     assert!(
         msg.contains("jwc serve"),
         "and it must name the way out: {msg}"
+    );
+}
+
+/// `enum(E, x)` names a type first, and a type is not a value.
+///
+/// The native backend emitted every argument of a call before looking at
+/// which call it was, so the bare `E` reached the expression emitter and
+/// failed there — `native build cannot resolve the bare name \`Status\``.
+/// The interpreter returns before evaluating the arguments for exactly this
+/// reason, so `jwc serve` ran the same program. An optional enum filter is
+/// the only way the language has to write one (`==?` needs a `T?`, and
+/// `boolean(x)` is not nullable), so this was every such filter.
+#[test]
+fn an_enum_coercion_names_a_type_and_still_compiles() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace n;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         enum Status { open, done }\n\
+         table Todos of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   status Status default Status.open;\n\
+         }\n\
+         routes \"/t\" {\n\
+         \x20   route GET \"\" {\n\
+         \x20       let want = enum(Status, request.query(\"status\"));\n\
+         \x20       return json(select T from App.s.Todos\n\
+         \x20           where T.status ==? @want as { T.id, T.status } orderby T.id asc);\n\
+         \x20   }\n\
+         }\n\
+         function main() { serve(); }\n",
+    )
+    .expect("write");
+    let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
+    assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    let rust = jwc::native::codegen_for_test(&ws).expect("the enum coercion must compile");
+    assert!(
+        rust.contains("jwc_b_v1_enum("),
+        "the coercion should reach the prelude"
+    );
+    assert!(
+        !rust.contains("jwc_b_v1_enum(v_str(\"Status\")"),
+        "the type name must not be emitted as a value"
     );
 }

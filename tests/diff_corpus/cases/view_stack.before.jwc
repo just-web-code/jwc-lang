@@ -9,9 +9,9 @@ table Orgs of App.org {
 }
 
 view OrgSummary of App.org {
-    select O from App.org.Orgs as { id, slug };
+    select O from App.org.Orgs as { O.id, O.slug };
 }
 
 view OrgTop of App.org {
-    select S from App.org.OrgSummary as { id, slug };
+    select S from App.org.OrgSummary as { S.id, S.slug };
 }

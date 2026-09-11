@@ -1,5 +1,5 @@
--- ops: 4 drop_constraint org.orgs.ck_orgs__seats__1
--- ops: 4 add_constraint org.orgs.ck_orgs__seats__1
+// ops: 4 drop_constraint org.orgs.ck_orgs__seats__1
+// ops: 4 add_constraint org.orgs.ck_orgs__seats__1
 
 namespace c;
 database App : Postgres;

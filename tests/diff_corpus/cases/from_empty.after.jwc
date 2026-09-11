@@ -1,6 +1,6 @@
--- ops: 1 create_schema org
--- ops: 1 create_enum org.plan
--- ops: 2 create_table org.orgs
+// ops: 1 create_schema org
+// ops: 1 create_enum org.plan
+// ops: 2 create_table org.orgs
 
 namespace c;
 database App : Postgres;

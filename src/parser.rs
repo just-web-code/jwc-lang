@@ -132,7 +132,25 @@ impl Parser {
     }
 
     fn err(&mut self, code: &'static str, span: Span, msg: impl Into<String>) {
+        if self.at_old_comment() && self.span() == span {
+            self.diags.push(
+                Diagnostic::error("E0901", span, "`--` does not start a comment")
+                    .note("a line comment starts with `//`, a doc comment with `///`")
+                    .clause("names.md §1.4"),
+            );
+            return;
+        }
         self.diags.push(Diagnostic::error(code, span, msg));
+    }
+
+    /// `--` where a declaration, member or statement belongs: a line comment
+    /// from before the syntax moved to `//`.
+    ///
+    /// Only reachable once the parser has already failed on the `-`. In an
+    /// expression `a -- b` is `a - (-b)` and parses, so this never fires on
+    /// arithmetic.
+    fn at_old_comment(&self) -> bool {
+        self.at(&Tok::Minus) && self.peek_at(1).tok == Tok::Minus
     }
 
     fn err_note(
@@ -233,6 +251,7 @@ impl Parser {
             match t {
                 Trivia::Doc(s) => at.docs.push(s.clone()),
                 Trivia::Line(s) => at.comments.push(s.clone()),
+                Trivia::Block(lines) => at.blocks.push(lines.clone()),
                 Trivia::Blank => at.blank_before = true,
             }
         }
@@ -292,9 +311,18 @@ impl Parser {
         }
     }
 
-    /// Emits `E0900` when the token is a keyword the pre-1.0 language had
-    /// (routing.md §10) and returns true.
+    /// Emits `E0900` for a keyword the pre-1.0 language had (routing.md §10),
+    /// or `E0901` for its `--` comment, and returns true.
     fn check_removed_keyword(&mut self) -> bool {
+        if self.at_old_comment() {
+            let span = self.span();
+            self.diags.push(
+                Diagnostic::error("E0901", span, "`--` does not start a comment")
+                    .note("a line comment starts with `//`, a doc comment with `///`")
+                    .clause("names.md §1.4"),
+            );
+            return true;
+        }
         let (word, span) = match (&self.peek().tok, self.span()) {
             (Tok::Ident(w), s) => (w.clone(), s),
             _ => return false,
@@ -350,16 +378,7 @@ impl Parser {
             "function" => Decl::Function(self.parse_function(at, start)?),
             "job" => Decl::Job(self.parse_job(at, start)?),
             "test" => Decl::Test(self.parse_test(at, start)?),
-            "route" => {
-                self.err_note(
-                    "E0003",
-                    start,
-                    "`route` must be inside a `routes` block",
-                    "write `routes \"/prefix\" { route GET \"suffix\" { … } }`",
-                    "routing.md §1.1",
-                );
-                return Err(());
-            }
+            "route" | "socket" => Decl::Routes(self.parse_bare_route(at, start)?),
             other => {
                 self.err(
                     "E0002",
@@ -1204,7 +1223,7 @@ impl Parser {
                 loop {
                     let bspan = self.span();
                     let bname = match self.peek().tok.clone() {
-                        Tok::PathParam(n) => {
+                        Tok::Local(n) => {
                             self.bump();
                             Ident::new(n, bspan)
                         }
@@ -1354,6 +1373,38 @@ impl Parser {
             uses,
             routes,
             sockets,
+            bare: false,
+            span: start.to(end),
+        })
+    }
+
+    /// A `route` or `socket` written at the top level.
+    ///
+    /// The two-piece path is what a grouped API wants; a single endpoint
+    /// is one piece, and making someone write `routes "" { … }` around it
+    /// to say so is ceremony for its own sake. The prefix is `""`, so the
+    /// resolved path is the suffix and §1.2 applies unchanged.
+    fn parse_bare_route(&mut self, at: Attached, start: Span) -> PResult<RoutesDecl> {
+        let mut routes = Vec::new();
+        let mut sockets = Vec::new();
+        if self.at_word("socket") {
+            sockets.push(self.parse_socket(at.clone(), start)?);
+        } else {
+            routes.push(self.parse_route(at.clone(), start)?);
+        }
+        let end = routes
+            .first()
+            .map(|r: &RouteDecl| r.span)
+            .or_else(|| sockets.first().map(|s: &SocketDecl| s.span))
+            .unwrap_or(start);
+        Ok(RoutesDecl {
+            at,
+            prefix: String::new(),
+            prefix_span: start,
+            uses: Vec::new(),
+            routes,
+            sockets,
+            bare: true,
             span: start.to(end),
         })
     }
@@ -1843,6 +1894,21 @@ impl Parser {
         if self.at_word("for") {
             self.bump();
             self.expect(Tok::LParen)?;
+            // The binder is declared, like every other name in the language.
+            // Without `let` the loop was the one place a name appeared out of
+            // nowhere.
+            if !self.at_word("let") {
+                let span = self.span();
+                self.err_note(
+                    "E0902",
+                    span,
+                    "a `for` binder is declared with `let`",
+                    "write `for (let x in xs)`",
+                    "names.md §5.5",
+                );
+                return Err(());
+            }
+            self.bump();
             let binder = self.expect_ident()?;
             self.expect_word("in")?;
             let iterable = self.parse_expr()?;
@@ -2069,7 +2135,7 @@ impl Parser {
             }
         }
 
-        // `x = …;`, `$x = …;` and `context.k = …;` — the sigil is optional
+        // `x = …;`, `@x = …;` and `context.k = …;` — the sigil is optional
         // outside a query clause (names.md §5.3).
         if let Tok::Local(name) | Tok::Ident(name) = self.peek().tok.clone() {
             if self.peek_at(1).is(&Tok::Eq) {
@@ -2089,7 +2155,7 @@ impl Parser {
                 });
             }
         }
-        // `x.field = …`, `$x.a.b = …`. Tried before the `context.k` form
+        // `x.field = …`, `@x.a.b = …`. Tried before the `context.k` form
         // below, which is the same shape on a name the runtime owns, so
         // that one keeps its own branch and this one never sees it.
         if !self.at_word("context") {
@@ -2674,10 +2740,6 @@ impl Parser {
                 self.bump();
                 Ok(Expr::new(ExprKind::Local(Ident::new(n, span)), span))
             }
-            Tok::PathParam(n) => {
-                self.bump();
-                Ok(Expr::new(ExprKind::PathParam(Ident::new(n, span)), span))
-            }
             Tok::LBrace => {
                 let (entries, end) = self.parse_object_entries()?;
                 Ok(Expr::new(ExprKind::Object(entries), span.to(end)))
@@ -2721,17 +2783,17 @@ impl Parser {
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Select(Box::new(s)), sp))
                 }
-                "insert" if self.word_at(1, "into") => {
+                "insert" if self.word_at(2, "into") => {
                     let s = self.parse_insert()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Insert(Box::new(s)), sp))
                 }
-                "update" if matches!(self.peek_at(1).tok, Tok::Ident(_)) => {
+                "update" if self.word_at(2, "of") => {
                     let s = self.parse_update()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Update(Box::new(s)), sp))
                 }
-                "delete" if self.word_at(1, "from") => {
+                "delete" if self.word_at(2, "from") => {
                     let s = self.parse_delete()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Delete(Box::new(s)), sp))
@@ -3046,6 +3108,18 @@ impl Parser {
         let mut fields = Vec::new();
         while !self.at(&Tok::RBrace) && !self.at_eof() {
             let name = self.expect_ident()?;
+            // `T.id` — the shorthand field, whose key is the column name.
+            if self.eat(&Tok::Dot) {
+                let column = self.expect_ident()?;
+                fields.push(ProjField::Column {
+                    binding: Some(name),
+                    column,
+                });
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+                continue;
+            }
             if self.at(&Tok::Colon) {
                 self.bump();
                 if self.at(&Tok::LBrace) {
@@ -3066,7 +3140,12 @@ impl Parser {
                     });
                 }
             } else {
-                fields.push(ProjField::Column(name));
+                // Unqualified: the checker names the binding it should have
+                // carried, which a parser has no way to know.
+                fields.push(ProjField::Column {
+                    binding: None,
+                    column: name,
+                });
             }
             if !self.eat(&Tok::Comma) {
                 break;
@@ -3134,6 +3213,7 @@ impl Parser {
 
     fn parse_insert(&mut self) -> PResult<InsertExpr> {
         let start = self.expect_word("insert")?.span;
+        let binder = self.expect_ident()?;
         self.expect_word("into")?;
         let table = self.parse_qualified_table()?;
         self.query_depth += 1;
@@ -3161,6 +3241,7 @@ impl Parser {
                 false
             };
             Ok(InsertExpr {
+                binder: binder.clone(),
                 table: table.clone(),
                 values,
                 conflict,
@@ -3258,6 +3339,8 @@ impl Parser {
 
     fn parse_update(&mut self) -> PResult<UpdateExpr> {
         let start = self.expect_word("update")?.span;
+        let binder = self.expect_ident()?;
+        self.expect_word("of")?;
         let table = self.parse_qualified_table()?;
         self.query_depth += 1;
         let r = (|| -> PResult<UpdateExpr> {
@@ -3289,6 +3372,7 @@ impl Parser {
                 first = true;
             }
             Ok(UpdateExpr {
+                binder: binder.clone(),
                 table: table.clone(),
                 sets,
                 filter,
@@ -3304,6 +3388,7 @@ impl Parser {
 
     fn parse_delete(&mut self) -> PResult<DeleteExpr> {
         let start = self.expect_word("delete")?.span;
+        let binder = self.expect_ident()?;
         self.expect_word("from")?;
         let table = self.parse_qualified_table()?;
         self.query_depth += 1;
@@ -3335,6 +3420,7 @@ impl Parser {
                 first = true;
             }
             Ok(DeleteExpr {
+                binder: binder.clone(),
                 table: table.clone(),
                 filter,
                 projection,

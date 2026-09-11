@@ -12,10 +12,10 @@ what the runtime guarantees.
 ```jwc no-compile
 job SendWelcome(account_id: bigint, email: text) retries 5 backoff "30s" {
     let account = select A from App.auth.Accounts
-        where id == $account_id
+        where id == @account_id
         first or throw NotFound("akkaunt topilmadi");
 
-    mail.send($email, "Welcome", "<p>salom</p>");
+    mail.send(@email, "Welcome", "<p>salom</p>");
 }
 ```
 
@@ -57,11 +57,11 @@ message.
 
 ```jwc no-compile
 route POST "register" {
-    let account = AuthService.register($req);
+    let account = AuthService.register(@req);
 
-    dispatch SendWelcome(account_id: $account.id, email: $account.email);
+    dispatch SendWelcome(account_id: @account.id, email: @account.email);
 
-    return created(json($account));
+    return created(json(@account));
 }
 ```
 

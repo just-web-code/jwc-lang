@@ -1,8 +1,8 @@
--- ops: 0 drop_view org.org_top
--- ops: 0 drop_view org.org_summary
--- ops: 2 alter_column_type org.orgs.name varchar(80) -> varchar(200)
--- ops: 8 create_view org.org_summary
--- ops: 8 create_view org.org_top
+// ops: 0 drop_view org.org_top
+// ops: 0 drop_view org.org_summary
+// ops: 2 alter_column_type org.orgs.name varchar(80) -> varchar(200)
+// ops: 8 create_view org.org_summary
+// ops: 8 create_view org.org_top
 
 namespace c;
 database App : Postgres;
@@ -15,9 +15,9 @@ table Orgs of App.org {
 }
 
 view OrgSummary of App.org {
-    select O from App.org.Orgs as { id, slug };
+    select O from App.org.Orgs as { O.id, O.slug };
 }
 
 view OrgTop of App.org {
-    select S from App.org.OrgSummary as { id, slug };
+    select S from App.org.OrgSummary as { S.id, S.slug };
 }

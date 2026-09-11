@@ -14,7 +14,7 @@ namespace app;
 error PaymentDeclined(message: text) = 402 : "to'lov rad etildi";
 error RateLimited(message: text) = 429 : "so'rov ko'p";
 
-function main() { serve(8080); }
+function main() { serve(); }
 ```
 
 Eight exist without being declared:
@@ -36,7 +36,7 @@ The construct that most JWC code is built out of:
 
 ```jwc no-compile
 let account = select A from App.auth.Accounts
-    where id == $account_id
+    where id == @account_id
     as { id, email }
     first or throw NotFound("account not found");
 ```

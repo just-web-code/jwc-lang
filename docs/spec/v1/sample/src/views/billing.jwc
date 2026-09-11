@@ -9,48 +9,48 @@ view SubscriptionDetail of App.billing {
         left join App.billing.Plans P on P.id == S.plan_id as one plan
         left join App.org.Orgs O on O.id == S.org_id as one org
         as {
-            id,
-            org_id,
-            status,
-            current_period_start,
-            current_period_end,
-            cancel_at,
+            S.id,
+            S.org_id,
+            S.status,
+            S.current_period_start,
+            S.current_period_end,
+            S.cancel_at,
             plan: { id, code, name, price, currency, interval },
             org: { id, slug, name }
         }
 }
 
---- Two `as many` children. A paged select against this view compiles to
---- the two-stage form so children are aggregated for the page only
---- (queries.md §8.3).
+/// Two `as many` children. A paged select against this view compiles to
+/// the two-stage form so children are aggregated for the page only
+/// (queries.md §8.3).
 view InvoiceDetail of App.billing {
     select I from App.billing.Invoices
         left join App.billing.InvoiceLines L on L.invoice_id == I.id as many lines orderby id asc limit 200
         left join App.billing.Payments Y on Y.invoice_id == I.id as many payments orderby created_at desc limit 20
         as {
-            id,
-            org_id,
-            number,
-            amount,
-            currency,
-            status,
-            issued_at,
-            due_at,
-            paid_at,
+            I.id,
+            I.org_id,
+            I.number,
+            I.amount,
+            I.currency,
+            I.status,
+            I.issued_at,
+            I.due_at,
+            I.paid_at,
             lines: { id, description, quantity, unit_price },
             payments: { id, provider, provider_ref, amount, status, created_at }
         }
 }
 
---- Bare join + aggregates + group by. No `as many` in the same query,
---- which is what keeps it out of E0532 (queries.md §6.2).
+/// Bare join + aggregates + group by. No `as many` in the same query,
+/// which is what keeps it out of E0532 (queries.md §6.2).
 view OrgBillingSummary of App.billing {
     select O from App.org.Orgs
         left join App.billing.Invoices I on I.org_id == O.id as group
         group by O.id, O.slug
         as {
             org_id: id,
-            slug,
+            O.slug,
             invoice_count: count(I.id),
             open_count: count(I.id where I.status == InvoiceStatus.open),
             paid_total: sum(I.amount where I.status == InvoiceStatus.paid),

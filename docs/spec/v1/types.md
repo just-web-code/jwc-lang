@@ -210,7 +210,7 @@ illegal under the old rule, and gaps.md #17 found it.
 A `Raw` value may appear as a **field value in an object literal**:
 
 ```jwc
-return json({ items: $rows, next: $cursor });   -- $rows : Raw[]
+return json({ items: @rows, next: @cursor });   // @rows : Raw[]
 ```
 
 The compiler emits the surrounding object by string concatenation and splices
@@ -310,9 +310,9 @@ Inside a block, a local of type `T?` narrows to `T` after a guard that
 **diverges** on the null branch:
 
 ```jwc no-compile
-let account = select A from App.auth.Accounts … first;   -- Record{…}?
-if ($account == null) { throw NotFound("akkaunt topilmadi"); }
--- account : Record{…} from here to end of block
+let account = select A from App.auth.Accounts … first;   // Record{…}?
+if (@account == null) { throw NotFound("akkaunt topilmadi"); }
+// account : Record{…} from here to end of block
 ```
 
 The narrowing rules, exhaustively:
@@ -357,8 +357,8 @@ The coercion builtins `int(x)`, `bigint(x)`, `numeric(x)`, `boolean(x)`,
 - otherwise, failure is a **fault** → 500 + log.
 
 ```jwc
-let limit = int(request.query("limit") ?? "50");   -- ?limit=abc → 400
-let port  = int(env("PORT") ?? "8080");            -- bad env → 500 at boot
+let limit = int(request.query("limit") ?? "50");   // ?limit=abc → 400
+let port  = int(env("PORT") ?? "8080");            // bad env → 500 at boot
 ```
 
 No new syntax. The rejected alternative — an explicit `int?()` form — taxes
@@ -370,7 +370,7 @@ silently dropped: `DEFERRED-1`.
 
 The result of `jwt.verify(token, secret)` is **not** client-derived, in
 whole or in part: a value that passed signature verification was produced by
-this server. `bigint($claims.sub)` on a verified token therefore fails as a
+this server. `bigint(@claims.sub)` on a verified token therefore fails as a
 fault, which is correct — a non-numeric `sub` in a token we signed is our
 bug, not the caller's.
 
@@ -588,7 +588,7 @@ Overflow of the result type is a **fault** (500), never a wrap. Money is
 ### 12.4 There is no truthiness
 
 The condition of `if`, `and`, `or`, `!` and the ternary must be `boolean`.
-`if ($x)` where `x : text?` is `E0371`. Write `if ($x != null)`. A `while`
+`if (@x)` where `x : text?` is `E0371`. Write `if (@x != null)`. A `while`
 condition is held to the same rule: `while (1)` is `E0371`, because a loop
 that never ends on a value that is not a condition is a typo rather than a
 design.
@@ -599,9 +599,9 @@ Lambdas do not exist. The replacement is a fixed set of array builtins that
 take **field names as strings**:
 
 ```jwc
-let total = array.sum_product($req.lines, "quantity", "unit_cents");
-let n     = array.len($req.lines);
-let ids   = array.pluck($rows, "id");
+let total = array.sum_product(@req.lines, "quantity", "unit_cents");
+let n     = array.len(@req.lines);
+let ids   = array.pluck(@rows, "id");
 ```
 
 `array.sum_product` returns `numeric` — the width question of §12.3 is

@@ -32,16 +32,16 @@ server {
     }
 }
 
---- Provider declined the charge. Not a client mistake and not our fault,
---- so it needs its own status and its own arm.
+/// Provider declined the charge. Not a client mistake and not our fault,
+/// so it needs its own status and its own arm.
 error PaymentDeclined(message: text) = 402 : "to'lov rad etildi";
 
--- Every other error type this app raises carries a default status, so it
--- needs no arm here (errors.md §4.3). This handler exists for the one case
--- that wants a non-default body.
+// Every other error type this app raises carries a default status, so it
+// needs no arm here (errors.md §4.3). This handler exists for the one case
+// that wants a non-default body.
 errorHandler (e) {
     catch PaymentDeclined (err) {
-        return statusCode(402, { error: "payment_declined", reason: $err.message });
+        return statusCode(402, { error: "payment_declined", reason: @err.message });
     }
     catch (err) {
         return internalError();
@@ -49,5 +49,5 @@ errorHandler (e) {
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }

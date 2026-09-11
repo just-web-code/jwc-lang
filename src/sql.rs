@@ -165,7 +165,7 @@ impl<'a> Builder<'a> {
                 .fields
                 .iter()
                 .filter_map(|f| match f {
-                    ProjField::Column(i) => Some(i.name.clone()),
+                    ProjField::Column { column: i, .. } => Some(i.name.clone()),
                     ProjField::Expr { alias, .. } => Some(alias.name.clone()),
                     ProjField::Nested { .. } => None,
                 })
@@ -186,7 +186,7 @@ impl<'a> Builder<'a> {
                 .fields
                 .iter()
                 .filter_map(|f| match f {
-                    ProjField::Column(i) => {
+                    ProjField::Column { column: i, .. } => {
                         let c = t.column(&i.name)?;
                         Some(self.json_entry(&i.name, c, alias))
                     }

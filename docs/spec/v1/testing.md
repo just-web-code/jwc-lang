@@ -62,7 +62,7 @@ assertion says which one failed without a line number lookup.
 
 ```jwc no-compile
 assert fails Conflict {
-    insert into App.billing.Subscriptions { … };
+    insert Subscriptions into App.billing.Subscriptions { … };
 } with "bu tashkilotda faol obuna allaqachon bor";
 ```
 

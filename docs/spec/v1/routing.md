@@ -12,20 +12,39 @@ routes "/api/v1/orgs/{org_id: bigint}" use RequireAuth, RequireOrgMember, Audit 
 
     route GET "" {
         let org = OrgService.detail(@org_id);
-        return json($org);
+        return json(@org);
     }
 
     route PATCH "" use RequireOrgAdmin {
         let req = request.body() as OrgEdit;
-        let org = OrgService.update(@org_id, $req);
-        return json($org);
+        let org = OrgService.update(@org_id, @req);
+        return json(@org);
     }
 }
 ```
 
-1.1 A path is written in **exactly two pieces**: the `routes` prefix and the
-`route` suffix. There is no third. `routes` blocks do not nest
-(ROADMAP §8).
+1.1 A grouped path is written in **exactly two pieces**: the `routes`
+prefix and the `route` suffix. There is no third. `routes` blocks do not
+nest (ROADMAP §8).
+
+1.1.1 A `route` — or a `socket` — may also be written **at the top level**,
+with no `routes` around it:
+
+```jwc no-compile
+route GET "/health" {
+    return json({ ok: true });
+}
+```
+
+It is the same declaration with an empty prefix, so §1.2 resolves it to
+its suffix alone and everything downstream — the middleware chain, route
+conflicts, `jwc routes`, both backends — sees the shape it already knows.
+A `use` clause goes on the route itself; there is no prefix to hang one on.
+
+The grouped form exists because a prefix and a chain shared by several
+endpoints should be written once. A lone endpoint shares nothing, and
+`routes "" { … }` around it says only that the language wanted a wrapper.
+`jwc fmt` prints back whichever form was written.
 
 1.2 The resolved path is `prefix + "/" + suffix`, with an empty suffix
 meaning the prefix itself, and duplicate `/` collapsed. Both pieces are
@@ -214,7 +233,7 @@ that carries data.
 ### 6.2 `with { }` headers (#10)
 
 ```jwc
-return created(json($invoice)) with { "Location": $url, "X-Request-Id": $rid };
+return created(json(@invoice)) with { "Location": @url, "X-Request-Id": @rid };
 ```
 
 `with { }` is a suffix on any response expression. Keys are literal strings;
@@ -240,7 +259,7 @@ A cookie is set with `cookie(...)` rather than through `with { }`, because
 a JSON object cannot carry a duplicate key:
 
 ```jwc
-return json($x) with { "Cache-Control": "no-store" } cookie("sid", $sid, { http_only: true, max_age: 3600 });
+return json(@x) with { "Cache-Control": "no-store" } cookie("sid", @sid, { http_only: true, max_age: 3600 });
 ```
 
 `cookie(name, value, opts)` may be chained; each occurrence appends one
@@ -287,8 +306,8 @@ here is one the reader has to guess the encoding of.
 ### 6.4 `redirect` and `redirectExternal`
 
 ```jwc no-compile
-return redirect(302, "/dashboard");                 -- a path on this service
-return redirectExternal(302, $link.url);            -- anywhere
+return redirect(302, "/dashboard");                 // a path on this service
+return redirectExternal(302, @link.url);            // anywhere
 ```
 
 `redirect` sends a caller to a path on **this** service. A target that can
@@ -358,8 +377,8 @@ nothing about the bytes inside the string.
 ### 6.4 What a route may return
 
 A route body must end every path in `return <Response>` (`E0731`).
-Returning a non-`Response` from a route is `E0732` — `return $account;` is
-the mistake this catches, and the fix is `return json($account);`.
+Returning a non-`Response` from a route is `E0732` — `return @account;` is
+the mistake this catches, and the fix is `return json(@account);`.
 
 ---
 
@@ -401,11 +420,11 @@ routes "/live" use RequireAuth {
         }
 
         on message (text) {
-            socket.send("echo: " + $text);
+            socket.send("echo: " + @text);
         }
 
         on close {
-            -- released here, whatever ended the connection
+            // released here, whatever ended the connection
         }
     }
 }
@@ -707,8 +726,8 @@ language had no users (ROADMAP §0).
 | `via` | `'via' was removed in 1.0 — write the join's 'on' clause` |
 | `nav` | `'nav' was removed in 1.0 — joins are written in the query, never declared on the table` |
 | `validate` | `'validate body' was removed in 1.0 — write 'request.body() as ClassName'` |
-| `new` | `'new X from Y' was removed in 1.0 — write 'insert into App.s.X { ...y }'` |
-| `patch` | `'patch' was removed in 1.0 — write 'update App.s.X set …'` |
+| `new` | `'new X from Y' was removed in 1.0 — write 'insert X into App.s.X { ...@y }'` |
+| `patch` | `'patch' was removed in 1.0 — write 'update X of App.s.X set …'` |
 | `mount` | `'mount' was removed in 1.0 — every route declares its full path` |
 | `dome` | `'dome' was removed in 1.0` |
 

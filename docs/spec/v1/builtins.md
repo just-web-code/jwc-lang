@@ -44,7 +44,7 @@ middleware or `after` block.
 | `cookie(name, value, opts)` | `Response` suffix | routing §6.2 |
 | `env(k)` | `text?` | process environment; read once at boot |
 | `raw(sql, …)` | `Raw[]` | writes §6 |
-| `serve(port)` | `Void` | only in `main()`; the port the listener binds (config §3.2.2) |
+| `serve()` | `Void` | only in `main()`; says this program is a server. Where it listens is `server { port }` (config §3.2.2) |
 
 Coercions — types §7.2 decides their failure class:
 
@@ -97,7 +97,7 @@ Bare `now()` is `E0302`.
 | `string.matches(s, r"…")` | `boolean` |
 | `string.strip_prefix(s, p)` | `text` — unchanged when absent |
 
-`string.strip_prefix($header, "Bearer ")` is the correct spelling of the
+`string.strip_prefix(@header, "Bearer ")` is the correct spelling of the
 sample's `string.replace(header, "Bearer ", "")`, which would also have
 stripped the literal from the middle of a token.
 
@@ -213,7 +213,7 @@ gate (§7c) applies: a provider on a private network needs
 
 **`hash.sha256` exists to make hashed-token lookup possible (#38).** Three
 sample tables declare `token_hash varchar(255) private, unique` and then need
-`where token_hash == $h` — which a salted KDF cannot serve, because every
+`where token_hash == @h` — which a salted KDF cannot serve, because every
 call produces a different string. The rule is: **`hash.password` for secrets
 a human chose, `hash.sha256` for high-entropy tokens the server generated.**
 A `crypto.token(32)` value has 256 bits of entropy, so an unsalted digest is

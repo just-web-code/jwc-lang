@@ -14,8 +14,8 @@ total = total + 1;
 ```
 
 There is no `+=`. A binding is declared with `let` and written by name. The
-`$` sigil is legal here too (`$total = $total + 1;`) but only *required*
-inside a query clause, where a bare name is a column — see
+`@` sigil is legal here too (`@total = @total + 1;`) but only *required*
+inside a query clause, where a column is written `T.column` — see
 [Syntax](./syntax.md#sigils).
 
 ## `const`
@@ -34,7 +34,7 @@ other consts. A call, a query or request data is `E0216`.
 let o = { "a": 1, "b": { "c": 2 } };
 o.a = 10;
 o.b.c = 20;
-o.fresh = 30;      -- a key that was not there is added
+o.fresh = 30;      // a key that was not there is added
 ```
 
 ## `if`
@@ -51,7 +51,7 @@ as usual.
 ## `for`
 
 ```jwc no-compile
-for (line in invoice.lines) {
+for (let line in invoice.lines) {
     total = total + line.amount;
 }
 ```
@@ -69,11 +69,11 @@ a retry loop cannot be written, because `return` and `throw` leave the whole
 function:
 
 ```jwc no-compile
-for (attempt in [1, 2, 3, 4, 5]) {
+for (let attempt in [1, 2, 3, 4, 5]) {
     let code = fresh_code();
-    insert into App.public.Links {
-        code = $code,
-        url  = $req.url
+    insert Links into App.public.Links {
+        code = @code,
+        url  = @req.url
     } catch Conflict (err) {
         continue;
     };
@@ -94,10 +94,10 @@ Inside an `after` block a bare `return;` ends that block only, and
 
 ```jwc no-compile
 transaction {
-    let org = insert into App.org.Orgs { ...$req } as { id, slug };
-    insert into App.org.Members {
-        org_id     = $org.id,
-        account_id = $owner_id,
+    let org = insert Orgs into App.org.Orgs { ...@req } as { id, slug };
+    insert Members into App.org.Members {
+        org_id     = @org.id,
+        account_id = @owner_id,
         role       = MemberRole.owner
     };
     return org;

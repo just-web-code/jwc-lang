@@ -94,9 +94,9 @@ middleware Audit {
             return;
         }
 
-        insert into App.audit.Events {
+        insert Events into App.audit.Events {
             route      = request.route(),
-            status     = $status,
+            status     = @status,
             duration   = response.duration_ms(),
             created_at = date.now()
         };

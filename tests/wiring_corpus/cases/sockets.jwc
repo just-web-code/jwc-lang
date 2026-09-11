@@ -1,11 +1,11 @@
 namespace sockets;
 
--- routing.md §9 — a `socket` is a member of a `routes` block, beside its
--- HTTP siblings, sharing the prefix and the `use` chain.
+// routing.md §9 — a `socket` is a member of a `routes` block, beside its
+// HTTP siblings, sharing the prefix and the `use` chain.
 
 middleware SockAuth provides who: text {
     let key = request.header("X-Key") or throw Unauthorized("kalit kerak");
-    context.who = $key;
+    context.who = @key;
 }
 
 routes "/live" {
@@ -15,15 +15,15 @@ routes "/live" {
 
     socket "rooms/{room: text}" use SockAuth {
         on open {
-            -- `@room` is a path parameter; a socket has a path.
+            // `@room` is a path parameter; a socket has a path.
             socket.send("joined " + @room + " as " + context.who);
         }
 
         on message (text) {
-            if ($text == "bye") {
+            if (@text == "bye") {
                 socket.close();
             }
-            socket.send("echo: " + $text);
+            socket.send("echo: " + @text);
         }
 
         on close {
@@ -31,8 +31,8 @@ routes "/live" {
         }
     }
 
-    -- Send-only: no `on message`. Legal — a peer that speaks first is not
-    -- an error, its frame is dropped.
+    // Send-only: no `on message`. Legal — a peer that speaks first is not
+    // an error, its frame is dropped.
     socket "ticks" {
         on open {
             socket.send("tick");
@@ -45,9 +45,9 @@ routes "/dup" {
         return json({});
     }
 
-    -- The upgrade is a GET on the wire, so this collides with the route
-    -- above rather than coexisting with it.
-    socket "a" {                                -- expect: E0710
+    // The upgrade is a GET on the wire, so this collides with the route
+    // above rather than coexisting with it.
+    socket "a" {                                // expect: E0710
         on open {
             socket.send("hi");
         }
@@ -57,16 +57,16 @@ routes "/dup" {
 routes "/bad" {
     socket "returns" {
         on message (m) {
-            -- The HTTP response was the 101 that got here.
-            return json({ echoed: $m });        -- expect: E0814
+            // The HTTP response was the 101 that got here.
+            return json({ echoed: @m });        // expect: E0814
         }
     }
 }
 
 routes "/misplaced" {
     route GET "x" {
-        -- There is no connection here.
-        socket.send("nope");                    -- expect: E0225
+        // There is no connection here.
+        socket.send("nope");                    // expect: E0225
         return json({});
     }
 }

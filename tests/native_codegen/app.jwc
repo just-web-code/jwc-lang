@@ -14,7 +14,7 @@ class NewNote {
 
 middleware Guard {
     let key = request.header("X-Key") or throw Unauthorized("kalit kerak");
-    if ($key != "secret") {
+    if (@key != "secret") {
         throw Unauthorized("kalit noto'g'ri");
     }
 
@@ -26,57 +26,57 @@ middleware Guard {
 service Notes {
     function rename(id: bigint, title: text) {
         transaction {
-            update App.s.Notes
-                set title = $title
-                where id == $id;
+            update Notes of App.s.Notes
+                set title = @title
+                where Notes.id == @id;
         }
 
-        return $title;
+        return @title;
     }
 }
 
 function greeting(who: text) -> text {
-    return "salom, " + $who;
+    return "salom, " + @who;
 }
 
 routes "/" {
     route GET "hello" {
         let who = request.query("who") ?? "dunyo";
-        return json({ message: greeting($who), upper: string.upper($who) });
+        return json({ message: greeting(@who), upper: string.upper(@who) });
     }
 
     route GET "count" {
         let total = 0;
-        for (n in [1, 2, 3, 4, 5]) {
-            if ($n == 3) { continue; }
-            $total = $total + $n;
+        for (let n in [1, 2, 3, 4, 5]) {
+            if (@n == 3) { continue; }
+            @total = @total + @n;
         }
-        return json({ total: $total });
+        return json({ total: @total });
     }
 }
 
 routes "/notes" use Guard {
     route GET "" {
-        let rows = select N from App.s.Notes as { id, title } orderby id desc limit 50;
+        let rows = select N from App.s.Notes as { N.id, N.title } orderby N.id desc limit 50;
 
-        return json($rows);
+        return json(@rows);
     }
 
     route GET "{id: bigint}" {
         let row = select N from App.s.Notes
-            where id == @id
-            as { id, title }
+            where N.id == @id
+            as { N.id, N.title }
             first or throw NotFound("bunday eslatma yo'q");
 
-        return json($row);
+        return json(@row);
     }
 
     route POST "" {
         let body = request.body() as NewNote;
 
-        let row = insert into App.s.Notes { title = $body.title } as { id, title };
+        let row = insert Notes into App.s.Notes { title = @body.title } as { Notes.id, Notes.title };
 
-        return created(json($row));
+        return created(json(@row));
     }
 
     route PATCH "{id: bigint}" {
@@ -86,12 +86,12 @@ routes "/notes" use Guard {
     }
 
     route DELETE "{id: bigint}" {
-        delete from App.s.Notes where id == @id;
+        delete Notes from App.s.Notes where Notes.id == @id;
 
         return noContent();
     }
 }
 
 function main() {
-    serve(8090);
+    serve();
 }

@@ -1,4 +1,4 @@
--- ops: 2 add_column org.orgs.region
+// ops: 2 add_column org.orgs.region
 
 namespace c;
 database App : Postgres;

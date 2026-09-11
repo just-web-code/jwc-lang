@@ -174,7 +174,8 @@ Every `errorHandler` arm must end every path in `return <Response>`
 ## 5. `or throw` (E2, types §6.6)
 
 ```jwc
-let account = select A from App.auth.Accounts where email == $req.email as { id, password_hash } first
+let account = select A from App.auth.Accounts
+    where A.email == @req.email as { A.id, A.password_hash } first
     or throw Unauthorized("email yoki parol xato");
 ```
 
@@ -270,7 +271,7 @@ map and never produces a migration.
 ### 7.1 Shape
 
 ```jwc
-let payment = insert into App.billing.Payments { ...$req } as { id }
+let payment = insert Payments into App.billing.Payments { ...@req } as { Payments.id }
     catch Conflict (err) { return { status: "duplicate" }; };
 ```
 

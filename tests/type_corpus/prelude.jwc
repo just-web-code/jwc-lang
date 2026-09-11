@@ -25,8 +25,8 @@ table Members of App.s {
     foreign key (org_id) references App.s.Orgs (id) on delete cascade;
 }
 
---- An account with a stored password digest, for the hash rules
---- (builtins.md §6).
+/// An account with a stored password digest, for the hash rules
+/// (builtins.md §6).
 table Accounts of App.s {
     id            bigint primary key identity;
     email         varchar(255) unique;
@@ -58,9 +58,9 @@ table Invites of App.s {
     foreign key (accepted_by) references App.s.Orgs (id);
 }
 
---- A `jsonb` payload, for the write rules (types.md §5.6). Its shape is
---- per-event, which is the point: it is the one column type whose shape is
---- not the schema's business.
+/// A `jsonb` payload, for the write rules (types.md §5.6). Its shape is
+/// per-event, which is the point: it is the one column type whose shape is
+/// not the schema's business.
 table Events of App.s {
     id      bigint primary key identity;
     org_id  bigint;
@@ -73,18 +73,18 @@ view OrgList of App.s {
     select O from App.s.Orgs
         left join App.s.Members M on M.org_id == O.id
             as many members orderby account_id asc limit 200
-        as { id, slug, name, members: { account_id, role } }
+        as { O.id, O.slug, O.name, members: { account_id, role } }
 }
 
---- A view with both a nested `one` and a collection: ordering by the
---- nested field lowers to a flattened column, which the base table does
---- not have (queries.md §8.3).
+/// A view with both a nested `one` and a collection: ordering by the
+/// nested field lowers to a flattened column, which the base table does
+/// not have (queries.md §8.3).
 view NoteWithOrg of App.s {
     select N from App.s.Notes
         left join App.s.Orgs O on O.id == N.org_id as one org
         left join App.s.Invites I on I.org_id == N.org_id
             as many invites under N orderby id asc limit 200
-        as { id, body, org: { id, name }, invites: { id, email } }
+        as { N.id, N.body, org: { id, name }, invites: { id, email } }
 }
 
 class NoteInput {

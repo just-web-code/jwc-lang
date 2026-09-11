@@ -51,7 +51,7 @@ A `?` suffix makes the column nullable. Without it the column is
 `NOT NULL`, which is the default because most columns are.
 
 ```jwc no-compile
-region     varchar(20)?;         -- NULL allowed
+region     varchar(20)?;         // NULL allowed
 created_at timestamptz default now();
 ```
 
@@ -81,7 +81,7 @@ unique (org_id, slug) : "bu tashkilotda bunday slug bor";
 
 check (amount > 0) : "amount must be positive";
 
--- Column rules take one too, and a column can carry several:
+// Column rules take one too, and a column can carry several:
 email varchar(255) unique : "bu email band", pattern(r"^[^@]+@[^@]+$") : "email yaroqsiz";
 ```
 

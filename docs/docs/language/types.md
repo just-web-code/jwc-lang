@@ -31,7 +31,7 @@ holding money. If a client reads an id as a number, declare the column
 
 ```jwc no-compile
 let org = select O from App.org.Orgs
-    where id == $id
+    where id == @id
     as { id, name }
     first or throw NotFound("not found");
 ```
@@ -47,12 +47,12 @@ When you want to handle the null rather than answer with it, three shapes
 narrow:
 
 ```jwc no-compile
-if ($org == null) { throw NotFound("not found"); }
--- org is Record{…} from here to the end of the block
+if (@org == null) { throw NotFound("not found"); }
+// org is Record{…} from here to the end of the block
 
-if ($org != null) { … $org.name … }          -- inside the then-branch
+if (@org != null) { … @org.name … }          // inside the then-branch
 
-if ($org == null) { … } else { … $org.name … }   -- inside the else-branch
+if (@org == null) { … } else { … @org.name … }   // inside the else-branch
 ```
 
 The third is the same fact as the second, written the other way round. Its
@@ -66,12 +66,12 @@ Postgres built, forwarded to the response with zero parsing. Reading a field
 of it is a compile error.
 
 ```jwc no-compile
--- Raw: fast, forwarded whole, opaque
-return json(select O from App.org.Orgs where id == $id first);
+// Raw: fast, forwarded whole, opaque
+return json(select O from App.org.Orgs where id == @id first);
 
--- Record: named fields, readable, checked
+// Record: named fields, readable, checked
 let org = select O from App.org.Orgs
-    where id == $id
+    where id == @id
     as { id, name, created_at }
     first or throw NotFound("not found");
 return json({ id: org.id, label: org.name });

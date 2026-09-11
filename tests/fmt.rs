@@ -113,19 +113,19 @@ fn formatted_output_reparses_to_the_same_shape() {
 #[test]
 fn doc_comments_survive_a_round_trip() {
     let src = "\
---- Tenant table.
+/// Tenant table.
 table Orgs of App.org {
-    --- URL-safe handle.
+    /// URL-safe handle.
     slug varchar(40) unique : \"taken\";
 }
 ";
     let once = fmt("<docs>", src);
     assert!(
-        once.contains("--- Tenant table."),
+        once.contains("/// Tenant table."),
         "table doc lost:\n{once}"
     );
     assert!(
-        once.contains("--- URL-safe handle."),
+        once.contains("/// URL-safe handle."),
         "column doc lost:\n{once}"
     );
     assert_eq!(once, fmt("<docs2>", &once));
@@ -134,18 +134,18 @@ table Orgs of App.org {
 #[test]
 fn line_comments_survive_a_round_trip() {
     let src = "\
--- why this exists
+// why this exists
 function f() {
-    -- and this
+    // and this
     let a = 1;
 }
 ";
     let once = fmt("<comments>", src);
     assert!(
-        once.contains("-- why this exists"),
+        once.contains("// why this exists"),
         "decl comment lost:\n{once}"
     );
-    assert!(once.contains("-- and this"), "stmt comment lost:\n{once}");
+    assert!(once.contains("// and this"), "stmt comment lost:\n{once}");
     assert_eq!(once, fmt("<comments2>", &once));
 }
 
@@ -156,19 +156,19 @@ fn corpus_snippets_are_fixed_points() {
     let cases: &[(&str, &str)] = &[
         (
             "insert_with_returning",
-            "function f() { return insert into App.s.T { a = 1, b = 2 } as { id }; }",
+            "function f() { return insert T into App.s.T { a = 1, b = 2 } as { id }; }",
         ),
         (
             "insert_on_conflict",
-            "function f() { return insert into App.s.T { a = 1 } on conflict (a) do nothing as { id }; }",
+            "function f() { return insert T into App.s.T { a = 1 } on conflict (a) do nothing as { id }; }",
         ),
         (
             "update_first_or_throw",
-            "function f() { return update App.s.T set a = 1 where id == 1 as { id } first or throw NotFound(\"m\"); }",
+            "function f() { return update T of App.s.T set a = 1 where id == 1 as { id } first or throw NotFound(\"m\"); }",
         ),
         (
             "delete_first",
-            "function f() { return delete from App.s.T where id == 1 as { id } first; }",
+            "function f() { return delete T from App.s.T where id == 1 as { id } first; }",
         ),
         (
             "select_nested_projection",
@@ -176,11 +176,11 @@ fn corpus_snippets_are_fixed_points() {
         ),
         (
             "catch_postfix",
-            "function f() { let a = insert into App.s.T { a = 1 } as { id } catch Conflict (e) { return 1; }; }",
+            "function f() { let a = insert T into App.s.T { a = 1 } as { id } catch Conflict (e) { return 1; }; }",
         ),
         (
             "page_clause",
-            "function f() { return select T from App.s.T orderby id desc page after $c size 50 max 100; }",
+            "function f() { return select T from App.s.T orderby id desc page after @c size 50 max 100; }",
         ),
         (
             "middleware_full",
@@ -192,7 +192,7 @@ fn corpus_snippets_are_fixed_points() {
         ),
         (
             "error_handler",
-            "errorHandler (e) { catch NotFound (err) { return notFound($err.message); } catch (err) { return internalError(); } }",
+            "errorHandler (e) { catch NotFound (err) { return notFound(@err.message); } catch (err) { return internalError(); } }",
         ),
         (
             "routes_with_headers",
@@ -200,7 +200,7 @@ fn corpus_snippets_are_fixed_points() {
         ),
         (
             "nested_if_else",
-            "function f() { if ($a) { return 1; } else if ($b) { return 2; } else { return 3; } }",
+            "function f() { if (@a) { return 1; } else if (@b) { return 2; } else { return 3; } }",
         ),
         (
             "assert_fails",
@@ -266,19 +266,19 @@ table T of App.s {
     a  varchar(10);
     b  varchar(10);
 
-    --- why this check exists
+    /// why this check exists
     check (char_length(a) >= 2) : "qisqa";
-    --- why this unique exists
+    /// why this unique exists
     unique (a, b) : "band";
-    --- why this index exists
+    /// why this index exists
     index on (a);
 }
 "#;
     let out = fmt("constraint_docs.jwc", src);
     for doc in [
-        "--- why this check exists",
-        "--- why this unique exists",
-        "--- why this index exists",
+        "/// why this check exists",
+        "/// why this unique exists",
+        "/// why this index exists",
     ] {
         assert!(out.contains(doc), "`{doc}` was dropped:\n{out}");
     }
@@ -303,16 +303,16 @@ table Child of App.s {
     a bigint;
     b bigint;
 
-    --- composite, in this order, because reads are always by `a`
+    /// composite, in this order, because reads are always by `a`
     primary key (a, b);
-    --- cascade: a child row has no meaning without its parent
+    /// cascade: a child row has no meaning without its parent
     foreign key (a) references App.s.Parent (id) on delete cascade;
 }
 "#;
     let out = fmt("key_docs.jwc", src);
     for doc in [
-        "--- composite, in this order, because reads are always by `a`",
-        "--- cascade: a child row has no meaning without its parent",
+        "/// composite, in this order, because reads are always by `a`",
+        "/// cascade: a child row has no meaning without its parent",
     ] {
         assert!(out.contains(doc), "`{doc}` was dropped:\n{out}");
     }
@@ -387,18 +387,18 @@ fn a_long_chain_breaks_at_its_operator_and_a_ternary_does_not() {
     let src = concat!(
         "service S {\n",
         "    function a(x: text) -> text {\n",
-        "        return \"<img src='https://barcodeapi.org/api/qr/\" + $x",
+        "        return \"<img src='https://barcodeapi.org/api/qr/\" + @x",
         " + \"?format=svg' alt='QR Code'/>\";\n",
         "    }\n",
         "    function b(x: int) -> text {\n",
-        "        return $x > 100000 ? \"a rather long branch here for width\" :",
+        "        return @x > 100000 ? \"a rather long branch here for width\" :",
         " \"another rather long branch\";\n",
         "    }\n",
         "}\n",
     );
     let once = fmt("chain.jwc", src);
     assert!(
-        once.contains("\n            + $x\n"),
+        once.contains("\n            + @x\n"),
         "the `+` chain must break at its operator:\n{once}"
     );
     // The ternary has no place to break, so it stays on one line even
@@ -413,8 +413,8 @@ fn a_long_chain_breaks_at_its_operator_and_a_ternary_does_not() {
 
 /// The `insert` width check counted the columns before its suffix.
 ///
-/// Measured on jwc-shortener: `insert into App.public.Links { code = $code,
-/// url = $req.url } catch Conflict (err) {` printed as 96 columns, because
+/// Measured on jwc-shortener: `insert Links into App.public.Links { code = @code,
+/// url = @req.url } catch Conflict (err) {` printed as 96 columns, because
 /// the check summed the head and the inline values and ignored both the
 /// indent and the ` catch … {` riding on the end.
 #[test]
@@ -429,8 +429,8 @@ fn an_inserts_width_check_counts_its_indent_and_its_suffix() {
         "}\n",
         "service S {\n",
         "    function make(code: text, url: text) {\n",
-        "        for (n in [1, 2]) {\n",
-        "            insert into App.public.Links { code = $code, url = $url }",
+        "        for (let n in [1, 2]) {\n",
+        "            insert Links into App.public.Links { code = @code, url = @url }",
         " catch Conflict (err) {\n",
         "                continue;\n",
         "            };\n",
@@ -447,4 +447,114 @@ fn an_inserts_width_check_counts_its_indent_and_its_suffix() {
         );
     }
     assert_eq!(once, fmt("insert_width.jwc (2nd)", &once));
+}
+
+/// A top-level `route` is printed back as a top-level `route`.
+///
+/// It desugars to a `routes ""` block holding one route, which is how
+/// everything downstream sees it. `jwc fmt` must not show that: printing
+/// the wrapper would rewrite the source into the form the author chose not
+/// to write, and `fmt --check` would fail on a file nobody had touched.
+#[test]
+fn a_bare_route_keeps_its_shape() {
+    let src = "\
+namespace app;
+
+route GET \"/health\" {
+    return json({ ok: true });
+}
+";
+    let once = fmt("bare.jwc", src);
+    assert_eq!(once, src, "a bare route must survive a format unchanged");
+    assert_eq!(once, fmt("bare.jwc (2nd)", &once), "and be idempotent");
+    assert!(
+        !once.contains("routes"),
+        "the desugared wrapper must not appear in the output:\n{once}"
+    );
+}
+
+/// The same, for the sibling declaration.
+#[test]
+fn a_bare_socket_keeps_its_shape() {
+    let src = "\
+namespace app;
+
+socket \"/feed\" {
+    on message (m) {
+        socket.send(@m);
+    }
+}
+";
+    let once = fmt("bare-socket.jwc", src);
+    assert_eq!(once, src, "a bare socket must survive a format unchanged");
+    assert!(!once.contains("routes"), "no wrapper:\n{once}");
+}
+
+/// A grouped block is still printed grouped.
+#[test]
+fn a_grouped_block_keeps_its_wrapper() {
+    let src = "\
+namespace app;
+
+routes \"/api/v1\" {
+    route GET \"notes\" {
+        return json([]);
+    }
+}
+";
+    assert_eq!(fmt("grouped.jwc", src), src);
+}
+
+/// Block comments survive the printer, nesting and all.
+///
+/// The same machinery as `//`: the AST carries them on a declaration or a
+/// statement, and `comments_lost` is what turns anything it cannot carry
+/// into a refusal rather than a deletion.
+#[test]
+fn block_comments_round_trip() {
+    let src = r#"
+namespace n;
+
+/* a one-liner */
+database App : Postgres;
+
+/*
+Several lines, and it nests:
+/* inner — so a region with comments in it can be commented out whole */
+still inside.
+*/
+schema s of App;
+
+table T of App.s {
+    /* about the key */
+    id bigint primary key identity;
+}
+"#;
+    let once = fmt("blocks.jwc", src);
+    for text in [
+        "/* a one-liner */",
+        "/* inner — so a region with comments in it can be commented out whole */",
+        "/* about the key */",
+        "still inside.",
+    ] {
+        assert!(once.contains(text), "`{text}` was dropped:\n{once}");
+    }
+    assert!(
+        jwc::fmt::comments_lost(src, &once).is_empty(),
+        "a comment was lost:\n{once}"
+    );
+    assert_eq!(once, fmt("blocks.jwc", &once), "not a fixed point");
+}
+
+/// A block comment the AST cannot carry is named, not deleted.
+#[test]
+fn a_block_comment_mid_expression_is_refused_rather_than_dropped() {
+    let src = "namespace n;\nfunction f() {\n    return 1 /* why */ + 2;\n}\n";
+    let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), src);
+    assert!(!parsed.has_errors(), "the sample must parse");
+    let printed = jwc::fmt::format_program(&parsed.program);
+    assert_eq!(
+        jwc::fmt::comments_lost(src, &printed),
+        vec!["/* why */".to_string()]
+    );
 }

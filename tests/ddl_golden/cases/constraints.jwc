@@ -10,8 +10,8 @@ table Parents of App.s {
     code varchar(20) unique;
 }
 
---- Composite primary key, composite foreign key as ONE constraint,
---- partial unique as an index, and a table check.
+/// Composite primary key, composite foreign key as ONE constraint,
+/// partial unique as an index, and a table check.
 table Children of App.s {
     parent_id bigint;
     seq       int;

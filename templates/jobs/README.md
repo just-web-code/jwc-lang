@@ -26,7 +26,7 @@ job Deliver(recipient: text, subject: text) retries 5 backoff "30s" { … }
 and the dispatch site in `src/routes/work.jwc`:
 
 ```jwc
-dispatch Deliver(recipient: $req.recipient, subject: $req.subject);
+dispatch Deliver(recipient: @req.recipient, subject: @req.subject);
 ```
 
 The arguments are named and checked against the declaration, so a

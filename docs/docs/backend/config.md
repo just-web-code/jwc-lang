@@ -25,7 +25,7 @@ server {
     }
 }
 
-function main() { serve(8080); }
+function main() { serve(); }
 ```
 
 | Key | Default | What it does |
@@ -79,6 +79,7 @@ does not have, or miss one it does.
 | `JWC_REQUEST_LOG` | `0` | One access line per answered request, on stderr. `jwc serve --request-logging` sets it; a native binary has no flags, so this is how `jwc build` output is turned on. |
 | `JWC_LOG_FORMAT` | `text` | Access-log shape: `text` or `json`. Read only when JWC_REQUEST_LOG is on. |
 | `JWC_MAX_BODY_BYTES` | `2097152` | Request body cap (bytes); 0 disables. |
+| `JWC_SWAGGER` | `server { swagger }, else off` | Path the API reference is served at, e.g. `/docs`; empty is off. Wins over `server { swagger }` in both backends. The page lists every route, parameter and error, so it is off unless asked for. |
 | `JWC_MAX_SOCKETS` | `server { max_sockets }, else half the descriptor limit (512 on Windows)` | Concurrent WebSocket connections; 0 disables the cap. Native builds only — `jwc serve` reads `server { max_sockets }`. |
 | `JWC_SOCKET_KEEPALIVE` | `server { socket_keepalive }, else 30` | Seconds between keepalive pings on a quiet WebSocket, and the deadline for the pong. `0` disables it, leaving a dead peer holding its `max_sockets` slot. Native builds only — `jwc serve` reads `server { socket_keepalive }`. |
 | `JWC_SHUTDOWN_TIMEOUT` | `5` | Graceful shutdown budget before force-exit. |
@@ -92,6 +93,7 @@ does not have, or miss one it does.
 | `JWC_REAL_IP_HEADER` | `x-forwarded-for` | Header name parsed by the request_ip() builtin. |
 | `JWC_TRUSTED_PROXIES` | — | Comma-separated IPs/prefixes peeled off X-F-F. |
 | `JWC_PRINT_CONFIG` | `true` | Print this table at boot, with secrets redacted. |
+| `JWC_PORT` | `server { port }, else 8080` | Port the listener binds. `PORT` is read too, and `JWC_PORT` wins over it — the same pair `JWC_DATABASE_URL` and `DATABASE_URL` make, because a platform that injects one of these injects `PORT`. Both win over `server { port }`; `--port` wins over both. |
 | `JWC_BIND_HOST` | — | Native builds only: override the listen address (`server { bind }` in the source). |
 | `JWC_DEV` | `false` | Development mode: `debug.dump` prints. Never in production — it prints request data. |
 | `JWC_HTTP_TIMEOUT_SECS` | `10` | Whole-request ceiling for outbound `http.*` calls. |

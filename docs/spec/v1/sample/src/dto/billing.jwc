@@ -27,8 +27,8 @@ class InvoiceCreate {
     lines  InvoiceLineInput[] required, minItems(1), maxItems(200);
 }
 
---- The provider's payload. `invoice_id` arrives as a JSON string or
---- number; both are accepted for `bigint` (types.md §2.3).
+/// The provider's payload. `invoice_id` arrives as a JSON string or
+/// number; both are accepted for `bigint` (types.md §2.3).
 class WebhookPayment {
     provider_ref varchar(120) required;
     invoice_id   bigint required;

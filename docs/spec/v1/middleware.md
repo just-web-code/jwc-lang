@@ -15,12 +15,12 @@ middleware RequireOrgMember(@org_id: bigint)
     let account_id = context.account_id;
 
     let access = select MA from App.org.MemberAccess
-        where org_id == @org_id and account_id == $account_id
+        where MA.org_id == @org_id and MA.account_id == @account_id
         first
         or throw Forbidden("siz bu tashkilot a'zosi emassiz");
 
     context.org_id = @org_id;
-    context.role   = $access.role;
+    context.role   = @access.role;
 }
 ```
 
@@ -126,14 +126,14 @@ middleware Audit {
         let method = request.method();
         let status = response.status();
 
-        if ($method == "GET" or $status >= 400) { return; }
+        if (@method == "GET" or @status >= 400) { return; }
 
         let path = request.route();
-        insert into App.audit.Events {
+        insert Events into App.audit.Events {
             org_id   = context.org_id?,
             actor_id = context.account_id?,
-            action   = $method,
-            entity   = $path,
+            action   = @method,
+            entity   = @path,
             ip       = request.client_ip()
         };
     }

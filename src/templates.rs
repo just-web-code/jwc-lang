@@ -229,9 +229,16 @@ pub fn new_project(name: String, kind: TemplateKind, path: Option<PathBuf>) -> R
     println!("  cp .env.example .env      # point DATABASE_URL at a database");
     println!("  jwc check                 # offline: types, schema, routes");
     if kind != TemplateKind::Empty {
-        println!("  jwc migrate new init && jwc migrate up");
+        // `--create-db` is in the printed line because the database not
+        // being there yet is the ordinary case one command after `jwc
+        // new`, and the step that creates it was in no template, in no
+        // quickstart page, and in one tutorial line.
+        println!("  jwc migrate new init && jwc migrate up --create-db");
     }
     println!("  jwc serve");
+    println!("  jwc swagger               # browsable API reference");
+    println!();
+    println!("  `server {{ swagger = \"/docs\"; }}` serves that page from the app itself.");
     Ok(())
 }
 

@@ -29,14 +29,14 @@ names the expected position, and `jwc fmt` normalises to it.
 ## The binder, and why it exists
 
 ```jwc no-compile
-select N from App.notes.Notes where org_id == $org_id
+select N from App.notes.Notes where org_id == @org_id
 ```
 
-`N` binds the row. A bare name in a clause is a **column**; `$name` is a
-local. That is the whole of the rule that makes
+`N` binds the row, and every column in a clause says so: `N.org_id`.
+`@name` is a local. That is the whole of the rule that makes
 
 ```jwc no-compile
-where org_id == $org_id
+where org_id == @org_id
 ```
 
 mean what it looks like. In SQL, `WHERE org_id = org_id` is a tautology
@@ -111,10 +111,10 @@ happened to produce, and that answer changes under load.
 
 ```jwc no-compile
 select N from App.notes.Notes
-    where org_id == $org_id
+    where org_id == @org_id
     as { id, title, created_at }
     orderby created_at asc, id asc
-    page after $cursor size $size
+    page after @cursor size @size
 ```
 
 The answer is `{ items, next, has_more }`. Follow `next` until it is
@@ -151,7 +151,7 @@ it is greppable, and its result is `Raw` — the runtime does not pretend to
 know the shape.
 
 ```jwc no-compile
-raw("SELECT count(*) FROM notes.notes WHERE org_id = {}", [$org_id])
+raw("SELECT count(*) FROM notes.notes WHERE org_id = {}", [@org_id])
 ```
 
 ## Seeing the SQL

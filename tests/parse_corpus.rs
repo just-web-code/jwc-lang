@@ -116,7 +116,7 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
              \x20   route GET \"health\" { return json({}); }\n\
              \x20   socket \"rooms/{room: text}\" use Member {\n\
              \x20       on open { socket.send(\"hi\"); }\n\
-             \x20       on message (m) { socket.send($m); }\n\
+             \x20       on message (m) { socket.send(@m); }\n\
              \x20       on close { socket.close(); }\n\
              \x20   }\n}",
         ),
@@ -124,22 +124,22 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
             "buffered_insert",
             "middleware Log {\n\
              \x20   after {\n\
-             \x20       insert into App.s.Access { route = request.route() } buffered;\n\
+             \x20       insert Access into App.s.Access { route = request.route() } buffered;\n\
              \x20   }\n}",
         ),
         (
             "job_decl",
             "job SendWelcome(account_id: bigint, email: text) retries 3 backoff \"30s\" {\n\
-             \x20   let who = $account_id;\n}",
+             \x20   let who = @account_id;\n}",
         ),
         (
             "dispatch_stmt",
-            "job J(a: bigint) { let x = $a; }\n\
+            "job J(a: bigint) { let x = @a; }\n\
              routes \"/\" { route POST \"x\" {\n\
              \x20   dispatch J(a: 1);\n\
              \x20   return created(json({}));\n} }",
         ),
-        ("named_arg", "job K(a: text) { let x = $a; }"),
+        ("named_arg", "job K(a: text) { let x = @a; }"),
         (
             "socket_handler",
             "routes \"/live\" { socket \"t\" { on open { socket.send(\"x\"); } } }",
@@ -156,7 +156,11 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
             "table_decl.physical_was",
             "table T of App.s as \"t_x\" was \"old_t\" { id bigint; }",
         ),
-        ("doc_comment", "--- doc\ntable T of App.s {\n--- col\nid bigint; }"),
+        ("doc_comment", "/// doc\ntable T of App.s {\n/// col\nid bigint; }"),
+        (
+            "block_comment",
+            "/* header\n/* nested */\n*/\ntable T of App.s { /* on the key */ id bigint; }",
+        ),
         ("column_def.optional", "table T of App.s { a text?; }"),
         ("column_def.array", "table T of App.s { a text[]; }"),
         (
@@ -243,7 +247,7 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "error_handler_decl",
-            "errorHandler (e) { catch NotFound (err) { return notFound($err.message); } catch (err) { return internalError(); } }",
+            "errorHandler (e) { catch NotFound (err) { return notFound(@err.message); } catch (err) { return internalError(); } }",
         ),
         ("server_decl", "server { a = 1; cors { origins = [\"x\"]; } }"),
         ("test_decl", "test \"t\" { assert 1 == 1; }"),
@@ -259,7 +263,7 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         ("type_ref.array_optional", "class C { a text[]?; }"),
         ("let_stmt", "function f() { let a = 1; }"),
         ("let_stmt.typed", "function f() { let a: bigint = 1; }"),
-        ("assign_stmt.local", "function f() { let a = 1; $a = 2; }"),
+        ("assign_stmt.local", "function f() { let a = 1; @a = 2; }"),
         ("assign_stmt.context", "middleware M provides k: int { context.k = 1; }"),
         ("if_stmt", "function f() { if (true) { return 1; } }"),
         ("if_stmt.else", "function f() { if (true) { return 1; } else { return 2; } }"),
@@ -267,14 +271,14 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
             "if_stmt.else_if",
             "function f() { if (true) { return 1; } else if (false) { return 2; } else { return 3; } }",
         ),
-        ("for_stmt", "function f() { for (x in $xs) { let a = $x; } }"),
+        ("for_stmt", "function f() { for (let x in @xs) { let a = @x; } }"),
         (
             "break_stmt",
-            "function f() { for (x in $xs) { if ($x == 1) { break; } } }",
+            "function f() { for (let x in @xs) { if (@x == 1) { break; } } }",
         ),
         (
             "continue_stmt",
-            "function f() { for (x in $xs) { if ($x == 1) { continue; } } }",
+            "function f() { for (let x in @xs) { if (@x == 1) { continue; } } }",
         ),
         ("return_stmt.bare", "middleware M { after { return; } }"),
         ("throw_stmt", "function f() { throw NotFound(\"x\"); }"),
@@ -315,47 +319,47 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "page_clause",
-            "function f() { return select T from App.s.T orderby id desc page after $c size 50 max 100; }",
+            "function f() { return select T from App.s.T orderby id desc page after @c size 50 max 100; }",
         ),
         (
             "insert_expr",
-            "function f() { return insert into App.s.T { a = 1 } as { id }; }",
+            "function f() { return insert T into App.s.T { a = 1 } as { id }; }",
         ),
         (
             "conflict_clause.nothing",
-            "function f() { return insert into App.s.T { a = 1 } on conflict (a) do nothing as { id }; }",
+            "function f() { return insert T into App.s.T { a = 1 } on conflict (a) do nothing as { id }; }",
         ),
         (
             "conflict_clause.update",
-            "function f() { return insert into App.s.T { a = 1 } on conflict (a) do update set b = 2; }",
+            "function f() { return insert T into App.s.T { a = 1 } on conflict (a) do update set b = 2; }",
         ),
         (
             "update_expr",
-            "function f() { return update App.s.T set a = 1, b =? $x, ...$req where id == 1 as { id } first; }",
+            "function f() { return update T of App.s.T set a = 1, b =? @x, ...@req where id == 1 as { id } first; }",
         ),
         (
             "delete_expr",
-            "function f() { return delete from App.s.T where id == 1 as { id } first; }",
+            "function f() { return delete T from App.s.T where id == 1 as { id } first; }",
         ),
-        ("or_throw", "function f() { let a = $x or throw NotFound(\"m\"); }"),
+        ("or_throw", "function f() { let a = @x or throw NotFound(\"m\"); }"),
         (
             "catch_postfix",
-            "function f() { let a = insert into App.s.T { a = 1 } as { id } catch Conflict (err) { return 1; }; }",
+            "function f() { let a = insert T into App.s.T { a = 1 } as { id } catch Conflict (err) { return 1; }; }",
         ),
-        ("coalesce_expr", "function f() { let a = $x ?? 1; }"),
-        ("ternary_expr", "function f() { let a = $x ? 1 : 2; }"),
-        ("or_expr", "function f() { let a = $x or $y; }"),
-        ("and_expr", "function f() { let a = $x and $y; }"),
-        ("not_expr", "function f() { let a = !$x; }"),
+        ("coalesce_expr", "function f() { let a = @x ?? 1; }"),
+        ("ternary_expr", "function f() { let a = @x ? 1 : 2; }"),
+        ("or_expr", "function f() { let a = @x or @y; }"),
+        ("and_expr", "function f() { let a = @x and @y; }"),
+        ("not_expr", "function f() { let a = !@x; }"),
         (
             "compare_expr.ops",
-            "function f() { let a = $x == 1 and $y != 2 and $z < 3 and $w <= 4 and $v > 5 and $u >= 6; }",
+            "function f() { let a = @x == 1 and @y != 2 and @z < 3 and @w <= 4 and @v > 5 and @u >= 6; }",
         ),
-        ("compare_expr.optional", "function f() { return select T from App.s.T where a ==? $x; }"),
-        ("compare_expr.like", "function f() { return select T from App.s.T where a like $x; }"),
-        ("compare_expr.ilike", "function f() { return select T from App.s.T where a ilike $x; }"),
+        ("compare_expr.optional", "function f() { return select T from App.s.T where a ==? @x; }"),
+        ("compare_expr.like", "function f() { return select T from App.s.T where a like @x; }"),
+        ("compare_expr.ilike", "function f() { return select T from App.s.T where a ilike @x; }"),
         ("compare_expr.in", "function f() { return select T from App.s.T where a in (1, 2); }"),
-        ("compare_expr.not_in", "function f() { return select T from App.s.T where a not in ($xs); }"),
+        ("compare_expr.not_in", "function f() { return select T from App.s.T where a not in (@xs); }"),
         (
             "compare_expr.exists",
             "function f() { return select T from App.s.T where exists (select U from App.s.U where U.t_id == T.id); }",
@@ -367,28 +371,28 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         ("additive", "function f() { let a = 1 + 2 - 3; }"),
         ("multiplicative", "function f() { let a = 1 * 2 / 3 % 4; }"),
         ("unary.neg", "function f() { let a = -1; }"),
-        ("postfix.field", "function f() { let a = $x.y.z; }"),
-        ("postfix.index", "function f() { let a = $x[0]; }"),
+        ("postfix.field", "function f() { let a = @x.y.z; }"),
+        ("postfix.index", "function f() { let a = @x[0]; }"),
         ("postfix.call", "function f() { let a = g(1, 2); }"),
         ("call_args.filter", "function f() { return select T from App.s.T group by a as { n: count(b where b > 1) }; }"),
         ("param_ref", "middleware M(@id: bigint) { let a = @id; }"),
-        ("local_ref", "function f() { let a = 1; let b = $a; }"),
+        ("local_ref", "function f() { let a = 1; let b = @a; }"),
         ("object_literal", "function f() { let a = { x: 1, y: 2 }; }"),
-        ("object_literal.assign", "function f() { return insert into App.s.T { a = 1 }; }"),
+        ("object_literal.assign", "function f() { return insert T into App.s.T { a = 1 }; }"),
         ("object_literal.string_key", "function f() { let a = { \"X-Id\": 1 }; }"),
-        ("spread", "function f() { return insert into App.s.T { ...$req }; }"),
-        ("spread.except", "function f() { return insert into App.s.T { ...$req except (password) }; }"),
+        ("spread", "function f() { return insert T into App.s.T { ...@req }; }"),
+        ("spread.except", "function f() { return insert T into App.s.T { ...@req except (password) }; }"),
         ("array_literal", "function f() { let a = [1, 2, 3]; }"),
         ("response_expr.with", "routes \"/x\" { route GET \"\" { return json(1) with { \"Location\": \"/y\" }; } }"),
         ("literal.number", "function f() { let a = 1; let b = 1.5; }"),
         ("literal.string", "function f() { let a = \"x\"; }"),
         ("raw_string", "function f() { let a = r\"^x$\"; }"),
         ("literal.bool_null", "function f() { let a = true; let b = false; let c = null; }"),
-        ("cast", "routes \"/x\" { route POST \"\" { let r = request.body() as C; return json($r); } }"),
+        ("cast", "routes \"/x\" { route POST \"\" { let r = request.body() as C; return json(@r); } }"),
         ("context_read_optional", "middleware M { after { let a = context.k?; } }"),
         (
             "response_expr.cookie",
-            "routes \"/x\" { route GET \"\" { return json(1) with { \"A\": \"b\" } cookie(\"sid\", $s, { http_only: true }); } }",
+            "routes \"/x\" { route GET \"\" { return json(1) with { \"A\": \"b\" } cookie(\"sid\", @s, { http_only: true }); } }",
         ),
     ]
 }
@@ -551,5 +555,81 @@ fn corpus_covers_every_grammar_production() {
         missing.is_empty(),
         "grammar productions with no corpus entry: {missing:?}\n\
          add a snippet to corpus() or list the production as structural"
+    );
+}
+
+/// A `route` at the top level parses, and resolves to its suffix alone.
+///
+/// It was `E0003` — "`route` must be inside a `routes` block" — which made
+/// the smallest program anyone writes, one endpoint in one file, illegal
+/// until it was wrapped in a block that grouped nothing.
+#[test]
+fn a_route_needs_no_routes_block_around_it() {
+    use jwc::ast::Decl;
+    let parsed = jwc::parse_str(
+        "app.jwc",
+        "namespace app;\n\
+         \n\
+         route GET \"/health\" {\n\
+         \x20   return json({ ok: true });\n\
+         }\n",
+    );
+    assert!(
+        !parsed.has_errors(),
+        "a bare route must parse:\n{}",
+        parsed.render_all()
+    );
+
+    let routes = parsed
+        .program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Routes(r) => Some(r),
+            _ => None,
+        })
+        .expect("the route becomes a routes declaration");
+    assert!(routes.bare, "and is marked as written bare");
+    assert_eq!(routes.prefix, "", "with an empty prefix");
+    assert_eq!(routes.routes.len(), 1);
+    assert_eq!(routes.routes[0].suffix, "/health");
+}
+
+/// A `socket` at the top level parses the same way.
+#[test]
+fn a_socket_needs_no_routes_block_around_it() {
+    let parsed = jwc::parse_str(
+        "app.jwc",
+        "namespace app;\n\
+         \n\
+         socket \"/feed\" {\n\
+         \x20   on open { }\n\
+         }\n",
+    );
+    assert!(
+        !parsed.has_errors(),
+        "a bare socket must parse:\n{}",
+        parsed.render_all()
+    );
+}
+
+/// A `routes` block still refuses to hold anything but routes and sockets.
+///
+/// Allowing a bare `route` at the top level must not loosen what a block
+/// admits — `E0008` is a different rule and stays.
+#[test]
+fn a_routes_block_still_holds_only_routes_and_sockets() {
+    let parsed = jwc::parse_str(
+        "app.jwc",
+        "namespace app;\n\
+         \n\
+         routes \"/api\" {\n\
+         \x20   function nope() { }\n\
+         }\n",
+    );
+    assert!(
+        parsed.render_all().contains("E0008"),
+        "a function inside a routes block is still E0008:\n{}",
+        parsed.render_all()
     );
 }

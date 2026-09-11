@@ -1421,6 +1421,14 @@ pub fn canonical_expr(
         // An enum member reduces to its physical literal (schema.md §4.3).
         ExprKind::Field { base, field } => match &*base.kind {
             ExprKind::Name(n) if enums.contains_key(&n.name) => sql_string(&field.name),
+            // `T.status` — a query binding qualifying a column. DDL has no
+            // bindings, so the canonical form is the column alone; without
+            // this a qualified predicate stops matching the partial unique
+            // it was written against.
+            ExprKind::Name(_) => match columns.iter().find(|c| c.declared == field.name) {
+                Some(c) => naming::quote_ident(&c.physical),
+                None => naming::quote_ident(&naming::physical(&field.name)),
+            },
             _ => format!(
                 "{}.{}",
                 canonical_expr(base, columns, enums),

@@ -3,7 +3,7 @@
 //! Each `tests/type_corpus/cases/*.jwc` is annotated inline:
 //!
 //! ```text
-//! return $row.body;                       -- expect: E0310
+//! return @row.body;                       -- expect: E0310
 //! ```
 //!
 //! The annotation names the diagnostic that must be reported **on that
@@ -39,8 +39,8 @@ fn cases() -> Vec<PathBuf> {
 fn expectations(text: &str) -> BTreeSet<(usize, String)> {
     let mut out = BTreeSet::new();
     for (i, line) in text.lines().enumerate() {
-        if let Some(pos) = line.find("-- expect:") {
-            for code in line[pos + "-- expect:".len()..]
+        if let Some(pos) = line.find("// expect:") {
+            for code in line[pos + "// expect:".len()..]
                 .split(',')
                 .map(str::trim)
                 .filter(|c| !c.is_empty())
@@ -141,7 +141,7 @@ fn every_case_asserts_something() {
     for case in cases() {
         let text = std::fs::read_to_string(&case).expect("read");
         assert!(
-            text.contains("-- expect:") || text.contains("function"),
+            text.contains("// expect:") || text.contains("function"),
             "{} asserts nothing",
             case.display()
         );

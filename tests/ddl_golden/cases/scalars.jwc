@@ -3,8 +3,8 @@ namespace scalars;
 database App : Postgres;
 schema s of App;
 
---- Every scalar in the dictionary (types.md §2.1), so the golden file is
---- the type-mapping table in executable form.
+/// Every scalar in the dictionary (types.md §2.1), so the golden file is
+/// the type-mapping table in executable form.
 table Every of App.s {
     id     bigint primary key identity;
     a      smallint;

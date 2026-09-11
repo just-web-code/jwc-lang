@@ -1,4 +1,4 @@
--- ops: 1 add_enum_value org.plan 'team' before 'pro'
+// ops: 1 add_enum_value org.plan 'team' before 'pro'
 
 namespace c;
 database App : Postgres;

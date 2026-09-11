@@ -2,13 +2,13 @@ namespace route_returns;
 
 import prelude;
 
--- routing.md §6.4 and middleware.md §5.2 — what a route may return, and
--- what a middleware may.
+// routing.md §6.4 and middleware.md §5.2 — what a route may return, and
+// what a middleware may.
 service Notes {
     function one(id: bigint) -> { id: bigint, body: text } {
         return select N from App.s.Notes
-            where id == $id
-            as { id, body }
+            where N.id == @id
+            as { N.id, N.body }
             first or throw NotFound("yo'q");
     }
 }
@@ -18,26 +18,26 @@ routes "/notes" {
         return json(Notes.one(@id));
     }
 
-    -- The mistake this catches. The fix is `return json($account);`.
+    // The mistake this catches. The fix is `return json($account);`.
     route GET "bare/{id: bigint}" {
         let note = Notes.one(@id);
 
-        return $note;                       -- expect: E0732
+        return @note;                       // expect: E0732
     }
 
-    -- A body that can fall off the end has no answer to send.
-    route GET "silent/{id: bigint}" {         -- expect: E0731
+    // A body that can fall off the end has no answer to send.
+    route GET "silent/{id: bigint}" {         // expect: E0731
         let note = Notes.one(@id);
     }
 
-    -- One arm returns, the other does not.
-    route GET "half/{id: bigint}" {           -- expect: E0731
+    // One arm returns, the other does not.
+    route GET "half/{id: bigint}" {           // expect: E0731
         if (@id > 0) {
             return json(Notes.one(@id));
         }
     }
 
-    -- Both arms return, so the body is total.
+    // Both arms return, so the body is total.
     route GET "total/{id: bigint}" {
         if (@id > 0) {
             return json(Notes.one(@id));
@@ -47,40 +47,40 @@ routes "/notes" {
     }
 }
 
--- An error that is returned rather than thrown skips the error handler,
--- so it answers with a different body than every other error in the
--- program.
+// An error that is returned rather than thrown skips the error handler,
+// so it answers with a different body than every other error in the
+// program.
 middleware ReturnsAnError {
     if (request.header("x-blocked") != null) {
-        return forbidden("no");                -- expect: W0801
+        return forbidden("no");                // expect: W0801
     }
 }
 
--- A deliberately non-error response is what `return` is for.
+// A deliberately non-error response is what `return` is for.
 middleware Redirects {
     if (request.header("x-old") != null) {
         return redirect(301, "/notes");
     }
 }
 
--- middleware.md §4.2 — the fourth outcome, which the section does not
--- list. A bare `return;` stops the chain and answers 204, so an author who
--- meant "reject" sends the wrong status and one who meant "I am done,
--- carry on" switches the endpoint off entirely.
+// middleware.md §4.2 — the fourth outcome, which the section does not
+// list. A bare `return;` stops the chain and answers 204, so an author who
+// meant "reject" sends the wrong status and one who meant "I am done,
+// carry on" switches the endpoint off entirely.
 middleware BareReturn {
     if (request.header("x-quiet") != null) {
-        return;                                -- expect: E0812
+        return;                                // expect: E0812
     }
 }
 
--- The same statement in an `after` block is how a block ends, and stays
--- legal: an `after` has no response to produce (§5.3, E0810).
+// The same statement in an `after` block is how a block ends, and stays
+// legal: an `after` has no response to produce (§5.3, E0810).
 middleware EndsItsAfter {
     after {
         if (response.status() == 204) {
             return;
         }
-        insert into App.s.Notes {
+        insert Notes into App.s.Notes {
             org_id = 1,
             body = request.route()
         } buffered;

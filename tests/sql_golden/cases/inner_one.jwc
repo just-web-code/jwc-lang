@@ -1,5 +1,5 @@
---- An `inner join … as one` cannot miss, so the projected object needs no
---- null guard. The `left join` beside it does.
+/// An `inner join … as one` cannot miss, so the projected object needs no
+/// null guard. The `left join` beside it does.
 namespace inner_one;
 
 database App : Postgres;
@@ -28,12 +28,12 @@ view SessionAccount of App.s {
     select S from App.s.Sessions
         inner join App.s.Accounts A on A.id == S.account_id
             as one account
-        as { id, account: { id, email } }
+        as { S.id, account: { id, email } }
 }
 
 view SessionProfile of App.s {
     select S from App.s.Sessions
         left join App.s.Profiles P on P.account_id == S.account_id
             as one profile
-        as { id, profile: { account_id, nickname } }
+        as { S.id, profile: { account_id, nickname } }
 }

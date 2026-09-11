@@ -36,6 +36,80 @@ pub struct Input<'a> {
     pub raises: BTreeMap<String, Vec<String>>,
 }
 
+/// The document, from artifacts a caller already has.
+///
+/// `jwc openapi`, `jwc swagger` and the reference `server { swagger }`
+/// serves all come through here. That is the whole point: the 0.9 command
+/// was a second generator, 661 lines, kept in step with the first by hand,
+/// and a page that disagrees with the document beside it is worse than no
+/// page. One walk, three callers.
+pub fn document_for(
+    ws: &crate::workspace::Workspace,
+    database: Option<&str>,
+    sym: &Symbols,
+    checked: &Checked,
+    wired: &Wired,
+    title: Option<String>,
+) -> Value {
+    // Which declared errors each route can raise. errors.md §4.3 makes a
+    // declared error's default status the answer whether or not an
+    // `errorHandler` arm names it, so this is exactly the non-2xx set.
+    let bodies = crate::wiring::function_bodies(ws);
+    let mut raises: BTreeMap<String, Vec<String>> = Default::default();
+    for file in &ws.files {
+        for d in &file.program.decls {
+            let crate::ast::Decl::Routes(r) = d else {
+                continue;
+            };
+            for rt in &r.routes {
+                let key = format!(
+                    "{} {}",
+                    rt.method.name.to_uppercase(),
+                    crate::wiring::route_pattern(&r.prefix, &rt.suffix)
+                );
+                let mut set: Vec<String> = crate::wiring::raises_from(sym, &bodies, &rt.body)
+                    .into_iter()
+                    .collect();
+                // Middleware runs before the handler and can answer on its
+                // own, so what it raises the route can produce.
+                for m in rt.uses.iter().chain(&r.uses) {
+                    if let Some(b) = middleware_body(ws, &m.name) {
+                        set.extend(crate::wiring::raises_from(sym, &bodies, b));
+                    }
+                }
+                set.sort();
+                set.dedup();
+                raises.insert(key, set);
+            }
+        }
+    }
+
+    document(&Input {
+        title: title.unwrap_or_else(|| {
+            database
+                .map(str::to_string)
+                .unwrap_or_else(|| "JWC application".to_string())
+        }),
+        version: "1.0.0".to_string(),
+        sym,
+        wired,
+        checked,
+        raises,
+    })
+}
+
+fn middleware_body<'a>(
+    ws: &'a crate::workspace::Workspace,
+    name: &str,
+) -> Option<&'a crate::ast::Block> {
+    ws.files.iter().find_map(|f| {
+        f.program.decls.iter().find_map(|d| match d {
+            crate::ast::Decl::Middleware(m) if m.name.name == name => Some(&m.body),
+            _ => None,
+        })
+    })
+}
+
 pub fn document(input: &Input) -> Value {
     let mut paths: Map<String, Value> = Map::new();
     let mut used: BTreeSet<String> = BTreeSet::new();

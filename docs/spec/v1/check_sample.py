@@ -4,7 +4,7 @@
 Reads the sample project, classifies every construct it uses, and writes
 spec-coverage.json mapping each construct to the normative clause that
 defines it.  A construct with no clause is reported as `unspecified` and
-makes the script exit non-zero -- that is the v0.20.0 done-criterion
+makes the script exit non-zero — that is the v0.20.0 done-criterion
 (ROADMAP: "spec-coverage.json da 0 ta unspecified").
 
 This is a lexical scan, not a parser.  The parser arrives in v0.21.0 and
@@ -34,7 +34,7 @@ CONSTRUCTS = [
     ("errorHandler.arm",      r"^\s*catch\s+\w+\s*\(",               "errors §4.2"),
     ("errorHandler.fault_arm", r"^\s*catch\s*\(",                    "errors §4.4"),
     ("table",                 r"^table\s+\w+\s+of\s",                "schema §1"),
-    ("doc_comment",           r"^\s*---\s",                          "schema §7"),
+    ("doc_comment",           r"^\s*///\s",                          "schema §7"),
     ("column.nullable",       r"^\s+\w+\s+[\w()\[\], ]+\?\s*[;,]",   "types §6.1"),
     ("column.identity",       r"\bprimary key identity\b",           "schema §2.3"),
     ("column.private",        r"\bprivate\b",                        "schema §3.1"),
@@ -84,7 +84,7 @@ CONSTRUCTS = [
     ("route.use",             r"^\s*route\s+[A-Z]+\s+\"[^\"]*\"\s+use\s", "middleware §4.1"),
     ("path_param.typed",      r"\{\w+\s*:\s*\w+\}",                  "routing §3.1"),
     ("path_param.ref",        r"@\w+",                               "names §5.2"),
-    ("local.sigil",           r"\$\w+",                              "names §5.3"),
+    ("local.sigil",           r"@\w+",                               "names §5.2"),
     ("let",                   r"^\s*let\s+\w+\s*=",                  "names §5.5"),
     ("select",                r"\bselect\s+\w+\s+from\s",            "queries §1"),
     ("select.first",          r"^\s*first\b",                        "queries §5.1"),
@@ -103,19 +103,19 @@ CONSTRUCTS = [
     ("join.child_limit",      r"as many \w+ orderby .*limit",        "queries §4.6"),
     ("aggregate",             r"\b(count|sum|min|max|avg)\(",        "queries §6.3"),
     ("aggregate.filter",      r"\b(count|sum|min|max)\([^)]*\bwhere\b", "queries §6.3"),
-    ("insert",                r"\binsert into\s",                    "writes §2"),
+    ("insert",                r"\binsert\s+\w+\s+into\s",             "writes §2"),
     ("insert.returning",      r"\}\s*as\s*\{",                       "writes §2.2"),
     ("insert.on_conflict",    r"on conflict\s*\([^)]*\)\s*do nothing", "writes §2.3"),
-    ("update",                r"^\s*(let\s+\w+\s*=\s*)?update\s+App\.", "writes §3"),
+    ("update",                r"\bupdate\s+\w+\s+of\s+App\.",         "writes §3"),
     ("update.first",          r"^\s*first\b",                        "writes §3.2"),
-    ("delete",                r"\bdelete from\s",                    "writes §5"),
-    ("spread",                r"\.\.\.\$\w+",                        "types §9"),
-    ("spread.except",         r"\.\.\.\$\w+\s+except\s",             "types §9.1"),
+    ("delete",                r"\bdelete\s+\w+\s+from\s",             "writes §5"),
+    ("spread",                r"\.\.\.@\w+",                         "types §9"),
+    ("spread.except",         r"\.\.\.@\w+\s+except\s",              "types §9.1"),
     ("transaction",           r"^\s*transaction\s*\{",               "writes §7"),
     ("or_throw",              r"^\s*or throw\s+\w+",                 "errors §5"),
     ("throw",                 r"^\s*throw\s+\w+",                    "errors §2.1"),
     ("catch_postfix",         r"\}\s*catch\s+\w+\s*\(\w+\)\s*\{",    "errors §7"),
-    ("for",                   r"^\s*for\s*\(\w+\s+in\s",             "types §12.5"),
+    ("for",                   r"^\s*for\s*\(let\s+\w+\s+in\s",       "types §12.5"),
     ("ternary",               r"\?\s.*\s:\s",                        "types §12"),
     ("coalesce",              r"\?\?",                               "types §6.6"),
     ("response.json",         r"\bjson\(",                           "routing §6.1"),
@@ -133,7 +133,7 @@ CONSTRUCTS = [
     ("request.client_ip",     r"request\.client_ip\(\)",             "routing §5.4"),
     ("response.status",       r"response\.status\(\)",               "middleware §5.1"),
     ("builtin.env",           r"\benv\(",                            "builtins §2"),
-    ("builtin.coercion",      r"\b(int|bigint|numeric|boolean|uuid)\(\$?\w", "types §7.2"),
+    ("builtin.coercion",      r"\b(int|bigint|numeric|boolean|uuid)\(@?\w", "types §7.2"),
     ("builtin.enum_coercion", r"\benum\(\w+,",                       "builtins §2"),
     ("builtin.date",          r"\bdate\.\w+\(",                      "builtins §3"),
     ("builtin.string",        r"\bstring\.\w+\(",                    "builtins §4"),
@@ -144,7 +144,7 @@ CONSTRUCTS = [
     ("builtin.package",       r"\b(redis|mail)\.\w+\(",              "builtins §8"),
     ("builtin.serve",         r"\bserve\(",                          "builtins §2"),
     ("test",                  r"^test\s+\"",                         "DEFERRED-11"),
-    ("test.assert",           r"^\s*assert\s+\$",                    "DEFERRED-11"),
+    ("test.assert",           r"^\s*assert\s+@",                     "DEFERRED-11"),
     ("test.assert_fails",     r"^\s*assert fails\s+\w+\s*\{",        "DEFERRED-11"),
 ]
 
@@ -171,9 +171,9 @@ FORBIDDEN = [
 
 
 def is_line_comment(line: str) -> bool:
-    """A `--` line comment, but not a `---` doc comment."""
+    """A `//` line comment, but not a `///` doc comment."""
     stripped = line.lstrip()
-    return stripped.startswith("--") and not stripped.startswith("---")
+    return stripped.startswith("//") and not stripped.startswith("///")
 
 
 def main() -> int:

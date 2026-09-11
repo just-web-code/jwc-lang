@@ -1,13 +1,13 @@
 namespace group_by_alias;
 
--- E0531 fires on a column that is neither aggregated nor grouped. A
--- projection that *aliases* a grouped column is grouped — and `group by`
--- takes either spelling, bare or qualified, so the alias map has to read
--- both. Reading only the bare one made `as { org_name: O.name }` an error
--- against `group by O.name`, while `as { name: O.name }` passed by
--- coincidence.
+// E0531 fires on a column that is neither aggregated nor grouped. A
+// projection that *aliases* a grouped column is grouped — and `group by`
+// takes either spelling, bare or qualified, so the alias map has to read
+// both. Reading only the bare one made `as { org_name: O.name }` an error
+// against `group by O.name`, while `as { name: O.name }` passed by
+// coincidence.
 service GroupAlias {
-    -- The alias differs from the column name. This is the case that broke.
+    // The alias differs from the column name. This is the case that broke.
     function per_org() {
         return select M from App.s.Members
             inner join App.s.Orgs O on O.id == M.org_id as group
@@ -15,8 +15,8 @@ service GroupAlias {
             as { org_id: M.org_id, org_name: O.name, n: count(M.account_id) };
     }
 
-    -- The alias equals the column name. This always worked and has to keep
-    -- working.
+    // The alias equals the column name. This always worked and has to keep
+    // working.
     function per_org_same_name() {
         return select M from App.s.Members
             inner join App.s.Orgs O on O.id == M.org_id as group
@@ -24,10 +24,10 @@ service GroupAlias {
             as { org_id: M.org_id, name: O.name, n: count(M.account_id) };
     }
 
-    -- Still an error: aliasing a column does not group it.
+    // Still an error: aliasing a column does not group it.
     function aliasing_does_not_group() {
         return select N from App.s.Notes
-            group by org_id
-            as { org_id, text: body, n: count(id) };   -- expect: E0531
+            group by N.org_id
+            as { N.org_id, text: body, n: count(N.id) };   // expect: E0531
     }
 }

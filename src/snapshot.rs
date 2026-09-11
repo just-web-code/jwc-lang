@@ -623,9 +623,9 @@ schema org of App;
 
 enum Plan of App.org { free, pro }
 
---- Tenants.
+/// Tenants.
 table Orgs of App.org {
-    --- Surrogate key.
+    /// Surrogate key.
     id   bigint primary key identity;
     slug varchar(40) unique;
     plan Plan;

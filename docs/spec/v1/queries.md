@@ -40,23 +40,54 @@ binds `I`.
 
 2.3 Referring to a source that is not a `table` or `view` is `E0502`.
 
+2.4 **A column says which binding it came from.** In `where`, `having`,
+`orderby`, `group by`, a `join ... on`, a `page after` expression and a
+projection field, a column is written `B.column`. A bare name there is
+`E0904`, naming the binding it should have carried.
+
+```jwc no-compile
+select I from App.billing.Invoices
+    where I.org_id == @org_id
+    as { I.id, I.total }
+```
+
+That is what the binder is for. It also makes the four query forms read
+alike, so each one binds a name:
+
+| | |
+|---|---|
+| `select I from App.billing.Invoices` | |
+| `insert I into App.billing.Invoices { … }` | |
+| `update I of App.billing.Invoices set … ` | |
+| `delete I from App.billing.Invoices` | |
+
+The exceptions are the two positions that are not references: a `set`
+target and an `insert` object key name a column of the table being written,
+and take no qualifier — as in SQL, where `UPDATE t AS a SET a.x = 1` is an
+error.
+
+A projection field qualified with a binding other than the query's own is
+`E0905`; a joined table's columns reach the result through its own `as one`
+/ `as many` nested shape (§6.1), whose fields are already scoped to it and
+so stay bare.
+
 ---
 
 ## 3. `where`
 
-3.1 The predicate is an expression over columns of the bindings in scope,
-`$locals`, `@path_params`, and literals (names §5.3).
+3.1 The predicate is an expression over `B.column` references to the
+bindings in scope, `@names`, and literals (§2.4, names §5.2).
 
-3.2 `==?` — the **optional predicate**. `where status ==? $status` emits the
-comparison only when `$status` is non-null; when null the predicate is
+3.2 `==?` — the **optional predicate**. `where I.status ==? @status` emits
+the comparison only when `@status` is non-null; when null the predicate is
 dropped entirely (not `IS NULL`). The operand must be `T?` (`E0503`
 otherwise, since a non-null operand makes it a plain `==`).
 
 3.3 `in (…)` accepts a literal list or a single array-typed operand:
 
 ```jwc no-compile
-where status in (InvoiceStatus.open, InvoiceStatus.paid)
-where status in ($statuses)                 -- $statuses : InvoiceStatus[]
+where I.status in (InvoiceStatus.open, InvoiceStatus.paid)
+where I.status in (@statuses)               // @statuses : InvoiceStatus[]
 ```
 
 The array form lowers to `= ANY($n)`, one bind parameter, never string
@@ -141,7 +172,7 @@ clause order.
 
 ### 4.5 `as one` with no match (#3)
 
-`a : Record?` is **null**, not a record of nulls. `$row.a.name` without
+`a : Record?` is **null**, not a record of nulls. `@row.a.name` without
 narrowing is `E0320` (types §6.4). In JSON, an unmatched `as one` field
 serialises as `null`.
 
@@ -197,16 +228,16 @@ either:
   equality, and (for a partial unique index) the predicate is implied.
 
 A partial unique index counts when the query's `where` **implies** its
-predicate. `where org_id == $org_id and status != SubscriptionStatus.canceled
+predicate. `where S.org_id == @org_id and S.status != SubscriptionStatus.canceled
 first` is covered by `unique (org_id) where status != SubscriptionStatus.canceled`;
-`where org_id == $org_id first` alone is not. Implication is checked
+`where S.org_id == @org_id first` alone is not. Implication is checked
 syntactically on the canonical predicate form (schema §4.3) — conjunct
 containment, not a solver.
 
 5.2.1 **Views inherit uniqueness.** A view projects a column of its driving
 table under its own name; that column keeps the driving table's primary-key
 and unique constraints for the purposes of this rule. `select V from
-App.org.OrgWithMembers where id == $org_id first` is therefore accepted:
+App.org.OrgWithMembers where id == @org_id first` is therefore accepted:
 `id` is `Orgs.id`, a primary key. A column projected under a *different*
 name (`org_id: id`) keeps them too, tracked through the alias; a column
 projected from an expression does not.
@@ -229,9 +260,9 @@ Postgres's default (`nulls last` for `asc`) applies otherwise.
 as {
     id,
     slug,
-    org_id: id,                       -- alias: expression
-    plan: { id, code, name },         -- nested, from an `as one` binding
-    lines: { id, description }        -- nested, from an `as many` binding
+    org_id: id,                       // alias: expression
+    plan: { id, code, name },         // nested, from an `as one` binding
+    lines: { id, description }        // nested, from an `as many` binding
 }
 ```
 
@@ -547,7 +578,7 @@ page [ after <cursor> ] size <n> [ max <m> ]
 
 - requires an `orderby` whose keys, with the table's primary key appended,
   are a total order (`E0550` otherwise);
-- `after $cursor` accepts the opaque cursor from a previous page, or `null`
+- `after @cursor` accepts the opaque cursor from a previous page, or `null`
   for the first page;
 - `size` is clamped to `max` when given, else to `server { max_page_size }`
   (config §3);
@@ -628,6 +659,8 @@ transaction's connection.
 | Code | Meaning |
 |---|---|
 | `E0501` | query clause out of order |
+| `E0904` | a column that does not name its binding |
+| `E0905` | a projection field qualified with another query's binding |
 | `E0502` | source is not a table or view |
 | `E0503` | `==?` on a non-nullable operand |
 | `E0510` | ambiguous join attachment — add `under <binding>` |

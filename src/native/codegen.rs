@@ -509,12 +509,12 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
 
     out.push_str("\n// ── generated from the program ──\n");
     out.push_str(
-        // 0 means `serve(...)` has not run. The generated `main` turns
-        // that into "this program is not a server" — see the listener
-        // block below — so a console program built with `jwc build` exits
-        // when `main` returns instead of binding :8080 behind it.
-        "\nstatic JWC_SERVE_PORT: ::std::sync::atomic::AtomicU16 = \
-         ::std::sync::atomic::AtomicU16::new(0);\n",
+        // `serve()` ran. The generated `main` turns a false into "this
+        // program is not a server" — see the listener block below — so a
+        // console program built with `jwc build` exits when `main` returns
+        // instead of binding a port behind it.
+        "\nstatic JWC_SERVE_CALLED: ::std::sync::atomic::AtomicBool = \
+         ::std::sync::atomic::AtomicBool::new(false);\n",
     );
     // config.md §3.1 — the two limits the source can set, carried into the
     // crate as constants.
@@ -532,12 +532,51 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
          const JWC_SOURCE_MAX_SOCKETS: usize = {};\n\
          const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n\
          const JWC_SOURCE_JOB_MAX_PAYLOAD: usize = {};\n\
-         const JWC_SOURCE_JOB_QUEUE_LIMIT: usize = {};\n",
+         const JWC_SOURCE_JOB_QUEUE_LIMIT: usize = {};\n\
+         const JWC_SOURCE_PORT: u16 = {};\n",
         server.max_body_bytes,
         server.max_sockets,
         server.socket_keepalive.as_secs(),
         server.job_max_payload,
-        server.job_queue_limit
+        server.job_queue_limit,
+        server.port
+    ));
+
+    // The reference, rendered here rather than in the binary: the document
+    // is a function of the compile-time analysis, which a running native
+    // binary does not carry. Same `document_for` the interpreter and
+    // `jwc openapi` call, so all three answer with the same bytes.
+    let (swagger_path, swagger_html, swagger_json) = match &server.swagger {
+        Some(path) => {
+            // Only when the reference is asked for: a second type-check
+            // pass on every build to bake a page nobody serves is time
+            // spent for nothing.
+            let checked = crate::check::check(ws, &symbols, &built.model);
+            let doc = crate::openapi::document_for(
+                ws,
+                built.model.database.as_deref(),
+                &symbols,
+                &checked,
+                &wired,
+                None,
+            );
+            (
+                path.clone(),
+                crate::swagger::render(&doc),
+                serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
+            )
+        }
+        // Not asked for, so nothing is baked in — an off switch that still
+        // carried the page would put every route name in the binary.
+        None => (String::new(), String::new(), String::new()),
+    };
+    out.push_str(&format!(
+        "\nconst JWC_SOURCE_SWAGGER: &str = {};\n\
+         const JWC_SWAGGER_HTML: &str = {};\n\
+         const JWC_SWAGGER_JSON: &str = {};\n",
+        rust_str_literal(&swagger_path),
+        rust_str_literal(&swagger_html),
+        rust_str_literal(&swagger_json)
     ));
     emit_constraint_messages(&mut out, &built.model);
     emit_cursor_secret(&mut out, ws);
@@ -846,32 +885,13 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     } else {
         ""
     };
-    // `main` runs, and `serve(port)` inside it records where to listen —
-    // the same order the interpreter uses, so a program that hardcodes its
-    // port gets that port on both backends.
-    // Whether this binary is a server at all.
-    //
-    // It used to be "always": `main` ran, and then the listener bound
-    // :8080 whatever the program was. A console program built with
-    // `jwc build` printed its output and then sat on a socket, or — on a
-    // box already running something — printed its output and then a bind
-    // error, which is a strange thing for `jwc run`'s own example to do.
-    //
-    // Two ways to be one, matching what the interpreter concludes:
-    // `serve(port)` ran, or the program declares routes or sockets. A
-    // program with neither said what it was.
-    let is_server = !routes.is_empty() || !sockets.is_empty();
-    let listen = if is_server {
-        // Routes with no `serve(...)` still listen, on the documented
-        // default (config.md §3.1).
-        "    let __port = JWC_SERVE_PORT.load(::std::sync::atomic::Ordering::SeqCst);\n\
-         \x20   jwc_serve_impl(if __port == 0 { 8080 } else { __port }).await;\n"
-    } else {
-        "    let __port = JWC_SERVE_PORT.load(::std::sync::atomic::Ordering::SeqCst);\n\
-         \x20   if __port != 0 {\n\
-         \x20       jwc_serve_impl(__port).await;\n\
-         \x20   }\n"
-    };
+    // `main` runs, and `serve()` inside it says the program is a server —
+    // the same call the interpreter reads, so both backends answer the
+    // question the same way. Where it listens is `server { port }` and the
+    // env over it; whether it listens is this flag.
+    let listen = "    if JWC_SERVE_CALLED.load(::std::sync::atomic::Ordering::SeqCst) {\n\
+         \x20       jwc_serve_impl(jwc_port()).await;\n\
+         \x20   }\n";
     let user_main = if has_main {
         "    if let Err(t) = jwc_user_main().await {\n\
          \x20       eprintln!(\"main() raised {}: {}\", t.error, t.message);\n\
@@ -1960,8 +1980,11 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
         ExprKind::Bool(b) => format!("V::Bool({b})"),
         ExprKind::Null => "V::Null".into(),
 
-        ExprKind::Local(i) => format!("{}.clone()", local(&i.name)),
-        ExprKind::PathParam(i) => {
+        // `@x` is a local when one is bound and a path parameter otherwise —
+        // the same order the checker resolved it in, and the reason a `let`
+        // may not shadow a path parameter (names.md §5.5).
+        ExprKind::Local(i) if ctx.is_local(&i.name) => format!("{}.clone()", local(&i.name)),
+        ExprKind::Local(i) => {
             format!("jwc_b_path_param(v_str({}))", rust_str_literal(&i.name))
         }
         // names.md §5.3 — outside a query clause the sigil is optional, so
@@ -2091,18 +2114,28 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
 
         ExprKind::Call { callee, args, .. } => {
             let name = callee_name(callee)?;
+            // `enum(E, x)` names a type first, and a type is not a value —
+            // so its arguments cannot all be emitted. The interpreter
+            // returns before evaluating them for the same reason; emitting
+            // them here made `enum(Status, request.query("s"))` fail the
+            // native build on the bare `Status`, while `jwc serve` ran it.
+            if name == "enum" {
+                ctx.used.insert("jwc_b_v1_enum".to_string());
+                let value = match args.get(1) {
+                    Some(a) => emit_expr(a, ctx)?,
+                    None => "V::Null".into(),
+                };
+                return Ok(format!("jwc_b_v1_enum({value})"));
+            }
             let mut parts = Vec::new();
             for a in args {
                 parts.push(emit_expr(a, ctx)?);
             }
             if name == "serve" {
-                let port = parts
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "V::Int(8080)".into());
-                return Ok(format!(
-                    "{{ JWC_SERVE_PORT.store(jwc_to_int(&{port}).unwrap_or(8080) as u16, ::std::sync::atomic::Ordering::SeqCst); V::Null }}"
-                ));
+                return Ok(
+                    "{ JWC_SERVE_CALLED.store(true, ::std::sync::atomic::Ordering::SeqCst); V::Null }"
+                        .into(),
+                );
             }
             // The prelude's arity, not 1.0's: `noContent()` takes no
             // argument in the language and one in the runtime, and a
@@ -2126,14 +2159,6 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                 return Ok(format!(
                     "jwc_b_v1_{name}({})?",
                     parts.first().cloned().unwrap_or_else(|| "V::Null".into())
-                ));
-            }
-            // `enum(E, x)` names a type first; the type is not a value.
-            if name == "enum" {
-                ctx.used.insert("jwc_b_v1_enum".to_string());
-                return Ok(format!(
-                    "jwc_b_v1_enum({})",
-                    parts.get(1).cloned().unwrap_or_else(|| "V::Null".into())
                 ));
             }
             if let Some(f) = prelude_fn(&name) {
@@ -2348,7 +2373,7 @@ fn emit_insert(i: &crate::ast::InsertExpr, ctx: &mut Ctx) -> Result<String> {
             } => {
                 let Some(class) = ctx.class_of_local(&source.name) else {
                     bail!(
-                        "native build cannot see the shape of `${}` — a `...` \
+                        "native build cannot see the shape of `@{}` — a `...` \
                          spread's columns come from the value's declared type, \
                          and this one is neither a typed parameter nor a \
                          `request.body() as <Class>`. `jwc serve` reads the \
@@ -2618,7 +2643,7 @@ fn emit_update(u: &crate::ast::UpdateExpr, ctx: &mut Ctx) -> Result<String> {
             } => {
                 let Some(class) = ctx.class_of_local(&source.name) else {
                     bail!(
-                        "native build cannot see the shape of `${}` — a `...` \
+                        "native build cannot see the shape of `@{}` — a `...` \
                          spread's columns come from the value's declared type, \
                          and this one is neither a typed parameter nor a \
                          `request.body() as <Class>`. `jwc serve` reads the \

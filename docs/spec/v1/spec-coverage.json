@@ -22,7 +22,7 @@
       "construct": "builtin.array",
       "clause": "builtins \u00a75",
       "uses": 1,
-      "first_use": "src/services/billing.jwc:95"
+      "first_use": "src/services/billing.jwc:107"
     },
     {
       "construct": "builtin.coercion",
@@ -286,7 +286,7 @@
       "construct": "for",
       "clause": "types \u00a712.5",
       "uses": 1,
-      "first_use": "src/services/billing.jwc:109"
+      "first_use": "src/services/billing.jwc:129"
     },
     {
       "construct": "function.free",
@@ -346,13 +346,13 @@
       "construct": "insert.on_conflict",
       "clause": "writes \u00a72.3",
       "uses": 1,
-      "first_use": "src/services/billing.jwc:159"
+      "first_use": "src/services/billing.jwc:182"
     },
     {
       "construct": "insert.returning",
       "clause": "writes \u00a72.2",
-      "uses": 4,
-      "first_use": "src/services/auth.jwc:26"
+      "uses": 2,
+      "first_use": "src/services/org.jwc:22"
     },
     {
       "construct": "join.alias",
@@ -398,7 +398,7 @@
     },
     {
       "construct": "local.sigil",
-      "clause": "names \u00a75.3",
+      "clause": "names \u00a75.2",
       "uses": 12,
       "first_use": "src/app.jwc:44"
     },
@@ -453,8 +453,8 @@
     {
       "construct": "path_param.ref",
       "clause": "names \u00a75.2",
-      "uses": 4,
-      "first_use": "src/middleware/auth.jwc:20"
+      "uses": 12,
+      "first_use": "src/app.jwc:44"
     },
     {
       "construct": "path_param.typed",
@@ -610,19 +610,19 @@
       "construct": "select.orderby",
       "clause": "queries \u00a75.3",
       "uses": 3,
-      "first_use": "src/services/auth.jwc:84"
+      "first_use": "src/services/auth.jwc:90"
     },
     {
       "construct": "select.page",
       "clause": "queries \u00a79.2",
       "uses": 1,
-      "first_use": "src/services/billing.jwc:84"
+      "first_use": "src/services/billing.jwc:96"
     },
     {
       "construct": "select.projection",
       "clause": "queries \u00a76.1",
-      "uses": 5,
-      "first_use": "src/services/auth.jwc:41"
+      "uses": 6,
+      "first_use": "src/services/auth.jwc:27"
     },
     {
       "construct": "select.where",
@@ -682,13 +682,13 @@
       "construct": "test.assert",
       "clause": "DEFERRED-11",
       "uses": 1,
-      "first_use": "tests/billing_test.jwc:40"
+      "first_use": "tests/billing_test.jwc:45"
     },
     {
       "construct": "test.assert_fails",
       "clause": "DEFERRED-11",
       "uses": 1,
-      "first_use": "tests/billing_test.jwc:62"
+      "first_use": "tests/billing_test.jwc:67"
     },
     {
       "construct": "throw",
@@ -700,7 +700,7 @@
       "construct": "transaction",
       "clause": "writes \u00a77",
       "uses": 2,
-      "first_use": "src/services/billing.jwc:94"
+      "first_use": "src/services/billing.jwc:106"
     },
     {
       "construct": "type.array",
@@ -736,13 +736,13 @@
       "construct": "type.record_inline",
       "clause": "types \u00a71",
       "uses": 3,
-      "first_use": "src/services/auth.jwc:38"
+      "first_use": "src/services/auth.jwc:44"
     },
     {
       "construct": "update",
       "clause": "writes \u00a73",
-      "uses": 3,
-      "first_use": "src/services/billing.jwc:12"
+      "uses": 4,
+      "first_use": "src/services/auth.jwc:80"
     },
     {
       "construct": "update.first",

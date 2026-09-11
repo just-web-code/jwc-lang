@@ -1,6 +1,6 @@
--- ops: 2 rename_table org.orgs -> tenants
--- ops: 4 rename_constraint org.tenants.pk_orgs -> pk_tenants
--- ops: 4 rename_constraint org.tenants.uq_orgs__slug -> uq_tenants__slug
+// ops: 2 rename_table org.orgs -> tenants
+// ops: 4 rename_constraint org.tenants.pk_orgs -> pk_tenants
+// ops: 4 rename_constraint org.tenants.uq_orgs__slug -> uq_tenants__slug
 
 namespace c;
 database App : Postgres;

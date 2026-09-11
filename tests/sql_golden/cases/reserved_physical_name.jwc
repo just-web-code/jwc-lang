@@ -1,13 +1,13 @@
---- A table renamed onto a reserved word — `as "user"` — through a write
---- that returns.
----
---- Found porting MyWallet, whose four tables are `user`, `wallet`,
---- `category` and `transaction`. `RETURNING` exposes the target under its
---- own name, and the projection built `json_build_object('id', user.id)`
---- unquoted: `user` there is the SQL `USER` function and the parser stops
---- at the dot — "syntax error at or near `.`", on a register endpoint that
---- type-checked clean. Every read path already quoted; only this one did
---- not, so it needed a write, a projection and a reserved name together.
+/// A table renamed onto a reserved word — `as "user"` — through a write
+/// that returns.
+///
+/// Found porting MyWallet, whose four tables are `user`, `wallet`,
+/// `category` and `transaction`. `RETURNING` exposes the target under its
+/// own name, and the projection built `json_build_object('id', user.id)`
+/// unquoted: `user` there is the SQL `USER` function and the parser stops
+/// at the dot — "syntax error at or near `.`", on a register endpoint that
+/// type-checked clean. Every read path already quoted; only this one did
+/// not, so it needed a write, a projection and a reserved name together.
 namespace reserved_physical_name;
 
 database App : Postgres;
@@ -25,26 +25,26 @@ class NewUser {
 
 service Accounts {
     function register(req: NewUser) {
-        return insert into App.s.Users { ...$req } as { id, email, created_at };
+        return insert Users into App.s.Users { ...@req } as { Users.id, Users.email, Users.created_at };
     }
 
     function rename(id: bigint, req: NewUser) {
-        return update App.s.Users
-            set email = $req.email
-            where id == $id
-            as { id, email }
+        return update Users of App.s.Users
+            set email = @req.email
+            where Users.id == @id
+            as { Users.id, Users.email }
             first or throw NotFound("yo'q");
     }
 
     function remove(id: bigint) {
-        delete from App.s.Users where id == $id as { id } first
+        delete Users from App.s.Users where Users.id == @id as { Users.id } first
             or throw NotFound("yo'q");
     }
 
     function one(id: bigint) {
         return select U from App.s.Users
-            where id == $id
-            as { id, email }
+            where U.id == @id
+            as { U.id, U.email }
             first or throw NotFound("yo'q");
     }
 }

@@ -2,32 +2,28 @@
 
 -- ── middleware RequireOrgMember ──
 -- $1 = @org_id :: bigint
--- $2 = $account_id :: bigint
+-- $2 = @account_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('org_id', t0.org_id::text, 'account_id', t0.account_id::text, 'role', t0.role, 'org', t0.org) AS j
   FROM org.member_access t0
   WHERE (t0.org_id = ($1::text)::bigint) AND (t0.account_id = ($2::text)::bigint)
   LIMIT 1) q
 
 -- ── AuthService.login ──
--- $1 = $req.email :: varchar(255)
+-- $1 = @req.email :: varchar(255)
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'password_hash', t0.password_hash) AS j
   FROM auth.accounts t0
   WHERE t0.email = ($1::text)::varchar(255)
   LIMIT 1) q
 
 -- ── AuthService.profile ──
--- $1 = $account_id :: bigint
+-- $1 = @account_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'email', t0.email, 'display_name', t0.display_name, 'email_verified', t0.email_verified, 'created_at', t0.created_at) AS j
   FROM auth.accounts t0
   WHERE t0.id = ($1::text)::bigint
   LIMIT 1) q
 
 -- ── AuthService.orgs_of ──
--- $1 = $account_id :: bigint
-SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('org_id', t0.org_id::text, 'account_id', t0.account_id::text, 'role', t0.role, 'org', t0.org) AS j
-  FROM org.member_access t0
-  WHERE t0.account_id = ($1::text)::bigint
-  ORDER BY t0.org__name) q
+-- not compilable yet: this query is not expressible yet
 
 -- ── BillingService.plans ──
 -- $1 = true :: boolean
@@ -37,7 +33,7 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ORDER BY t0.price, t0.id) q
 
 -- ── BillingService.subscription ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 -- $2 = SubscriptionStatus.canceled :: billing.subscription_status
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'status', t0.status, 'current_period_start', t0.current_period_start, 'current_period_end', t0.current_period_end, 'cancel_at', t0.cancel_at, 'plan', t0.plan, 'org', t0.org) AS j
   FROM billing.subscription_detail t0
@@ -45,7 +41,7 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.
   LIMIT 1) q
 
 -- ── BillingService.subscribe ──
--- $1 = $req.plan_code :: varchar(40)
+-- $1 = @req.plan_code :: varchar(40)
 -- $2 = true :: boolean
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'interval', t0.interval) AS j
   FROM billing.plans t0
@@ -53,11 +49,11 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'interval', t
   LIMIT 1) q
 
 -- ── BillingService.invoices ──
--- $1 = $org_id :: bigint
--- $2 = $status :: billing.invoice_status
+-- $1 = @org_id :: bigint
+-- $2 = @status :: billing.invoice_status
 -- $3 = <cursor.0> :: timestamptz
 -- $4 = <cursor.1> :: bigint
--- $5 = $size :: int
+-- $5 = @size :: int
 SELECT coalesce(json_agg(q.j ORDER BY q.rn) FILTER (WHERE q.rn <= LEAST(GREATEST(($5::text)::int, 1), 100)), '[]'::json)::text, coalesce(json_agg(q.k ORDER BY q.rn) FILTER (WHERE q.rn <= LEAST(GREATEST(($5::text)::int, 1), 100)), '[]'::json)::text, count(*) > LEAST(GREATEST(($5::text)::int, 1), 100) FROM (WITH page AS MATERIALIZED (
   SELECT p1.id FROM billing.invoices p1
    WHERE (p1.org_id = ($1::text)::bigint) AND (($2::text IS NULL OR p1.status = ($2::text)::billing.invoice_status)) AND ($3::text IS NULL OR (p1.issued_at < ($3::text)::timestamptz OR (p1.issued_at = ($3::text)::timestamptz AND (p1.id < ($4::text)::bigint))))
@@ -70,15 +66,15 @@ SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number',
   ORDER BY t0.issued_at DESC, t0.id DESC) q
 
 -- ── BillingService.invoice ──
--- $1 = $invoice_id :: bigint
--- $2 = $org_id :: bigint
+-- $1 = @invoice_id :: bigint
+-- $2 = @org_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'number', t0.number, 'amount', t0.amount::text, 'currency', t0.currency, 'status', t0.status, 'issued_at', t0.issued_at, 'due_at', t0.due_at, 'paid_at', t0.paid_at, 'lines', t0.lines, 'payments', t0.payments) AS j
   FROM billing.invoice_detail t0
   WHERE (t0.id = ($1::text)::bigint) AND (t0.org_id = ($2::text)::bigint)
   LIMIT 1) q
 
 -- ── BillingService.retry_payment #1 ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 -- $2 = InvoiceStatus.open :: billing.invoice_status
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'number', t0.number) AS j
   FROM billing.invoices t0
@@ -87,7 +83,7 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'number', t0.
   LIMIT 1) q
 
 -- ── BillingService.retry_payment #2 ──
--- $1 = $invoice.id :: bigint
+-- $1 = @invoice.id :: bigint
 -- $2 = PaymentStatus.failed :: billing.payment_status
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'failure_code', t0.failure_code) AS j
   FROM billing.payments t0
@@ -96,21 +92,21 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'failure_code
   LIMIT 1) q
 
 -- ── BillingService.summary ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('org_id', t0.org_id::text, 'slug', t0.slug, 'invoice_count', t0.invoice_count, 'open_count', t0.open_count, 'paid_total', t0.paid_total::text, 'oldest_due', t0.oldest_due) AS j
   FROM org.org_billing_summary t0
   WHERE t0.org_id = ($1::text)::bigint
   LIMIT 1) q
 
 -- ── OrgService.detail ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'slug', t0.slug, 'name', t0.name, 'created_at', t0.created_at, 'members', t0.members) AS j
   FROM org.org_with_members t0
   WHERE t0.id = ($1::text)::bigint
   LIMIT 1) q
 
 -- ── OrgService.members ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('account_id', t0.account_id::text, 'role', t0.role, 'joined_at', t0.joined_at, 'account', CASE WHEN t1.id IS NULL THEN NULL ELSE json_build_object('id', t1.id::text, 'email', t1.email, 'display_name', t1.display_name) END) AS j
   FROM org.members t0
   LEFT JOIN auth.accounts t1 ON t1.id = t0.account_id
@@ -118,14 +114,14 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   ORDER BY t0.joined_at) q
 
 -- ── OrgService.invites ──
--- $1 = $org_id :: bigint
+-- $1 = @org_id :: bigint
 SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object('id', t0.id::text, 'email', t0.email, 'role', t0.role, 'expires_at', t0.expires_at, 'created_at', t0.created_at) AS j
   FROM org.invites t0
   WHERE (t0.org_id = ($1::text)::bigint) AND (t0.accepted_at IS NULL)
   ORDER BY t0.created_at DESC) q
 
 -- ── OrgService.accept_invite ──
--- $1 = $token_hash :: varchar(64)
+-- $1 = @token_hash :: varchar(64)
 -- $2 = date.now() :: timestamptz
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'role', t0.role) AS j
   FROM org.invites t0

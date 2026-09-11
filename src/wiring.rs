@@ -134,7 +134,7 @@ impl<'a> Wiring<'a> {
     /// someone deliberately narrowed it.
     fn check_server_keys(&mut self, sv: &crate::ast::ServerDecl, fi: usize) {
         use crate::ast::ServerEntry;
-        const KEYS: [&str; 13] = [
+        const KEYS: [&str; 15] = [
             "max_sockets",
             "socket_keepalive",
             "job_max_payload",
@@ -148,6 +148,8 @@ impl<'a> Wiring<'a> {
             "trusted_proxies",
             "shutdown_grace",
             "bind",
+            "port",
+            "swagger",
         ];
         const GROUPS: [&str; 3] = ["cors", "tls", "headers"];
         const CORS: [&str; 5] = ["origins", "methods", "headers", "credentials", "max_age"];

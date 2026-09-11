@@ -11,6 +11,8 @@ use crate::token::Span;
 pub struct Attached {
     pub docs: Vec<String>,
     pub comments: Vec<String>,
+    /// `/* … */` blocks, one `Vec` of body lines each.
+    pub blocks: Vec<Vec<String>>,
     /// A blank line preceded this item in the source. `fmt` reproduces it.
     pub blank_before: bool,
 }
@@ -481,6 +483,14 @@ pub struct RoutesDecl {
     /// `socket "…" { on open … }` — WebSocket endpoints, which share the
     /// prefix and the `use` chain with their HTTP siblings.
     pub sockets: Vec<SocketDecl>,
+    /// Written at the top level, with no `routes` wrapper around it.
+    ///
+    /// `route GET "/health" { … }` on its own is a block whose prefix is
+    /// `""` holding one route, so everything downstream — resolution,
+    /// the middleware chain, `jwc routes` — sees the shape it already
+    /// knows. The flag exists for `jwc fmt`, which must give back the
+    /// form that was written rather than the one it was desugared into.
+    pub bare: bool,
     pub span: Span,
 }
 
@@ -718,7 +728,7 @@ pub enum Stmt {
 
 #[derive(Clone, Debug)]
 pub enum AssignTarget {
-    /// `x = …`, or `$x = …`. `sigil` records which was written so `jwc fmt`
+    /// `x = …`, or `@x = …`. `sigil` records which was written so `jwc fmt`
     /// gives it back the way it came in — outside a query clause the two
     /// mean the same thing (names.md §5.3).
     Local { name: Ident, sigil: bool },
@@ -781,10 +791,8 @@ pub enum ExprKind {
     /// A bare name: a column inside a query clause, a declaration name
     /// elsewhere (names.md §5.3).
     Name(Ident),
-    /// `$x`
+    /// `@x` — a local, a parameter or a path parameter (names.md §5.2).
     Local(Ident),
-    /// `@x`
-    PathParam(Ident),
 
     Field {
         base: Expr,
@@ -1009,8 +1017,13 @@ pub struct ObjectShape {
 
 #[derive(Clone, Debug)]
 pub enum ProjField {
-    /// `id`
-    Column(Ident),
+    /// `T.id` — the binding and the column it names. The qualifier is
+    /// mandatory; the parser accepts it missing so the checker can name the
+    /// binding the field should have carried (`E0904`).
+    Column {
+        binding: Option<Ident>,
+        column: Ident,
+    },
     /// `alias: expr`
     Expr {
         alias: Ident,
@@ -1043,6 +1056,8 @@ pub struct PageClause {
 
 #[derive(Clone, Debug)]
 pub struct InsertExpr {
+    /// `insert T into …` — the name its projection qualifies with.
+    pub binder: Ident,
     pub table: QualifiedTable,
     pub values: Vec<ObjEntry>,
     pub conflict: Option<ConflictClause>,
@@ -1073,6 +1088,8 @@ pub enum ConflictAction {
 
 #[derive(Clone, Debug)]
 pub struct UpdateExpr {
+    /// `update T of …` — the name its `where` and projection qualify with.
+    pub binder: Ident,
     pub table: QualifiedTable,
     pub sets: Vec<SetItem>,
     pub filter: Option<Expr>,
@@ -1100,6 +1117,8 @@ pub enum SetItem {
 
 #[derive(Clone, Debug)]
 pub struct DeleteExpr {
+    /// `delete T from …` — the name its `where` and projection qualify with.
+    pub binder: Ident,
     pub table: QualifiedTable,
     pub filter: Option<Expr>,
     pub projection: Option<ObjectShape>,

@@ -652,7 +652,7 @@ fn view_sym(s: &Symbols, v: &ViewDecl, loc: Loc) -> ViewSym {
     if let Some(proj) = &v.body.projection {
         for f in &proj.fields {
             match f {
-                ProjField::Column(i) => {
+                ProjField::Column { column: i, .. } => {
                     let ty = s
                         .tables
                         .get(&driving)
@@ -745,7 +745,7 @@ fn view_sym(s: &Symbols, v: &ViewDecl, loc: Loc) -> ViewSym {
 
 fn proj_name(f: &ProjField) -> String {
     match f {
-        ProjField::Column(i) => i.name.clone(),
+        ProjField::Column { column: i, .. } => i.name.clone(),
         ProjField::Expr { alias, .. } | ProjField::Nested { alias, .. } => alias.name.clone(),
     }
 }

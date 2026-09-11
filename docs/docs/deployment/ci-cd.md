@@ -116,7 +116,7 @@ binary was built with.
 The install script takes a version:
 
 ```bash
-curl -fsSL …/install.sh | JWC_VERSION=v1.0.0-rc.2 bash
+curl -fsSL …/install.sh | JWC_VERSION=v1.0.0-rc.3 bash
 ```
 
 Pin it in CI. A pipeline that silently follows the latest release will one

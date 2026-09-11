@@ -41,21 +41,21 @@ class NewNote {
 routes "/notes" {
     route GET "" {
         return json(select N from App.notes.Notes
-            as { id, title, body, created_at }
-            orderby created_at desc
+            as { N.id, N.title, N.body, N.created_at }
+            orderby N.created_at desc
             limit 100);
     }
 
     route POST "" {
         let req = request.body() as NewNote;
 
-        return created(json(insert into App.notes.Notes { ...$req }
-            as { id, title, body, created_at }));
+        return created(json(insert Notes into App.notes.Notes { ...@req }
+            as { Notes.id, Notes.title, Notes.body, Notes.created_at }));
     }
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 

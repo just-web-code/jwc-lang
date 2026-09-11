@@ -8,7 +8,7 @@ Until v1.0 this document is the contract; at v1.0 it becomes binding.
 > were removed at v0.25.0; the surface described here is the one this
 > compiler implements, not the one 0.9.x binaries implement.
 
-## What `1.0.0-rc.2` means
+## What `1.0.0-rc.3` means
 
 The syntax is **frozen for review, not yet by promise.** Everything in
 `docs/spec/v1/` is what 1.0.0 intends to be, and a change to it between
@@ -19,7 +19,7 @@ So, concretely, until 1.0.0 final:
 - A breaking change may still land, and ships with a `BREAKING:` line in
   `CHANGELOG.md` like any other. After 1.0.0 it takes a major bump.
 - `rc.N → rc.N+1` carries whatever review turned up. There is no promise
-  that an `rc.1` program compiles under `rc.2`; there is a promise that
+  that an `rc.2` program compiles under `rc.3`; there is a promise that
   the reason is written down.
 - The deferrals in [`docs/spec/v1/DEFERRED.md`](docs/spec/v1/DEFERRED.md)
   are decisions, not omissions waiting to be filled before 1.0.0. Each
@@ -134,7 +134,7 @@ for at least one full minor, and only then goes.
 ## Pre-release suffixes
 
 - `vX.Y.Z-rc.N` — release candidate; production-supported on a
-  best-effort basis. Per [`ROADMAP.md`](ROADMAP.md), 1.0.0-rc.2 is gated
+  best-effort basis. Per [`ROADMAP.md`](ROADMAP.md), 1.0.0-rc.3 is gated
   on the conformance corpus blocking in CI, an external review, and a
   migrated pilot application.
 - `vX.Y.Z-alpha.N` / `-beta.N` — feature previews; **no SemVer

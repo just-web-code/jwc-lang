@@ -9,9 +9,9 @@ description: "Comments, literals, sigils, and the fact that JWC has no reserved 
 ## Comments
 
 ```jwc no-compile
--- a line comment
---- a doc comment: it attaches to the next declaration and reaches the
---- database as a COMMENT ON, and `jwc migrate` diffs it
+// a line comment
+/// a doc comment: it attaches to the next declaration and reaches the
+/// database as a COMMENT ON, and `jwc migrate` diffs it
 ```
 
 `//` is **not** a comment. It is division, twice — so a `//` line does
@@ -45,8 +45,8 @@ Two characters carry meaning where a bare name would be ambiguous:
 
 | Sigil | Means |
 |---|---|
-| `$name` | a local variable — **required only inside a query clause** |
-| `@name` | a path parameter, from the route's pattern |
+| `@name` | a local, a parameter or a path parameter — **required inside a query clause** |
+| `B.column` | a column of binding `B` — **required inside a query clause** |
 
 ```jwc no-compile
 route GET "" {
@@ -57,23 +57,23 @@ route GET "" {
 
 The sigil is part of the token — `@ id` is an error.
 
-**Ordinary code does not need `$`.** In a route body, a service, a `for` or
-an argument list there is no column in scope, so `account` and `$account`
-are the same reference:
+**Ordinary code does not need the sigil.** In a route body, a service, a
+`for` or an argument list there is no column in scope, so `account` and
+`@account` are the same reference:
 
 ```jwc no-compile
-for (attempt in [1, 2, 3]) {
+for (let attempt in [1, 2, 3]) {
     console.writeln("Attempt #" + string.of(attempt));
 }
 ```
 
-**Inside a query clause it is required**, and there the distinction is
-load-bearing: a bare `email` is the *column*, `$email` is your variable, and
-without the sigil `where email == email` would be a tautology no one meant
-to write.
+**Inside a query clause both are required**, and there the distinction is
+load-bearing: `U.email` is the *column* and `@email` is your variable. A bare
+`email` is `E0904`, so `where email == email` — a tautology no one meant to
+write — is not spellable by accident.
 
 ```jwc no-compile
-select A from App.auth.Accounts where email == $email as { id } first;
+select A from App.auth.Accounts where email == @email as { id } first;
 ```
 
 Both spellings compile everywhere the sigil is optional, and `jwc fmt`

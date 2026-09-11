@@ -522,7 +522,7 @@ async fn readyz_is_503_when_the_database_is_not_there() {
 /// Found porting jwc-shortener, whose landing page, `robots.txt`,
 /// `sitemap.xml` and OpenGraph card are five routes that do not answer
 /// JSON. Before this the only way to reach for one was
-/// `statusCode(200, $html) with { "Content-Type": "text/html" }`, and it
+/// `statusCode(200, @html) with { "Content-Type": "text/html" }`, and it
 /// produced a response with **two** `content-type` headers — the builder's
 /// `application/json` and the author's — around a body that was still
 /// JSON-encoded, so a browser was handed `"<h1>…</h1>"`, quotes included.
@@ -617,56 +617,45 @@ async fn with_replaces_a_header_the_builder_already_set() {
     assert_eq!(header(&red, "location"), Some("/two"));
 }
 
-/// `serve(port)` in `main()` decides the port — builtins.md §2.
+/// `server { port }` says where, `serve()` says whether — config.md §3.2.
 ///
-/// It had never been evaluated. `main` was parsed and arity-checked and
-/// then dropped on the floor, so the listener always took the CLI default:
-/// a program asking for 3000 got 8080, and the spec's own sample line —
-/// `serve(int(env("PORT") ?? "8080"))` — could not have worked at all.
+/// Two questions that used to be one. The port rode in on `serve(n)`, which
+/// meant `main` had to be evaluated to discover a number, and the number
+/// lived outside the `server { }` block that holds every other listener
+/// setting — and outside the `JWC_*` registry, so nothing could override it
+/// the way `JWC_SWAGGER` overrides `server { swagger }`.
 #[tokio::test]
-async fn main_decides_the_port_it_listens_on() {
-    let literal = program(
+async fn the_port_is_declared_and_the_environment_wins_over_it() {
+    for k in ["JWC_PORT", "PORT"] {
+        std::env::remove_var(k);
+    }
+    let declared = program(
         "namespace h;\n\
+         server { port = 3000; }\n\
          routes \"/x\" { route GET \"\" { return json({ ok: true }); } }\n\
-         function main() { serve(3000); }\n",
+         function main() { serve(); }\n",
     );
-    assert_eq!(
-        jwc::serve::declared_port(&literal).await.expect("boot"),
-        Some(3000)
-    );
+    assert_eq!(jwc::serve::resolved_port(&declared.server), 3000);
 
-    // The argument is an expression, which is the whole reason `main` is
-    // evaluated rather than pattern-matched for an integer literal.
-    std::env::set_var("JWC_TEST_PORT_VAR", "4100");
-    let from_env = program(
-        "namespace h;\n\
-         routes \"/x\" { route GET \"\" { return json({ ok: true }); } }\n\
-         function main() { serve(int(env(\"JWC_TEST_PORT_VAR\") ?? \"8080\")); }\n",
-    );
-    assert_eq!(
-        jwc::serve::declared_port(&from_env).await.expect("boot"),
-        Some(4100)
-    );
+    // `PORT` unprefixed, because a platform that injects a port injects
+    // that one — the same pair `JWC_DATABASE_URL` and `DATABASE_URL` make.
+    std::env::set_var("PORT", "4100");
+    assert_eq!(jwc::serve::resolved_port(&declared.server), 4100);
 
-    // Unset: the `??` arm is taken, and that is still the program's answer
-    // rather than a default applied behind its back.
-    std::env::remove_var("JWC_TEST_PORT_VAR");
-    assert_eq!(
-        jwc::serve::declared_port(&from_env).await.expect("boot"),
-        Some(8080)
-    );
+    // And `JWC_PORT` over it, the way the registry's names win everywhere.
+    std::env::set_var("JWC_PORT", "4200");
+    assert_eq!(jwc::serve::resolved_port(&declared.server), 4200);
+    for k in ["JWC_PORT", "PORT"] {
+        std::env::remove_var(k);
+    }
 
-    // No `main` at all — nothing to read. `None`, not a defaulted 8080:
-    // `jwc serve` supplies the default, and `jwc run` needs to know the
-    // program never asked for a listener.
-    let headless = program(
+    // No `port` key: the documented default, not a number the CLI supplies
+    // behind the program's back.
+    let quiet = program(
         "namespace h;\n\
          routes \"/x\" { route GET \"\" { return json({ ok: true }); } }\n",
     );
-    assert_eq!(
-        jwc::serve::declared_port(&headless).await.expect("boot"),
-        None
-    );
+    assert_eq!(jwc::serve::resolved_port(&quiet.server), 8080);
 }
 
 /// A `+` chain is folded, not recursed — types.md §12.1.
@@ -714,10 +703,10 @@ async fn timestamptz_subtraction_is_defined() {
          routes \"/\" {\n\
          \x20   route GET \"t\" {\n\
          \x20       let now = date.now();\n\
-         \x20       let day_ago = $now - date.hours(24);\n\
-         \x20       let back = $day_ago + date.hours(24);\n\
-         \x20       let gap = $now - $day_ago;\n\
-         \x20       return json({ same: string.of($back) == string.of($now), gap: string.of($gap) });\n\
+         \x20       let day_ago = @now - date.hours(24);\n\
+         \x20       let back = @day_ago + date.hours(24);\n\
+         \x20       let gap = @now - @day_ago;\n\
+         \x20       return json({ same: string.of(@back) == string.of(@now), gap: string.of(@gap) });\n\
          \x20   }\n\
          }\n",
     );
@@ -744,19 +733,19 @@ async fn break_and_continue_control_the_loop() {
          routes \"/\" {\n\
          \x20   route GET \"b\" {\n\
          \x20       let seen = \"\";\n\
-         \x20       for (n in [\"a\", \"b\", \"stop\", \"c\"]) {\n\
-         \x20           if ($n == \"stop\") { break; }\n\
-         \x20           $seen = $seen + $n;\n\
+         \x20       for (let n in [\"a\", \"b\", \"stop\", \"c\"]) {\n\
+         \x20           if (@n == \"stop\") { break; }\n\
+         \x20           @seen = @seen + @n;\n\
          \x20       }\n\
-         \x20       return json({ seen: $seen });\n\
+         \x20       return json({ seen: @seen });\n\
          \x20   }\n\
          \x20   route GET \"c\" {\n\
          \x20       let seen = \"\";\n\
-         \x20       for (n in [\"a\", \"skip\", \"b\"]) {\n\
-         \x20           if ($n == \"skip\") { continue; }\n\
-         \x20           $seen = $seen + $n;\n\
+         \x20       for (let n in [\"a\", \"skip\", \"b\"]) {\n\
+         \x20           if (@n == \"skip\") { continue; }\n\
+         \x20           @seen = @seen + @n;\n\
          \x20       }\n\
-         \x20       return json({ seen: $seen });\n\
+         \x20       return json({ seen: @seen });\n\
          \x20   }\n\
          }\n",
     );
@@ -996,7 +985,7 @@ const SOCKET_AFTER: &str = "namespace h;\n\
                             }\n\
                             middleware Gate {\n\
                             \x20   let deny = request.query(\"deny\");\n\
-                            \x20   if ($deny == \"1\") { throw Unauthorized(\"no\"); }\n\
+                            \x20   if (@deny == \"1\") { throw Unauthorized(\"no\"); }\n\
                             }\n\
                             routes \"/s\" use Mark, Gate {\n\
                             \x20   socket \"ws\" { on open { socket.send(\"hi\"); } }\n\
@@ -1259,7 +1248,7 @@ fn the_filesystem_is_out_of_reach_of_a_request() {
          routes \"/x\" {\n\
          \x20   route GET \"\" {\n\
          \x20       let s = file.read(request.query(\"p\") ?? \"/etc/passwd\");\n\
-         \x20       return json({ s: $s });\n\
+         \x20       return json({ s: @s });\n\
          \x20   }\n\
          }\n",
     )
@@ -1331,8 +1320,9 @@ fn a_generated_env_example_names_nothing_that_is_never_read() {
             let name = name.trim();
             let known_to_runtime = jwc::config::REGISTRY.iter().any(|v| v.name == name)
                 // Read by name outside the registry, which documents only
-                // the `JWC_*` surface.
-                || matches!(name, "DATABASE_URL" | "JWC_DATABASE_URL");
+                // the `JWC_*` surface. Each is the unprefixed name the
+                // platforms inject, honoured under its `JWC_*` twin.
+                || matches!(name, "DATABASE_URL" | "JWC_DATABASE_URL" | "PORT");
             assert!(
                 known_to_runtime || read_by_source.contains(name),
                 "templates/{template}/.env.example names `{name}`, which is not in \
@@ -1677,7 +1667,7 @@ fn the_four_builtins_whose_implementations_were_already_here_are_reachable() {
          \x20   route GET \"h\" { return html(\"<b>x</b>\"); }\n\
          \x20   route GET \"d\" { return json({ a: hash.md5(\"abc\"), b: hash.sha1(\"abc\") }); }\n\
          }\n\
-         function main() { serve(8080); }\n",
+         function main() { serve(); }\n",
     )
     .expect("write");
     let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
@@ -1774,7 +1764,7 @@ fn not_exists_and_not_in_survive_the_prefix_rule() {
          service S {\n\
          \x20   function pick(w: text) {\n\
          \x20       return select U from App.public.Users\n\
-         \x20           where name not in (\"a\", \"b\") as { id };\n\
+         \x20           where U.name not in (\"a\", \"b\") as { U.id };\n\
          \x20   }\n\
          }\n",
     )
@@ -2552,20 +2542,16 @@ fn an_unknown_call_qualifier_is_reported() {
     .is_empty());
 }
 
-/// `jwc run` on a program whose `main` calls `serve(...)` starts the
-/// server.
+/// `jwc run` on a program whose `main` calls `serve()` starts the server.
 ///
-/// `serve(n)` records the port; it does not block. So `declared_port`
-/// ran `main`, returned the port, and `cmd::run` threw it away —
-/// `jwc run app.jwc` on the hello-world printed nothing and exited 0,
-/// while the CLI help beside it said "a `main` that calls `serve(...)`
-/// still starts a server, because that is what the call means" and the
-/// comment in the code claimed the program "has already blocked inside it
-/// and never reaches here". Neither was true.
+/// `serve()` records that the program is a server; it does not block. So
+/// `wants_serve` runs `main` and answers the one question the two commands
+/// differ on: `jwc run` listens only when the program asked to, and
+/// `jwc serve` refuses to start when it never did.
 ///
-/// The distinction is now in the type: `Option<u16>` separates "asked for
-/// 8080" from "never asked", which is exactly what `jwc run` needs and
-/// what a defaulted `u16` threw away.
+/// It also used to be inferable a second way — a program with routes and no
+/// `serve` listened anyway — which meant a console program built with
+/// `jwc build` sat on a socket after printing its output.
 #[tokio::test]
 async fn a_main_that_serves_is_distinguishable_from_one_that_does_not() {
     let load = |src: &str| {
@@ -2578,30 +2564,28 @@ async fn a_main_that_serves_is_distinguishable_from_one_that_does_not() {
     let serving = load(
         "namespace n;\n\
          routes \"/\" { route GET \"\" { return json({ ok: true }); } }\n\
-         function main() { serve(8123); }\n",
+         function main() { serve(); }\n",
     );
-    assert_eq!(
-        jwc::serve::declared_port(&serving).await.expect("boot"),
-        Some(8123)
-    );
+    assert!(jwc::serve::wants_serve(&serving).await.expect("boot"));
 
     let quiet = load(
         "namespace n;\n\
          function main() { console.writeln(\"done\"); }\n",
     );
-    assert_eq!(
-        jwc::serve::declared_port(&quiet).await.expect("boot"),
-        None,
-        "a `main` that never calls `serve` must not report a port"
+    assert!(
+        !jwc::serve::wants_serve(&quiet).await.expect("boot"),
+        "a `main` that never calls `serve` must not report a listener"
     );
 
-    // And no `main` at all is the same fact.
+    // Routes are not the question. A program can declare them and still be
+    // something other than a server — a test suite, a `jwc explain` target.
     let bare = load("namespace n;\nroutes \"/\" { route GET \"\" { return json({}); } }\n");
-    assert_eq!(jwc::serve::declared_port(&bare).await.expect("boot"), None);
+    assert!(!jwc::serve::wants_serve(&bare).await.expect("boot"));
 
-    // `cmd::run` has to act on it, or the distinction is decorative.
+    // Both commands have to act on it, or the distinction is decorative.
     let cmd = include_str!("../src/cmd/mod.rs");
-    assert!(cmd.contains("if let Some(port) = crate::serve::declared_port(&program).await?"));
+    assert!(cmd.contains("if crate::serve::wants_serve(&program).await?"));
+    assert!(cmd.contains("if !crate::serve::wants_serve(&program).await?"));
 }
 
 /// types.md §12 gives `+` and `-` three overloads on timestamps. The
@@ -2753,27 +2737,31 @@ fn a_native_console_program_does_not_bind_a_port() {
 
     let console = emit("namespace n;\nfunction main() { console.writeln(\"hi\"); }\n");
     assert!(
-        console.contains("if __port != 0 {"),
-        "a program with no routes must only listen when `serve(...)` ran"
+        console.contains("if JWC_SERVE_CALLED.load("),
+        "listening must be gated on the call, not inferred"
+    );
+    assert!(
+        !console.contains("JWC_SERVE_CALLED.store(true,"),
+        "a `main` that never calls `serve` must not set the flag"
     );
 
-    // `serve(...)` in `main` still listens, on the port the program named.
-    let server = emit("namespace n;\nfunction main() { serve(9000); }\n");
-    assert!(server.contains("JWC_SERVE_PORT.store("));
-    assert!(server.contains("if __port != 0 {"));
+    // `serve()` in `main` listens, on the port `server { port }` declares.
+    let server = emit("namespace n;\nserver { port = 9000; }\nfunction main() { serve(); }\n");
+    assert!(server.contains("JWC_SERVE_CALLED.store(true,"));
+    assert!(server.contains("const JWC_SOURCE_PORT: u16 = 9000;"));
 
-    // Routes with no `main` listen on the documented default.
+    // Routes are not the question: declaring them is not asking to listen.
     let routed =
         emit("namespace n;\nroutes \"/x\" { route GET \"\" { return json({ ok: true }); } }\n");
     assert!(
-        routed.contains("if __port == 0 { 8080 } else { __port }"),
-        "a program with routes is a server whether or not it calls `serve`"
+        !routed.contains("JWC_SERVE_CALLED.store(true,"),
+        "a program with routes and no `serve()` is not a server"
     );
 
-    // The sentinel is what makes \"never called\" expressible at all.
+    // The flag is what makes \"never called\" expressible at all.
     assert!(
-        console.contains("AtomicU16::new(0)"),
-        "the port must start at the sentinel, not at 8080"
+        console.contains("AtomicBool::new(false)"),
+        "the flag must start false"
     );
 }
 
@@ -2792,10 +2780,10 @@ fn a_native_console_program_does_not_bind_a_port() {
 #[test]
 fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     // A comment the AST carries: survives, as it always did.
-    let kept = "namespace n;\n\n-- why this function exists\nfunction f() {\n    return 1;\n}\n";
+    let kept = "namespace n;\n\n// why this function exists\nfunction f() {\n    return 1;\n}\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), kept);
     let printed = jwc::fmt::format_program(&parsed.program);
-    assert!(printed.contains("-- why this function exists"));
+    assert!(printed.contains("// why this function exists"));
     assert!(jwc::fmt::comments_lost(kept, &printed).is_empty());
 
     // A comment inside a record literal: the printer drops it, and the
@@ -2803,7 +2791,7 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     let lossy = "namespace n;\n\
                  function f() {\n\
                  \x20   return {\n\
-                 \x20       -- the reason for the next line\n\
+                 \x20       // the reason for the next line\n\
                  \x20       a: 1\n\
                  \x20   };\n\
                  }\n";
@@ -2813,13 +2801,13 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     let lost = jwc::fmt::comments_lost(lossy, &printed);
     assert_eq!(
         lost,
-        vec!["-- the reason for the next line".to_string()],
+        vec!["// the reason for the next line".to_string()],
         "the dropped comment must be named, not merely counted"
     );
 
-    // Lexed, not grepped: a `--` inside a string is not a comment, and a
+    // Lexed, not grepped: a `//` inside a string is not a comment, and a
     // file full of them must still format.
-    let strings = "namespace n;\nfunction f() {\n    return \"a -- b\";\n}\n";
+    let strings = "namespace n;\nfunction f() {\n    return \"a // b\";\n}\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), strings);
     let printed = jwc::fmt::format_program(&parsed.program);
     assert!(jwc::fmt::comments_lost(strings, &printed).is_empty());
@@ -2830,9 +2818,9 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     let twice = "namespace n;\n\
                  function f() {\n\
                  \x20   return {\n\
-                 \x20       -- same text\n\
+                 \x20       // same text\n\
                  \x20       a: 1,\n\
-                 \x20       -- same text\n\
+                 \x20       // same text\n\
                  \x20       b: 2\n\
                  \x20   };\n\
                  }\n";
@@ -2882,11 +2870,11 @@ fn a_recursion_that_never_ends_is_an_error_not_a_crash() {
         dir.path().join("app.jwc"),
         "namespace deep;\n\
          function down(n: int) -> int {\n\
-         \x20   let a = string.of($n) + \"-\" + string.of($n);\n\
-         \x20   let b = [$a, $a, $a, $a];\n\
-         \x20   let c = { one: $a, two: $b, three: $n };\n\
-         \x20   if (array.len($b) < 0) { return 0; }\n\
-         \x20   return down($n + 1) + string.len($c.one) - string.len($a);\n\
+         \x20   let a = string.of(@n) + \"-\" + string.of(@n);\n\
+         \x20   let b = [@a, @a, @a, @a];\n\
+         \x20   let c = { one: @a, two: @b, three: @n };\n\
+         \x20   if (array.len(@b) < 0) { return 0; }\n\
+         \x20   return down(@n + 1) + string.len(@c.one) - string.len(@a);\n\
          }\n\
          function main() { console.writeln(string.of(down(0))); }\n",
     )
@@ -2904,7 +2892,7 @@ fn a_recursion_that_never_ends_is_an_error_not_a_crash() {
         .expect("runtime");
     let err = rt
         .block_on(async move {
-            tokio::spawn(async move { jwc::serve::declared_port(&program).await })
+            tokio::spawn(async move { jwc::serve::wants_serve(&program).await })
                 .await
                 .expect("the task must not abort the process")
         })
@@ -2942,7 +2930,8 @@ fn a_loop_hands_the_scheduler_a_turn() {
         w.contains("yield_now().await"),
         "a generated `while` must yield"
     );
-    let f = emit("namespace n;\nfunction main() { let t = 0; for (x in [1, 2, 3]) { t += 1; } }\n");
+    let f =
+        emit("namespace n;\nfunction main() { let t = 0; for (let x in [1, 2, 3]) { t += 1; } }\n");
     assert!(
         f.contains("yield_now().await"),
         "a generated `for` must yield — a million-row array is a million turns"
@@ -2976,7 +2965,7 @@ fn a_recursive_function_compiles_natively() {
 
     let direct = emit(
         "namespace n;\n\
-         function down(k: int) -> int { if (k <= 0) { return 0; } return down($k - 1); }\n\
+         function down(k: int) -> int { if (k <= 0) { return 0; } return down(@k - 1); }\n\
          function main() { console.writeln(string.of(down(3))); }\n",
     );
     assert!(
@@ -2991,8 +2980,8 @@ fn a_recursive_function_compiles_natively() {
     // Mutual recursion is the same cycle by a longer path.
     let mutual = emit(
         "namespace n;\n\
-         function ping(k: int) -> int { if (k <= 0) { return 0; } return pong($k - 1); }\n\
-         function pong(k: int) -> int { return ping($k - 1); }\n\
+         function ping(k: int) -> int { if (k <= 0) { return 0; } return pong(@k - 1); }\n\
+         function pong(k: int) -> int { return ping(@k - 1); }\n\
          function main() { console.writeln(string.of(ping(3))); }\n",
     );
     assert!(mutual.contains("Box::pin(jwc_fn_ping("));
@@ -3001,7 +2990,7 @@ fn a_recursive_function_compiles_natively() {
     // A program with no cycle keeps the direct call and pays nothing.
     let plain = emit(
         "namespace n;\n\
-         function twice(k: int) -> int { return $k + $k; }\n\
+         function twice(k: int) -> int { return @k + @k; }\n\
          function main() { console.writeln(string.of(twice(3))); }\n",
     );
     assert!(plain.contains("jwc_fn_twice("));
@@ -3254,7 +3243,7 @@ fn wildcard_cors_with_credentials_is_refused() {
     assert!(!codes(listed).contains(&"E1207".to_string()));
 }
 
-/// `redirect(302, $url)` sent a caller wherever the value said.
+/// `redirect(302, @url)` sent a caller wherever the value said.
 ///
 /// Measured: a route reading `request.query("to")` answered
 /// `location: https://evil.example`, with nothing checked anywhere. That
@@ -3650,4 +3639,94 @@ fn cited_deferrals(line: &str) -> Vec<String> {
         rest = &tail[digits.len()..];
     }
     out
+}
+
+/// The API reference is a `server { }` key, not a second process.
+///
+/// `jwc swagger` boots its own listener on 8099. That is a second thing to
+/// run, a second port to reach, and it is not the running application — a
+/// reference is worth having where the API already is. So the page is
+/// where `server { swagger }` puts it, both backends serve it, and it is
+/// off unless asked for.
+#[test]
+fn the_reference_is_served_by_the_program_on_both_backends() {
+    let serve = include_str!("../src/serve.rs");
+    assert!(
+        serve.contains(r#"std::env::var("JWC_SWAGGER")"#),
+        "`jwc serve` must read the override it documents"
+    );
+    assert!(
+        serve.contains("program.server.swagger.as_deref() == Some(p)"),
+        "and answer at the configured path"
+    );
+
+    let base = include_str!("../src/native/prelude/base.rs.in");
+    assert!(
+        base.contains("fn jwc_swagger_path() -> Option<String> {"),
+        "the generated crate needs the same path behind one reader"
+    );
+    assert!(
+        base.contains(r#"std::env::var("JWC_SWAGGER")"#),
+        "and must read the same override, or the two backends serve the \
+         reference at different paths for the same source"
+    );
+
+    let wiring = include_str!("../src/wiring.rs");
+    assert!(
+        wiring.contains(r#""swagger","#),
+        "`swagger` must be a known `server {{ }}` key, or E1206 rejects it"
+    );
+}
+
+/// One walk builds the document, for all three readers.
+///
+/// The 0.9 `jwc swagger` was a second OpenAPI generator, 661 lines, kept
+/// in step with the first by hand. A page that disagrees with the document
+/// beside it is worse than no page, so `jwc openapi`, the served reference
+/// and the baked-in native one all come through `openapi::document_for`.
+#[test]
+fn there_is_one_openapi_generator() {
+    let openapi = include_str!("../src/openapi.rs");
+    assert!(
+        openapi.contains("pub fn document_for("),
+        "the shared entry point must exist"
+    );
+
+    for (name, src) in [
+        ("src/cmd/mod.rs", include_str!("../src/cmd/mod.rs")),
+        ("src/serve.rs", include_str!("../src/serve.rs")),
+        (
+            "src/native/codegen.rs",
+            include_str!("../src/native/codegen.rs"),
+        ),
+    ] {
+        assert!(
+            src.contains("openapi::document_for("),
+            "{name} must build the document through the shared walk"
+        );
+    }
+}
+
+/// Both backends label the reference document the same way.
+///
+/// `application/json` and `application/json; charset=utf-8` are the same
+/// media type and a different string, and a client that switches on the
+/// header sees two servers. The interpreter's canonical form carries the
+/// charset (`exec.rs::Response::json`), so nothing else may send the bare
+/// one.
+#[test]
+fn the_served_json_content_type_is_the_canonical_one() {
+    let serve = include_str!("../src/serve.rs");
+    for (i, line) in serve.lines().enumerate() {
+        let Some(rest) = line.split("\"application/json").nth(1) else {
+            continue;
+        };
+        assert!(
+            rest.starts_with("; charset=utf-8\""),
+            "src/serve.rs:{} sends a bare `application/json`; the canonical \
+             form carries the charset:\n  {}",
+            i + 1,
+            line.trim()
+        );
+    }
 }

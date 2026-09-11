@@ -20,7 +20,7 @@ routes "/api/notes" {
 }
 
 function main() {
-    serve(8080);
+    serve();
 }
 ```
 
@@ -48,11 +48,11 @@ declared type is a **400 before any middleware runs**:
 which is the honest answer, and keeps malformed input out of Postgres
 where it would have been a 500.
 
-`@name` is a path parameter and `$name` is a local. They are different
-sigils because they come from different places, and one of them is
-client-controlled. `@` is always required; `$` only inside a query clause,
-where a bare name is a column — everywhere else `account` and `$account`
-are the same reference.
+`@name` covers all three: a local, a function parameter and a path
+parameter. One sigil, because a `let` may not shadow a parameter, so the
+name decides which it is. Inside a query clause `@` is required — a column
+there is `T.column` — and everywhere else `account` and `@account` are the
+same reference.
 
 ## Which route wins
 
@@ -129,15 +129,18 @@ buckets by every distinct id.
 
 ## Where the port stops
 
-`main` runs at boot, and `serve(port)` inside it is where the program says
-where it listens:
+`server { port }` says where the listener binds, and `serve()` in `main`
+says that it binds at all:
 
 ```jwc no-compile
+server { port = 8080; }
+
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 
-The argument is an expression, evaluated at startup. The environment does
-not override what the program declared — the program reads the environment
-if it wants to.
+The environment wins over the declared value, the way it does for every
+other key in the block: `--port`, then `JWC_PORT`, then `PORT`, then
+`server { port }`, then 8080. `PORT` unprefixed because that is the name a
+platform injects.

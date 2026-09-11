@@ -70,7 +70,7 @@ service BillingService {
         let ends_at    = starts_at + trial + period;
         let status     = is_trial ? SubscriptionStatus.trialing : SubscriptionStatus.active;
 
-        let sub, err2 = insert into App.billing.Subscriptions {
+        let sub, err2 = insert Subscriptions into App.billing.Subscriptions {
             org_id               = org_id,
             plan_id              = plan.id,
             status               = status,
@@ -134,7 +134,7 @@ function record_payment(req: WebhookPayment) -> (Receipt, Error) {
         if (err != null)  { return null, err; }
         if (seen != null) { return { status: "duplicate" }, null; }
 
-        let _p, ierr = insert into App.billing.Payments { ...req, provider = "stripe" };
+        let _p, ierr = insert Payments into App.billing.Payments { ...req, provider = "stripe" };
 
         if (ierr != null and ierr.type == "ConstraintViolation") {
             return { status: "duplicate" }, null;
@@ -145,7 +145,7 @@ function record_payment(req: WebhookPayment) -> (Receipt, Error) {
 
         if (succeeded) {
             let paid_at = now();
-            let _u, uerr = update App.billing.Invoices
+            let _u, uerr = update Invoices of App.billing.Invoices
                 set status = InvoiceStatus.paid, paid_at = paid_at
                 where Invoices.id == req.invoice_id;
             if (uerr != null) { return null, uerr; }
@@ -294,12 +294,12 @@ schema org     of App;
 schema billing of App;
 schema audit   of App;
 
--- Built-in errors are pre-declared with default statuses:
---   BadRequest 400, Unauthorized 401, Forbidden 403, NotFound 404,
---   Conflict 409, TooManyRequests 429, ConstraintViolation 400.
--- Nothing below is required. The whole errorHandler may be deleted.
+// Built-in errors are pre-declared with default statuses:
+//   BadRequest 400, Unauthorized 401, Forbidden 403, NotFound 404,
+//   Conflict 409, TooManyRequests 429, ConstraintViolation 400.
+// Nothing below is required. The whole errorHandler may be deleted.
 
--- A user-declared error has NO default status, so E3 forces an arm.
+// A user-declared error has NO default status, so E3 forces an arm.
 error PaymentDeclined (message, provider_code);
 
 errorHandler (e) {
@@ -307,14 +307,14 @@ errorHandler (e) {
         return statusCode(402, { error: err.message, code: err.provider_code });
     }
     catch (err) {
-        -- faults only; E4 forbids this from covering PaymentDeclined
+        // faults only; E4 forbids this from covering PaymentDeclined
         log.error(err.type, err.message, err.origin);
         return internalError();
     }
 }
 
 function main() {
-    serve(int(env("PORT") ?? "8080"));
+    serve();
 }
 ```
 
@@ -342,7 +342,7 @@ service BillingService {
         let status = is_trial ? SubscriptionStatus.trialing
                               : SubscriptionStatus.active;
 
-        return insert into App.billing.Subscriptions {
+        return insert Subscriptions into App.billing.Subscriptions {
             org_id               = org_id,
             plan_id              = plan.id,
             status               = status,
@@ -424,17 +424,17 @@ service WebhookService {
                 as { id }
                 first;
 
-            -- normal outcome, not an error: commits (an empty tx) and returns 200
+            // normal outcome, not an error: commits (an empty tx) and returns 200
             if (seen != null) { return { status: "duplicate" }; }
 
-            insert into App.billing.Payments {
+            insert Payments into App.billing.Payments {
                 ...req,
                 provider = "stripe"
             }
             catch Conflict (err) {
-                -- concurrent delivery won the race on
-                --   provider_ref unique : "bu to'lov allaqachon qayd etilgan"
-                -- E9: ROLLBACK TO SAVEPOINT, connection stays usable
+                // concurrent delivery won the race on
+                //   provider_ref unique : "bu to'lov allaqachon qayd etilgan"
+                // E9: ROLLBACK TO SAVEPOINT, connection stays usable
                 return { status: "duplicate" };
             };
 
@@ -443,7 +443,7 @@ service WebhookService {
             if (succeeded) {
                 let paid_at = now();
 
-                update App.billing.Invoices
+                update Invoices of App.billing.Invoices
                     set status  = InvoiceStatus.paid,
                         paid_at = paid_at
                     where Invoices.id == req.invoice_id;

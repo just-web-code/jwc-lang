@@ -16,15 +16,23 @@ Closes gaps **#2**, **#18**, **#34** (bare identifiers in `where`), **N5**
 
 1.3 Whitespace separates tokens and is otherwise insignificant.
 
-1.4 A **line comment** starts with `--` and runs to end of line.
+1.4 A **line comment** starts with `//` and runs to end of line. `--` where a
+declaration, table member or statement belongs is `E0901`, naming `//`. In an
+expression `a -- b` is `a - (-b)` and stays arithmetic.
 
-1.5 A **doc comment** starts with `---` and runs to end of line. Consecutive
+1.5 A **doc comment** starts with `///` and runs to end of line. Consecutive
 doc-comment lines form one doc block. A doc block attaches to the immediately
 following declaration, column definition or class field. A doc block followed
 by anything else is an error (`E0104: doc comment attaches to nothing`).
 Doc blocks on tables and columns become `COMMENT ON` (schema §7).
 
-1.6 `--` inside a string literal is text, not a comment.
+1.6 `//` inside a string literal is text, not a comment.
+
+1.7 A **block comment** opens with `/*` and closes with `*/`. Block comments
+**nest**: `/*` inside one opens a deeper level, and the comment ends at the
+`*/` that closes the outermost. A block that reaches end of input unclosed is
+an error (`E0101: unterminated block comment`). A block comment does not
+document anything — only `///` (§1.5) reaches `COMMENT ON`.
 
 ---
 
@@ -45,7 +53,7 @@ binary float (types §2.4).
 2.4 **Raw string** — `r"..."` with no escape processing except `\"`. Used for
 regular expressions: `pattern(r"^[a-z0-9-]{3,40}$")`.
 
-2.5 **Sigils** — `@name` (path parameter, §5.2) and `$name` (local reference,
+2.5 **Sigil** — `@name` (a local, parameter or path parameter, §5.2)
 §5.3). The sigil is part of the token; `@ name` is an error.
 
 2.6 **There are no reserved words.** Every word the grammar gives meaning to
@@ -168,73 +176,65 @@ Database objects are additionally addressable by their qualified path:
 `references` and `join` (queries §2.1). The bare form is used everywhere
 else, including enum member access (`MemberRole.owner`).
 
-### 5.2 Path parameters — `@name`
+### 5.2 `@name` — everything bound outside a query
 
-`@name` refers to a path parameter of the enclosing route or middleware. It
-is legal only inside a `route` block, a `middleware` body/`after` block, or
-a `routes` block's `use` arguments. Elsewhere: `E0220`.
+One sigil. `@name` is a **local**, a **function parameter** or a **path
+parameter**, and which one it is falls out of scope rather than out of
+spelling:
+
+- a local or parameter in scope wins;
+- otherwise a path parameter of the enclosing route or middleware.
+
+The two cannot collide, because a `let` may not shadow a parameter or a path
+parameter that is already in scope (§5.5, `E0214`). `@name` is `E0903`,
+naming `@name`.
 
 Path parameters are typed at their binding site (routing §4) and are **never**
 strings by default. `@org_id` in a route under
-`routes "/api/v1/orgs/{org_id: bigint}"` has type `bigint`.
+`routes "/api/v1/orgs/{org_id: bigint}"` has type `bigint`. A path parameter
+exists only inside a `route` block, a `middleware` body/`after` block, or a
+`routes` block's `use` arguments; `@name` in a service that names no local is
+`E0801`.
 
-### 5.3 Locals — `$name` where a column could be meant
+### 5.3 The three kinds of name
 
 Inside a **query clause** — a `join ... on` expression, `where`, `having`,
-`group by`, `orderby`, a projection field expression, an aggregate filter, an
-`insert` object literal, a `set` clause, or a `page after` expression — an
-unqualified identifier can only be a column:
+`group by`, `orderby`, a projection field, an aggregate filter, or a
+`page after` expression — every name says what it is:
 
-- an **unqualified identifier resolves to a column** of exactly one binding;
-- **`Binding.name`** resolves to a column of that binding;
-- **`$name`** is a local, **`@name`** is a path parameter.
+| | |
+|---|---|
+| `B.column` | a column of binding `B` (queries §2.4) |
+| `@name` | a local, parameter or path parameter (§5.2) |
+| `Name`, `Name.member` | the declaration space (§5.1) |
 
-That is the one place a local has to be told apart from a column, so it is
-the one place the sigil is **required**.
+An unqualified column is `E0904`, naming the binding it should have carried.
+`E0210` covers the opposite slip — a bare name in a query clause that is no
+column but does match a local in scope: *`'account_id'` is not a column of any
+binding here; did you mean `@account_id`?*
 
-**Everywhere else it is optional.** In a route body, a service, a `for`, an
-argument list, there is no column in scope for a local to be confused with,
-so `attempt` and `$attempt` are the same reference and both compile:
+The two positions that are not references take no qualifier: a `set` target
+and an `insert` object key name a column of the table being written.
+
+**Outside a query clause the sigil is optional.** In a route body, a service,
+a `for`, an argument list, there is no column for a local to be confused with,
+so `attempt` and `@attempt` are the same reference and both compile:
 
 ```jwc
-for (attempt in [1, 2, 3]) {
+for (let attempt in [1, 2, 3]) {
     console.writeln("Attempt #" + string.of(attempt));
 }
 ```
 
-`jwc fmt` leaves each as written. New code should use the bare form outside
-a query clause — that is what the templates and the guides do. The sigil stays legal so that programs written under the
-older rule keep compiling; the conformance sample in this directory is one of
-them. A `...` spread source is a local either way (`{ ...req }` and
-`{ ...$req }`), since a column cannot be spread.
+`jwc fmt` leaves each as written. A bare name outside a query clause that is
+neither a local nor a declaration is `E0211: unknown name`; without it a
+mistyped local would quietly evaluate to its own name as text.
 
-A bare name outside a query clause that is neither a local nor a declaration
-is `E0211: unknown name`. Without it a mistyped local would quietly evaluate
-to its own name as text.
+Because a column carries its binding, `where T.org_id == T.org_id` can only
+mean the tautology it looks like. The compiler warns — `W0104: comparison is
+always true` — because a tautology in a `where` is never intentional.
 
-Consequences inside a query clause, all of them intended:
-
-```jwc no-compile
-where org_id == $org_id          -- tenancy filter: column vs. local
-where org_id == org_id           -- W0104: both sides are the same column
-where code == $req.plan_code
-where accepted_at == null
-```
-
-Because the sigil is **required here**, a bare identifier in a query clause is
-unambiguously a column and `where org_id == org_id` can only ever mean the
-tautology it looks like. That is the whole fix for #2/#34: the ambiguity is
-removed by construction rather than reported. The compiler still warns —
-`W0104: comparison is always true` — because a tautology in a `where` is
-never intentional.
-
-`E0210` covers the opposite slip: a bare identifier in a query clause that
-resolves to **no** column but does match a local in scope. The message is
-`E0210: 'account_id' is not a column of any binding here; did you mean
-'$account_id'?`. Without it the diagnostic would be a bare "unknown column",
-which points away from the fix.
-
-The declaration space (§5.1) is *not* sigiled: `MemberRole.owner`,
+The declaration space (§5.1) is not sigiled: `MemberRole.owner`,
 `AuthService.login(...)`, `context.account_id`, `request.header(...)` and
 `App.auth.Accounts` are names, not locals.
 
@@ -243,8 +243,8 @@ The declaration space (§5.1) is *not* sigiled: `MemberRole.owner`,
 Every `select` binds exactly one name for its source, written after `select`:
 
 ```jwc no-compile
-select Accounts from App.auth.Accounts     -- binds `Accounts`
-select a from App.auth.Accounts            -- binds `a`
+select Accounts from App.auth.Accounts     // binds `Accounts`
+select a from App.auth.Accounts            // binds `a`
 ```
 
 The binder is **mandatory**. `select from App.org.MemberAccess` does not
@@ -262,17 +262,21 @@ Two bindings with the same name in one query is an error (`E0212`), which is
 what makes self-joins expressible (#1): the second occurrence must be
 aliased.
 
-An unqualified column name that exists in more than one binding is
-`E0213: 'x' is ambiguous`, naming every binding that has it.
+A column names its binding (queries §2.4), so a name cannot be ambiguous
+between two of them: the qualifier is what decides.
 
 ### 5.5 Locals
 
-`let name = …;` introduces a local; a reference to it is `name`, or `$name`
+`let name = …;` introduces a local; a reference to it is `name`, or `@name`
 where §5.3 requires the sigil. A `let` may not shadow a local, parameter or path parameter that is already
 in scope (`E0214`). Blocks nest; a local goes out of scope at the end of its
 block.
 
-Assignment to a local (`x = expr;`, or `$x = expr;`) is permitted and does
+A `for` binder is declared the same way: `for (let x in xs)`. The `let` is
+**mandatory** (`E0902`); without it the loop was the one place in the language
+where a name appeared without being declared.
+
+Assignment to a local (`x = expr;`, or `@x = expr;`) is permitted and does
 not change its type. Assignment to a field (`x.y = expr;`) does not parse: load-modify-save
 is a declared non-goal.
 
@@ -379,10 +383,11 @@ initialisation order, because there is nothing to initialise.
 |---|---|
 | `E0104` | doc comment attaches to nothing |
 | `E0100` | unexpected character |
+| `E0101` | unterminated block comment |
 | `E0102` | unterminated string |
 | `E0103` | literal newline inside a string literal |
 | `E0105` | identifier starts with `_` |
-| `E0106` | `$` or `@` not followed immediately by a name |
+| `E0106` | `@` not followed immediately by a name |
 | `E0108` | `\u` not followed by `{XXXX}` |
 | `E0109` | unknown string escape |
 | `E0107` | integer literal out of `bigint` range |
@@ -395,12 +400,13 @@ initialisation order, because there is nothing to initialise.
 | `E0210` | bare identifier in a query clause is not a column but matches a local |
 | `E0211` | unknown name: not a column here, and not a local or declaration |
 | `E0212` | duplicate binding name in one query |
-| `E0213` | unqualified column is ambiguous across bindings |
 | `E0214` | `let` shadows an existing binding |
 | `E0215` | two `const` declarations with one name |
 | `E0216` | a `const` right-hand side is not a constant expression |
-| `E0220` | `@name` outside a route or middleware |
 | `E0900` | removed keyword from the pre-1.0 language |
+| `E0901` | `--` where a comment was meant; comments are `//` |
+| `E0902` | a `for` binder without `let` |
+| `E0903` | `@name` — the sigil is `@` |
 | `W0101` | case convention |
 | `W0102` | namespace does not match file path |
 | `W0103` | unused import |
@@ -417,7 +423,6 @@ carries the token that was actually found.
 |---|---|---|
 | `E0001` | any construct | expected a specific token, name, integer or string literal |
 | `E0002` | the top level | expected a declaration |
-| `E0003` | the top level | `route` outside a `routes` block |
 | `E0004` | a foreign key | expected `delete`/`update` after `on`, or a referential action |
 | `E0005` | an `error` declaration | expected an HTTP status code, or one outside `100..=599` |
 | `E0006` | a `service` body | expected `function` — a service holds nothing else |
@@ -426,7 +431,7 @@ carries the token that was actually found.
 | `E0009` | a `route` header | not an HTTP method |
 | `E0010` | an `errorHandler` body | expected `catch` — a handler holds nothing else |
 | `E0011` | a type | expected a type argument, as in `varchar(120)` |
-| `E0012` | an object literal | expected `$name` after `...` |
+| `E0012` | an object literal | expected `@name` after `...` |
 | `E0013` | an object literal | expected an object key, or `:`/`=` after one |
 | `E0014` | an expression | expected an expression |
 | `E0015` | a query | `select` with no binder before `from` |
