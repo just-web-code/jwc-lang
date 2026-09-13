@@ -476,6 +476,18 @@ carry `group by`/`having`.
 
 ### 8.2 Materialisation **[0.25.d]**
 
+A view is a real `CREATE VIEW`, so a body the emitter cannot express is not
+a view: it is `E0543`. Without that check the program typechecked, `gen-sql`
+omitted the `CREATE` and still emitted the view's `COMMENT ON VIEW`, and the
+DDL named a relation it had never created. The usual cause is a projection
+whose nesting does not follow the joins — a shape written flat where its
+`on` clause attaches it to another join (§4.4).
+
+Elsewhere, a query the emitter cannot lower is `W0503` rather than an error:
+it is a missing feature, not a wrong program. It is a warning and not
+silence because the alternative is a program that checks clean, deploys, and
+answers 500 the first time the query runs.
+
 A `view` is a real `CREATE VIEW`. A DBA can query it, `\d` lists it, and
 migrations track it (§8.4). Selecting from it composes.
 
@@ -677,6 +689,8 @@ transaction's connection.
 | `E0540` | view body has no projection |
 | `E0541` | view body carries a per-query clause |
 | `E0542` | pagination pushdown cannot be proven |
+| `E0543` | view body cannot be emitted as SQL |
 | `E0550` | `page` without a total order |
 | `W0501` | unbounded `as many` |
 | `W0502` | `count` under fan-out — did you mean `count.distinct`? |
+| `W0503` | this query will not lower to SQL |

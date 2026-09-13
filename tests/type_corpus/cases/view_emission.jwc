@@ -1,0 +1,33 @@
+namespace view_emission;
+
+// A `view` is a real `CREATE VIEW` (queries.md §8.2), so a body the SQL
+// emitter cannot express is not a view at all. It used to check clean and
+// then vanish from `gen-sql` — while its `COMMENT ON VIEW` was still
+// emitted, so the DDL named a relation it had never created and failed to
+// apply against an empty database.
+
+// `membership` hangs off `org`, because its `on` clause names `O` besides
+// the joined table (queries.md §4.4). Written nested, it emits.
+view MemberUnderOrg of App.s {
+    select N from App.s.Notes
+        left join App.s.Orgs O on O.id == N.org_id as one org
+        left join App.s.Members M on M.org_id == O.id as one membership
+        as { N.id, N.body, org: { id, name, membership: { account_id, role } } }
+}
+
+// The same joins with the shape written flat. The checker accepted it and
+// the emitter could not compile it.
+view MemberBesideOrg of App.s {                 // expect: E0543
+    select N from App.s.Notes
+        left join App.s.Orgs O on O.id == N.org_id as one org
+        left join App.s.Members M on M.org_id == O.id as one membership
+        as { N.id, N.body, org: { id, name }, membership: { account_id, role } }
+}
+
+// Two joins that both hang off the driving table stay flat, and emit.
+view BothOffTheDriver of App.s {
+    select I from App.s.Invites
+        left join App.s.Orgs O on O.id == I.org_id as one org
+        left join App.s.Orgs B on B.id == I.invited_by as one inviter
+        as { I.id, I.email, org: { id, name }, inviter: { id, name } }
+}

@@ -52,4 +52,33 @@ service First {
             as { O.id, O.name }
             first;
     }
+
+    // `update` and `delete` run the same determinism check through a probe
+    // built from their own clauses. The probe used to be handed the *table
+    // name* as its binder, so once the analysis learned to read bindings it
+    // stopped finding `U.id` — and every write whose binding was not spelled
+    // exactly like its table lost the primary key it had just constrained.
+    function update_binding_is_not_the_table_name(id: bigint, name: text) {
+        return update U of App.s.Orgs
+            set name = @name
+            where U.id == @id
+            as { U.id, U.name }
+            first;
+    }
+
+    function delete_binding_is_not_the_table_name(id: bigint) {
+        return delete D from App.s.Orgs
+            where D.id == @id
+            as { D.id }
+            first;
+    }
+
+    // The same probe must still refuse a write it cannot pin to one row.
+    function update_on_a_plain_predicate(org_id: bigint, body: text) {
+        return update N of App.s.Notes                         // expect: E0520
+            set body = @body
+            where N.org_id == @org_id
+            as { N.id }
+            first;
+    }
 }

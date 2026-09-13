@@ -53,6 +53,15 @@ if (@payment == null) { return { status: "duplicate" }; }
 2.4 `on conflict (cols) do update set …` is the upsert. `cols` must name a
 declared unique constraint or unique index (`E0603`).
 
+**Not implemented.** No backend lowers `do update`: `sql::Builder::insert`
+answers `None` for it, which reaches a running server as
+`this insert is not expressible yet`. It is `E0607` at check time rather
+than a 500 on the concurrent path — the path that is hardest to reach in
+testing, and the whole reason to write an upsert. Until it lands,
+`on conflict (cols) do nothing` answers `Record?`, and an `update` on the
+null branch writes the same row; inside one `transaction` a concurrent
+caller either loses the insert and updates, or wins it and is updated.
+
 2.5 Omitting `on conflict`'s column list is legal only when the table has
 exactly one unique constraint (`E0604`).
 
@@ -346,6 +355,7 @@ exhaustiveness covers it.
 | `E0604` | `on conflict` without columns on a multi-unique table |
 | `E0605` | `update`/`delete` with no `where` |
 | `E0606` | value is not assignable to the column it is written to |
+| `E0607` | `on conflict … do update` is not implemented |
 | `E0610` | `raw` placeholder/argument count mismatch |
 | `E0611` | `raw` inside a view |
 | `E0620` | nested transaction |
