@@ -68,10 +68,32 @@ fn jwc_parse_iso_duration(s: &str) -> Option<i64> {
     any.then_some(total)
 }
 
-/// An RFC 3339 timestamp moved by `secs`, rendered the way `date.now()`
-/// renders one so a shifted timestamp and a fresh one are the same shape.
+/// A `timestamptz` is RFC 3339 and a `date` is `YYYY-MM-DD`; both reach
+/// arithmetic as text, and `date + interval` is `timestamptz`
+/// (types.md §12.1). Reading a bare date as midnight UTC is what makes the
+/// second of those work.
+///
+/// Without it `date + interval` was wrong in both backends and wrong in
+/// two different ways: the interpreter faulted with `` `+` is not defined
+/// here: Text("2026-10-23") + Interval("P14D") ``, and the native runtime
+/// fell past its timestamp arm into string concatenation and answered
+/// `"2026-10-23P14D"` — a value no later comparison could make sense of,
+/// with nothing raised.
+fn jwc_as_timestamp(ts: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    if let Ok(t) = ts.parse::<chrono::DateTime<chrono::Utc>>() {
+        return Some(t);
+    }
+    let d: chrono::NaiveDate = ts.parse().ok()?;
+    Some(chrono::DateTime::from_naive_utc_and_offset(
+        d.and_hms_opt(0, 0, 0)?,
+        chrono::Utc,
+    ))
+}
+
+/// A timestamp moved by `secs`, rendered the way `date.now()` renders one
+/// so a shifted timestamp and a fresh one are the same shape.
 fn jwc_shift_secs(ts: &str, secs: i64) -> Option<String> {
-    let base: chrono::DateTime<chrono::Utc> = ts.parse().ok()?;
+    let base = jwc_as_timestamp(ts)?;
     let out = base.checked_add_signed(chrono::Duration::try_seconds(secs)?)?;
     Some(out.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
 }
@@ -81,8 +103,8 @@ fn jwc_shift_secs(ts: &str, secs: i64) -> Option<String> {
 /// Seconds because that is the resolution `jwc_parse_iso_duration` reads
 /// back, and the only one the pair can agree on.
 fn jwc_ts_diff_secs(later: &str, earlier: &str) -> Option<i64> {
-    let l: chrono::DateTime<chrono::Utc> = later.parse().ok()?;
-    let r: chrono::DateTime<chrono::Utc> = earlier.parse().ok()?;
+    let l = jwc_as_timestamp(later)?;
+    let r = jwc_as_timestamp(earlier)?;
     Some(l.signed_duration_since(r).num_seconds())
 }
 

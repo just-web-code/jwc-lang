@@ -647,6 +647,24 @@ impl<'a> Vm<'a> {
             "numeric" => Value::Numeric(s(0)),
             "boolean" => Value::Bool(matches!(s(0).as_str(), "true" | "1")),
             "uuid" | "timestamptz" => Value::Text(s(0)),
+            // Validated, unlike `uuid` and `timestamptz` above: a `date`
+            // this rejects is one Postgres would have rejected later, with
+            // a fault instead of a sentence. `YYYY-MM-DD`, which is the
+            // wire form a `date` column already answers with.
+            "date" => {
+                let raw = s(0);
+                match raw.trim().parse::<chrono::NaiveDate>() {
+                    Ok(d) => Value::Text(d.to_string()),
+                    Err(_) => {
+                        return Err(Abort::Thrown(Thrown {
+                            error: "BadRequest".into(),
+                            args: vec![Value::Text(format!(
+                                "`{raw}` is not a date — expected YYYY-MM-DD"
+                            ))],
+                        }))
+                    }
+                }
+            }
 
             // ---- date (builtins.md §3)
             "date.now" => Value::Timestamptz(
@@ -774,7 +792,17 @@ impl<'a> Vm<'a> {
                         .collect(),
                 )
             }
-            "array.contains" => Value::Bool(items(&arg(0)).contains(&arg(1))),
+            // The language's `==`, not Rust's. `Vec::contains` compares
+            // variants, so a `bigint` plucked out of a column — text on the
+            // wire — never matched the same number from a request body, and
+            // the call answered `false` for a value that was plainly in the
+            // list. It typechecked, and in `e-school` the list was a class
+            // roster and the question was whether a pupil belonged to it.
+            "array.contains" => Value::Bool(
+                items(&arg(0))
+                    .iter()
+                    .any(|v| crate::exec::equal(v, &arg(1))),
+            ),
             "array.first" => items(&arg(0)).first().cloned().unwrap_or(Value::Null),
             "array.last" => items(&arg(0)).last().cloned().unwrap_or(Value::Null),
             "array.sorted" => {

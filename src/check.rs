@@ -2783,6 +2783,16 @@ impl<'a> Checker<'a> {
                 arity(self, 1);
                 Ty::timestamptz()
             }
+            // `date.today()` used to be the only expression in the language
+            // that produced a `date`, and both calendar-shaped tables need
+            // two different ones to satisfy `check (ends_on > starts_on)` —
+            // so a term could not be created from JWC at all. `raw()` is no
+            // way round it either: it wraps its SQL as a subquery and can
+            // only read.
+            "date" => {
+                arity(self, 1);
+                Ty::Scalar(Scalar::Date)
+            }
             // `enum(E, x)` takes a type name (builtins.md §2).
             "enum" => {
                 arity(self, 2);

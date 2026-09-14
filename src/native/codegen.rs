@@ -176,6 +176,7 @@ fn prelude_fn(name: &str) -> Option<&'static str> {
         "boolean" => "jwc_b_v1_boolean",
         "uuid" => "jwc_b_v1_uuid",
         "timestamptz" => "jwc_b_v1_timestamptz",
+        "date" => "jwc_b_v1_date",
         "enum" => "jwc_b_v1_enum",
         "env" => "jwc_b_env",
 
@@ -2156,10 +2157,10 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                     parts.first().cloned().unwrap_or_else(|| "V::Null".into())
                 ));
             }
-            // `int(s)` and `bigint(s)` raise `BadRequest` on a value that
-            // is not a number (types.md §7.2), so they return a `Result`
-            // and the call site propagates.
-            if matches!(name.as_str(), "int" | "bigint") {
+            // `int(s)`, `bigint(s)` and `date(s)` raise `BadRequest` on a
+            // value of the wrong shape (types.md §7.2), so they return a
+            // `Result` and the call site propagates.
+            if matches!(name.as_str(), "int" | "bigint" | "date") {
                 ctx.used.insert(format!("jwc_b_v1_{name}"));
                 return Ok(format!(
                     "jwc_b_v1_{name}({})?",
@@ -3080,7 +3081,7 @@ mod tests {
     fn result_builtins_matches_the_prelude() {
         // `int` / `bigint` are fallible too, but they are special-cased
         // ahead of the generic path because they take one fixed argument.
-        const SPECIAL_CASED: &[&str] = &["jwc_b_v1_int", "jwc_b_v1_bigint"];
+        const SPECIAL_CASED: &[&str] = &["jwc_b_v1_int", "jwc_b_v1_bigint", "jwc_b_v1_date"];
 
         let mut actual: Vec<String> = Vec::new();
         for src in preludes() {

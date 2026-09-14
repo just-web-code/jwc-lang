@@ -19,6 +19,7 @@ use crate::query::{Node, Plan};
 use crate::sql::{Bind, PagePlan, Param, Shape};
 use crate::views::ViewObj;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// A table or a view. Emission treats them alike — a view is a real
 /// relation with columns (queries.md §8.2), which is the whole point of
@@ -260,6 +261,7 @@ impl<'a> Compiler<'a> {
 
         let mut from = format!("{} {root_alias}", root_table.qualified());
         from.push_str(&joins);
+        from.push_str(&self.recovered_joins(select, plan, projection)?);
         from.push_str(&self.group_joins(plan)?);
 
         // The page's key join replaces the filter: the CTE already applied
@@ -849,6 +851,99 @@ impl<'a> Compiler<'a> {
             }
             _ => self.unsupported("a projection field is a column or an aggregate"),
         }
+    }
+
+    /// Joins the projection did not ask for but the query still needs.
+    ///
+    /// Emitting a child's JSON is what pulls its `LEFT JOIN` into the FROM
+    /// clause, so an `as one` child nobody projected was dropped — while a
+    /// `where` or `orderby` naming it stayed. The emitted SQL then read
+    /// `WHERE t3.starts_on <= …` with no `t3` to read, which Postgres
+    /// answers with `missing FROM-clause entry for table "t3"`. Both
+    /// `jwc check` and `jwc explain` accepted the program.
+    ///
+    /// Only `as one` children are recoverable. An `as many` child is a
+    /// lateral and a predicate outside it cannot name the child's binding
+    /// at all (queries.md §4.6), so there is nothing to recover there.
+    fn recovered_joins(
+        &mut self,
+        select: &SelectExpr,
+        plan: &Plan,
+        projection: Option<&ObjectShape>,
+    ) -> Option<String> {
+        let mut paths = Vec::new();
+        if let Some(f) = &select.filter {
+            names(f, &mut paths);
+        }
+        if let Some(h) = &select.having {
+            names(h, &mut paths);
+        }
+        for k in &select.order_by {
+            names(&k.expr, &mut paths);
+        }
+        for g in &select.group_by {
+            names(g, &mut paths);
+        }
+        // `M.starts_on` names the binding `M`; a bare column names nothing
+        // a join could be recovered for.
+        let used: HashSet<String> = paths
+            .iter()
+            .filter_map(|p| p.split('.').next())
+            .map(str::to_string)
+            .collect();
+
+        let mut out = String::new();
+        self.recover_into(&plan.root, projection, &used, &mut out)?;
+        Some(out)
+    }
+
+    fn recover_into(
+        &mut self,
+        node: &Node,
+        projection: Option<&ObjectShape>,
+        used: &HashSet<String>,
+        out: &mut String,
+    ) -> Option<()> {
+        for child in &node.children {
+            let Some(link) = child.link.as_ref() else {
+                continue;
+            };
+            let shape = projection.and_then(|p| {
+                p.fields.iter().find_map(|f| match f {
+                    ProjField::Nested { alias, shape, .. } if alias.name == link.field => {
+                        Some(shape)
+                    }
+                    _ => None,
+                })
+            });
+            if link.cardinality != Cardinality::One {
+                continue;
+            }
+            if let Some(s) = shape {
+                // `emit` already joined this one; its own children may still
+                // be missing.
+                self.recover_into(child, Some(s), used, out)?;
+                continue;
+            }
+            if !mentioned(child, used) {
+                continue;
+            }
+            let alias = self.sql_alias(&child.alias);
+            let table = self.table(&child.object)?;
+            let on = self.predicate(&link.on, &child.alias)?;
+            let kind = match link.kind {
+                JoinKind::Left => "LEFT JOIN",
+                JoinKind::Inner => "JOIN",
+            };
+            out.push_str(&format!("\n  {kind} {} {alias} ON {on}", table.qualified()));
+            if let Some(f) = &link.filter {
+                out.push_str(&format!(" AND {}", self.predicate(f, &child.alias)?));
+            }
+            // Emitted before its own children so a grandchild's `ON` can
+            // name it.
+            self.recover_into(child, None, used, out)?;
+        }
+        Some(())
     }
 
     fn group_joins(&mut self, plan: &Plan) -> Option<String> {
@@ -1721,6 +1816,12 @@ fn dotted(e: &Expr) -> Option<String> {
         ExprKind::Field { base, field } => Some(format!("{}.{}", dotted(base)?, field.name)),
         _ => None,
     }
+}
+
+/// True when this node's binding, or one under it, is named outside the
+/// projection — which is what makes an unprojected join load-bearing.
+fn mentioned(node: &Node, used: &HashSet<String>) -> bool {
+    used.contains(&node.alias) || node.children.iter().any(|c| mentioned(c, used))
 }
 
 fn names(e: &Expr, out: &mut Vec<String>) {
