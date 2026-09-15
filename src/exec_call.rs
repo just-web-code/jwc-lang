@@ -657,16 +657,12 @@ impl<'a> Vm<'a> {
                 // which is how a `date` is derived from `date.now()` or from
                 // `date.today() + date.days(n)`, both of which widen to
                 // `timestamptz` (types.md §12.1).
-                let parsed = raw
-                    .trim()
-                    .parse::<chrono::NaiveDate>()
-                    .ok()
-                    .or_else(|| {
-                        raw.trim()
-                            .parse::<chrono::DateTime<chrono::Utc>>()
-                            .ok()
-                            .map(|t| t.date_naive())
-                    });
+                let parsed = raw.trim().parse::<chrono::NaiveDate>().ok().or_else(|| {
+                    raw.trim()
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .ok()
+                        .map(|t| t.date_naive())
+                });
                 match parsed {
                     Some(d) => Value::Text(d.to_string()),
                     None => {
