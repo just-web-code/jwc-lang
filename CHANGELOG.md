@@ -3,6 +3,102 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.4] — freeze candidate — 2026-09-15
+
+Eight places where the program said one thing, `jwc check` agreed, and the
+runtime did another. All of them came from one exercise: pointing rc.3 at a
+real application — a school management API — rather than at the sample.
+
+### `update` and `delete` lost the primary key when the binding was not the table name
+
+Both run their determinism check against a probe built from their own
+clauses, and the probe was handed the *table name* as its binder. That was
+harmless while the analysis never read the binding. rc.3 taught it to, and
+from then on `update U of App.s.Users where U.id == @id … first` could not
+find the key it had just constrained.
+
+`select` was unaffected, which is why no suite caught it: every write in the
+sample and in the type corpus binds the table's own name. In an application
+that binds short, it was **15 spurious `E0520`**.
+
+### A value's declared type stopped mattering for `==`
+
+A `bigint` from a column arrives as `Value::Text` — the shape on the wire is
+a string, because JavaScript loses digits above 2⁵³ — while `bigint(x)`, a
+path parameter and a request body all produce `Value::Bigint`. Nothing in
+the language distinguishes them:
+
+```
+from a column      : 7
+round-tripped      : 7
+string.of equal    : true
+bigint ==          : false
+```
+
+Ordering was worse: `compare` found neither a numeric nor a textual pair and
+answered `None`, so the handler got "values do not order". `array.contains`
+used Rust's `PartialEq` and inherited all of it — and where that list is a
+class register and the question is "is this pupil in this class", it is a
+**permission check** quietly answering no.
+
+Equality and ordering now agree on numbers whatever carried them, through
+one rule both operators share. Text stays lexicographic, and arithmetic
+keeps the strict rule it had.
+
+### An unprojected join was cut from FROM while its predicate stayed
+
+Emitting a child node's JSON is what pulls its `LEFT JOIN` into FROM. So an
+`as one` nobody projected disappeared, while the `where` or `orderby` naming
+it remained, and the SQL went out as `WHERE t3.starts_on <= …` with no `t3`
+— which Postgres answers with `missing FROM-clause entry`.
+
+The joins a filter, `having`, `orderby` or `group by` mentions are recovered
+into FROM now, parent before descendant. `as many` stays out: it is lateral,
+and its rows do not belong in the parent's FROM.
+
+### Three silent gaps between what checks and what lowers
+
+| Was | Now |
+|---|---|
+| A view whose body cannot be emitted was dropped silently, and its `COMMENT ON VIEW` stayed — so the DDL did not apply | `E0543` |
+| `on conflict … do update` is in the specification and neither backend emits it — a 500 on a running server | `E0607` |
+| Every other lowering gap was quiet: the program checks clean, deploys, and 500s on its first request | `W0503` |
+
+### `date(x)`, and `date ± interval` correct on both backends
+
+`date.today()` was the only expression in the language that produced a
+`date`, and a calendar table needs two different ones. `date ± interval`
+faulted in the interpreter and, in the native backend, **silently** produced
+`"2026-10-23P14D"`. Both are correct now, and a bare `YYYY-MM-DD` is read as
+midnight UTC by the shared interval core, so the two backends cannot drift.
+
+### BREAKING: `env()` inside `init()` is `E1209`
+
+It was the documented way to configure the pool size, and it was never read
+by anything. Keeping it would have meant a second path for a value the
+registry cannot check and `jwc`'s config table cannot show — the same
+argument that removed `serve(int(env("PORT")))` in rc.3.
+
+`database { init() }` is read by the runtime now. `pool_size`,
+`pool_timeout`, `statement_timeout`, `connect_timeout`, `application_name`,
+`tls` and `tls_root_cert` are literals the source declares, each with a
+`JWC_DB_*` variable over it.
+
+### BREAKING: the pool's effective default is 20, not 64
+
+config.md §2.4 said 20 from the beginning. 64 was a constant in `engine.rs`
+and a second one in the native prelude.
+
+### Known
+
+`bigint + bigint` where both sides come from columns is `Text + Text` to the
+runtime, so it concatenates. No rule at the value layer separates it from
+real text concatenation; fixing it means carrying the projection's types to
+the decode site.
+
+`E0320` does not narrow across an `or`: `(due == null or due >= today)`
+lowers to exactly the right SQL and the checker rejects it.
+
 ## [1.0.0-rc.3] — freeze candidate — 2026-09-11
 
 Five syntax decisions, each one removing a place where the language asked
