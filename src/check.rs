@@ -705,6 +705,38 @@ impl<'a> Checker<'a> {
                 "queries.md §8.1",
             );
         }
+        // A view is a real `CREATE VIEW`, so a body the emitter cannot
+        // express is not a view at all. Without this the program checked
+        // clean, `gen-sql` quietly omitted the `CREATE` — while still
+        // emitting the view's `COMMENT ON VIEW` — and the DDL failed to
+        // apply against an empty database. Every offline check passed and
+        // the schema could not be deployed.
+        //
+        // Reported before the body is walked, so the `W0503` that the same
+        // failure raises down there sees a program already known to be
+        // wrong and stays quiet.
+        if let Some(obj) = self.model.views.iter().find(|o| o.declared == v.name.name) {
+            if obj.body.is_none() {
+                let why = obj
+                    .gap
+                    .as_deref()
+                    .unwrap_or("this query is not expressible yet");
+                self.err_note(
+                    v.span,
+                    "E0543",
+                    format!(
+                        "view `{}` has a body that cannot be emitted as SQL",
+                        v.name.name
+                    ),
+                    format!(
+                        "{why} — check that each nested shape sits under the join its \
+                         `on` clause names (queries.md §4.4)"
+                    ),
+                    "queries.md §8.2",
+                );
+            }
+        }
+
         self.push_scope();
         self.select(&v.body, v.span);
         self.pop_scope();
@@ -2751,6 +2783,16 @@ impl<'a> Checker<'a> {
                 arity(self, 1);
                 Ty::timestamptz()
             }
+            // `date.today()` used to be the only expression in the language
+            // that produced a `date`, and both calendar-shaped tables need
+            // two different ones to satisfy `check (ends_on > starts_on)` —
+            // so a term could not be created from JWC at all. `raw()` is no
+            // way round it either: it wraps its SQL as a subquery and can
+            // only read.
+            "date" => {
+                arity(self, 1);
+                Ty::Scalar(Scalar::Date)
+            }
             // `enum(E, x)` takes a type name (builtins.md §2).
             "enum" => {
                 arity(self, 2);
@@ -3852,6 +3894,31 @@ impl<'a> Checker<'a> {
             return;
         }
         if c.gap_code() != Some("E0542") {
+            // Every other reason emission gives up is a missing feature
+            // rather than a wrong program, so it is not an error. It was
+            // silent, though, and silence here means the program checks
+            // clean, deploys, and answers 500 the first time the query
+            // runs — which is how `(due ?? today) >= today` in a `where`
+            // and `date + interval` in a local both reached a running
+            // server. Naming it costs a warning and moves the discovery
+            // from production to the build.
+            //
+            // Only when the program is otherwise clean. A query that names
+            // a column which does not exist also fails to lower, and
+            // saying so twice adds nothing to the error that already
+            // explains it.
+            let already_wrong = self
+                .diags
+                .iter()
+                .any(|(_, d)| d.severity == crate::diag::Severity::Error);
+            if !already_wrong {
+                self.warn(
+                    span,
+                    "W0503",
+                    format!("this query will not lower to SQL: {}", c.gap()),
+                    "queries.md §8.2",
+                );
+            }
             return;
         }
         self.err_note(
@@ -4277,6 +4344,22 @@ impl<'a> Checker<'a> {
     /// that is hardest to reach in testing and the reason `on conflict` is
     /// there at all.
     fn check_conflict_target(&mut self, c: &ConflictClause, object: &str) {
+        // `do update` is specified (writes.md §2.4) and neither backend can
+        // lower it: `sql::Builder::insert` answers `None` for it, which the
+        // interpreter reports as "this insert is not expressible yet" and
+        // the native backend as a build failure. Saying so here costs a
+        // compile error instead of a 500 on the concurrent path — the one
+        // hardest to reach in testing, and the whole reason to write an
+        // upsert in the first place.
+        if matches!(c.action, crate::ast::ConflictAction::DoUpdate(_)) {
+            self.err_note(
+                c.span,
+                "E0607",
+                "`on conflict … do update` is not implemented".to_string(),
+                "the spec describes it but no backend lowers it yet; until it lands, `on conflict (…) do nothing` answers `Record?` and an `update` on the null branch gets the same row written, inside one `transaction`",
+                "writes.md §2.4",
+            );
+        }
         let Some(t) = self.sym.tables.get(object) else {
             return;
         };
@@ -4394,7 +4477,7 @@ impl<'a> Checker<'a> {
         });
         if u.first {
             let probe = SelectExpr {
-                binder: Ident::new(object.clone(), span),
+                binder: u.binder.clone(),
                 source: u.table.clone(),
                 joins: vec![],
                 filter: u.filter.clone(),
@@ -4478,7 +4561,7 @@ impl<'a> Checker<'a> {
         });
         if d.first {
             let probe = SelectExpr {
-                binder: Ident::new(object.clone(), span),
+                binder: d.binder.clone(),
                 source: d.table.clone(),
                 joins: vec![],
                 filter: d.filter.clone(),

@@ -61,8 +61,13 @@ does not have, or miss one it does.
 | Variable | Default | |
 |---|---|---|
 | `JWC_DATABASE_URL` | — | Postgres connection string (overrides DATABASE_URL). |
-| `JWC_DB_POOL_SIZE` | `64` | Max connections in the deadpool-postgres pool. |
-| `JWC_DB_TLS` | `false` | Connect to Postgres over TLS via tokio-postgres-rustls. |
+| `JWC_DB_POOL_SIZE` | `20` | Max connections in the pool. `database { pool_size }` sets it; this overrides. |
+| `JWC_DB_POOL_TIMEOUT_MS` | `5000` | Wait for a free connection before failing. `database { pool_timeout }` sets it; this overrides. |
+| `JWC_DB_STATEMENT_TIMEOUT_MS` | `10000` | Server-side ceiling on one statement. `database { statement_timeout }` sets it; this overrides. |
+| `JWC_DB_CONNECT_TIMEOUT_MS` | `5000` | How long opening a connection may take. `database { connect_timeout }` sets it; this overrides. |
+| `JWC_DB_APPLICATION_NAME` | — | `application_name` per connection, in pg_stat_activity. `database { application_name }` sets it; this overrides. |
+| `JWC_DB_TLS_ROOT_CERT` | — | PEM root cert for the Postgres TLS connection. `database { tls_root_cert }` sets it; this overrides. |
+| `JWC_DB_TLS` | `false` | Connect to Postgres over TLS. `database { tls }` sets it; this overrides. |
 | `JWC_DB_TLS_INSECURE_SKIP_VERIFY` | `false` | Skip cert verification (dev only — never set in prod). |
 | `JWC_QUERY_CACHE_TTL_SECS` | `0` | Result-cache TTL; 0 disables caching. |
 | `JWC_DB_RETRY_MAX_ATTEMPTS` | `3` | Transient-error retry ceiling (outside transactions). |

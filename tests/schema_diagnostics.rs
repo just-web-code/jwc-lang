@@ -385,6 +385,45 @@ fn a_known_init_key_is_accepted() {
 }
 
 #[test]
+fn e1209_env_inside_init() {
+    // config.md §2.3 — `env()` was allowed here and was the documented way
+    // to make a pool size configurable. Nothing read it: the block reached
+    // `jwc fmt`, to print it, and a key-name check, to catch a typo, and no
+    // further. A program declaring `pool_size = 20` ran on a pool of 64.
+    //
+    // The block is read now, and the environment reaches it through the
+    // `JWC_DB_*` registry — validated at boot, listed in the generated
+    // config table. A second path through `env()` would be a value neither
+    // of those can see.
+    expect(
+        "database App : Postgres {\n  init() {\n    \
+         pool_size = int(env(\"DB_POOL\") ?? \"20\");\n  }\n}\nschema s of App;",
+        "E1209",
+        "JWC_DB_",
+    );
+}
+
+#[test]
+fn every_documented_init_key_is_accepted() {
+    // The seven keys of config.md §2.4, each as the literal the runtime now
+    // actually reads.
+    let diags = diagnose(
+        "database App : Postgres {\n  init() {\n    \
+         pool_size = 20;\n    \
+         pool_timeout = \"5s\";\n    \
+         statement_timeout = \"10s\";\n    \
+         connect_timeout = \"5s\";\n    \
+         tls = false;\n    \
+         tls_root_cert = \"/etc/ssl/pg.pem\";\n    \
+         application_name = \"eschool\";\n  }\n}\nschema s of App;",
+    );
+    assert!(
+        diags.is_empty(),
+        "the documented keys must be accepted: {diags:?}"
+    );
+}
+
+#[test]
 fn e0424_a_function_a_check_may_not_call() {
     // schema.md §4.4 — a check is stored in the database and re-evaluated
     // on every write, so it may only call what is portable enough to live

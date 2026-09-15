@@ -56,6 +56,7 @@ Coercions — types §7.2 decides their failure class:
 | `boolean(x)` | `boolean` |
 | `uuid(x)` | `uuid` |
 | `timestamptz(x)` | `timestamptz` — RFC 3339 only |
+| `date(x)` | `date` — `YYYY-MM-DD`; anything else raises `BadRequest` |
 | `enum(E, x)` | `E?` — `null` in gives `null` out; a non-member raises |
 
 `enum(E, x)` takes an enum **type name** as its first argument, the way

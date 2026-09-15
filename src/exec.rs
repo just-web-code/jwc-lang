@@ -1427,12 +1427,77 @@ pub fn field_error(path: &str, rule: &str, limit: Option<i64>, message: &str) ->
 
 // ---------------------------------------------------------------- ops
 
-fn equal(a: &Value, b: &Value) -> bool {
+/// True when at least one side is a variant only a numeric type produces.
+///
+/// The two sides of a comparison share a declared type — the checker
+/// proved that — but not necessarily a runtime *representation*. A
+/// `bigint` read out of a column arrives as `Value::Text`, because the
+/// wire form is a string (JavaScript loses digits above 2^53), while
+/// `bigint(x)`, a path parameter and a request body all build
+/// `Value::Bigint`. Nothing in the language distinguishes them:
+/// `string.of` prints both the same and both serialise the same.
+///
+/// So when either side is declared numeric, both are read as numbers.
+/// When neither is, they stay text — `"10" < "9"` is lexicographic and has
+/// to remain so, because a `text` column holding digits is still text.
+fn either_is_numeric(a: &Value, b: &Value) -> bool {
+    let numeric = |v: &Value| matches!(v, Value::Int(_) | Value::Bigint(_) | Value::Numeric(_));
+    numeric(a) || numeric(b)
+}
+
+/// `i128`, not `f64`: a `bigint` is 64 bits and comparing two of them
+/// through a double would make ids above 2^53 equal to their neighbours —
+/// the precision loss the string wire form exists to avoid.
+fn integral_of(v: &Value) -> Option<i128> {
+    match v {
+        Value::Int(n) | Value::Bigint(n) => Some(*n as i128),
+        Value::Numeric(s) | Value::Text(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// Arithmetic, unlike comparison, keeps the strict rule: a `Text` operand
+/// is not a number here. `text + text` is concatenation and everything
+/// else on two texts is a type error the checker has already refused, so
+/// loosening this would only change what an unreachable case does.
+fn numeric_of(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(n) | Value::Bigint(n) => Some(*n as f64),
+        Value::Numeric(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+fn decimal_of(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(n) | Value::Bigint(n) => Some(*n as f64),
+        Value::Numeric(s) | Value::Text(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// The ordering of two values compared as numbers, when that is what they
+/// are. `None` when it is not.
+fn numeric_ordering(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+    if !either_is_numeric(a, b) {
+        return None;
+    }
+    if let (Some(x), Some(y)) = (integral_of(a), integral_of(b)) {
+        return Some(x.cmp(&y));
+    }
+    let (x, y) = (decimal_of(a)?, decimal_of(b)?);
+    x.partial_cmp(&y)
+}
+
+pub(crate) fn equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Null, _) | (_, Value::Null) => false,
         (Value::Int(x), Value::Bigint(y)) | (Value::Bigint(x), Value::Int(y)) => x == y,
         _ => {
+            if let Some(ord) = numeric_ordering(a, b) {
+                return ord.is_eq();
+            }
             if let (Some(x), Some(y)) = (a.as_text(), b.as_text()) {
                 return x == y;
             }
@@ -1442,19 +1507,11 @@ fn equal(a: &Value, b: &Value) -> bool {
 }
 
 fn compare(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
-    if let (Some(x), Some(y)) = (numeric_of(a), numeric_of(b)) {
-        return x.partial_cmp(&y);
+    if let Some(ord) = numeric_ordering(a, b) {
+        return Some(ord);
     }
     match (a.as_text(), b.as_text()) {
         (Some(x), Some(y)) => Some(x.cmp(y)),
-        _ => None,
-    }
-}
-
-fn numeric_of(v: &Value) -> Option<f64> {
-    match v {
-        Value::Int(n) | Value::Bigint(n) => Some(*n as f64),
-        Value::Numeric(s) => s.parse().ok(),
         _ => None,
     }
 }
@@ -1464,7 +1521,11 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
     if let (Value::Text(x), Value::Text(y)) = (a, b) {
         return Some(Value::Text(format!("{x}{y}")));
     }
-    if let (Value::Timestamptz(t), Value::Interval(i)) = (a, b) {
+    // `Text` as well as `Timestamptz`: a `date` reaches here as text
+    // (`date.today()` and a `date` column both produce one), and
+    // `date + interval` is `timestamptz` by types.md §12.1. `Interval` is
+    // its own variant, so this cannot be mistaken for concatenation.
+    if let (Value::Timestamptz(t) | Value::Text(t), Value::Interval(i)) = (a, b) {
         return Some(Value::Timestamptz(jwc_shift_secs(
             t,
             jwc_parse_iso_duration(i)?,
@@ -1482,7 +1543,7 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
 /// answered 500 — and `date.now() - date.hours(24)` is how you ask for
 /// "the last day", which is the more common direction of the two.
 fn sub(a: &Value, b: &Value) -> Option<Value> {
-    if let (Value::Timestamptz(t), Value::Interval(i)) = (a, b) {
+    if let (Value::Timestamptz(t) | Value::Text(t), Value::Interval(i)) = (a, b) {
         // Negated in seconds, not in the text: `jwc_parse_iso_duration`
         // reads unsigned digits after a leading `P`, so neither `-PT24H`
         // nor `PT-24H` would come back.
@@ -2088,3 +2149,80 @@ include!("cookie_core.rs.in");
 // into the crate it generates, so a deployed binary and `jwc serve` send
 // the same set (config.md §3.7).
 include!("security_headers_core.rs.in");
+
+#[cfg(test)]
+mod comparison_tests {
+    use super::*;
+
+    /// The same number out of a column and out of a conversion. A `bigint`
+    /// column arrives as `Text` — the wire form is a string so JavaScript
+    /// does not lose digits above 2^53 — while `bigint(x)`, a path
+    /// parameter and a request body all build `Value::Bigint`.
+    #[test]
+    fn a_bigint_equals_itself_whichever_way_it_arrived() {
+        let from_column = Value::Text("90".into());
+        let converted = Value::Bigint(90);
+
+        assert!(equal(&from_column, &converted));
+        assert!(equal(&converted, &from_column));
+        assert_eq!(
+            compare(&converted, &from_column),
+            Some(std::cmp::Ordering::Equal)
+        );
+    }
+
+    /// Ordering used to answer `None` for the mixed pair, which reached a
+    /// handler as "values do not order".
+    #[test]
+    fn a_bigint_orders_against_itself_whichever_way_it_arrived() {
+        assert_eq!(
+            compare(&Value::Bigint(9), &Value::Text("10".into())),
+            Some(std::cmp::Ordering::Less)
+        );
+        assert_eq!(
+            compare(&Value::Text("10".into()), &Value::Bigint(9)),
+            Some(std::cmp::Ordering::Greater)
+        );
+    }
+
+    /// Above 2^53 a double cannot tell neighbouring ids apart, which is the
+    /// whole reason a `bigint` is a string on the wire.
+    #[test]
+    fn neighbouring_ids_past_the_double_limit_stay_distinct() {
+        let a = Value::Bigint(9_007_199_254_740_993);
+        let b = Value::Text("9007199254740992".into());
+
+        assert!(!equal(&a, &b));
+        assert_eq!(compare(&a, &b), Some(std::cmp::Ordering::Greater));
+    }
+
+    /// Two texts stay texts. A `text` column holding digits is still text,
+    /// and `"10" < "9"` is the answer its type gives.
+    #[test]
+    fn two_texts_compare_lexicographically() {
+        let a = Value::Text("10".into());
+        let b = Value::Text("9".into());
+
+        assert!(!equal(&a, &b));
+        assert_eq!(compare(&a, &b), Some(std::cmp::Ordering::Less));
+    }
+
+    /// `equal` and `compare` agree. They did not: `compare` read two
+    /// `Numeric`s as numbers while `equal` compared their text, so
+    /// `4.0` and `4.00` were unequal *and* neither greater nor less.
+    #[test]
+    fn equality_and_ordering_agree_on_decimals() {
+        let a = Value::Numeric("4.0".into());
+        let b = Value::Numeric("4.00".into());
+
+        assert!(equal(&a, &b));
+        assert_eq!(compare(&a, &b), Some(std::cmp::Ordering::Equal));
+    }
+
+    #[test]
+    fn null_is_equal_only_to_null() {
+        assert!(equal(&Value::Null, &Value::Null));
+        assert!(!equal(&Value::Null, &Value::Bigint(0)));
+        assert!(!equal(&Value::Text(String::new()), &Value::Null));
+    }
+}

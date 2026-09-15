@@ -165,6 +165,7 @@ the same extraction, so neither can drift from it.
 | `E0540` | view body has no projection | `queries.md` |
 | `E0541` | view body carries a per-query clause | `queries.md` |
 | `E0542` | pagination pushdown cannot be proven | `queries.md` |
+| `E0543` | view body cannot be emitted as SQL | `queries.md` |
 | `E0550` | `page` without a total order | `queries.md` |
 | `E0601` | write targets a view | `writes.md` |
 | `E0602` | unknown column in a write | `writes.md` |
@@ -172,6 +173,7 @@ the same extraction, so neither can drift from it.
 | `E0604` | `on conflict` without columns on a multi-unique table | `writes.md` |
 | `E0605` | `update`/`delete` with no `where` | `writes.md` |
 | `E0606` | value is not assignable to the column it is written to | `writes.md` |
+| `E0607` | `on conflict … do update` is not implemented | `writes.md` |
 | `E0610` | `raw` placeholder/argument count mismatch | `writes.md` |
 | `E0611` | `raw` inside a view | `writes.md` |
 | `E0612` | `buffered` inside a `transaction { }` | `writes.md` |
@@ -238,6 +240,7 @@ the same extraction, so neither can drift from it.
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block | `config.md` |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` | `config.md` |
 | `E1208` | `port` is not an integer literal | `config.md` |
+| `E1209` | `env(...)` inside `init()` | `config.md` |
 | `E1401` | `assert fails` without an error type | `testing.md` |
 | `E1402` | `with` on an `assert fails` whose message cannot be a literal | `testing.md` |
 | `E1501` | a package declares a schema object | `packages.md` |
@@ -250,6 +253,7 @@ the same extraction, so neither can drift from it.
 | `W0401` | table has no primary key | `schema.md` |
 | `W0501` | unbounded `as many` | `queries.md` |
 | `W0502` | `count` under fan-out — did you mean `count.distinct`? | `queries.md` |
+| `W0503` | this query will not lower to SQL | `queries.md` |
 | `W0602` | `request.path()` in a rate-limit key | `routing.md` |
 | `W0801` | middleware returns an error response instead of throwing | `middleware.md` |
 | `W1001` | unreachable `errorHandler` arm | `errors.md` |

@@ -572,7 +572,9 @@ coerce; write `string.concat(a, string.of(b))`.
 ### 12.2 `-`, `*`, `/`, `%`
 
 Numeric only, plus `timestamptz - timestamptz → interval` and
-`timestamptz - interval → timestamptz`. `/` on two integers is **integer
+`timestamptz - interval → timestamptz`. A `date` on the left of an
+`interval` behaves as midnight UTC on that day and widens the same way `+`
+does, so `date - interval` is a `timestamptz` too. `/` on two integers is **integer
 division**; `/` with a `numeric` operand is exact division. `%` is integer
 only. Division by zero is a fault.
 

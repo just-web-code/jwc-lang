@@ -176,6 +176,7 @@ fn prelude_fn(name: &str) -> Option<&'static str> {
         "boolean" => "jwc_b_v1_boolean",
         "uuid" => "jwc_b_v1_uuid",
         "timestamptz" => "jwc_b_v1_timestamptz",
+        "date" => "jwc_b_v1_date",
         "enum" => "jwc_b_v1_enum",
         "env" => "jwc_b_env",
 
@@ -482,10 +483,13 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // needs it to lower one. Read from the same declaration `serve.rs`
     // reads so the two backends cap at the same number.
     let mut server = crate::exec::ServerConfig::default();
+    let mut db = crate::engine::DbConfig::default();
     for file in &ws.files {
         for decl in &file.program.decls {
-            if let Decl::Server(d) = decl {
-                server = crate::serve::read_server_config(d);
+            match decl {
+                Decl::Server(d) => server = crate::serve::read_server_config(d),
+                Decl::Database(d) => db = crate::serve::read_db_config(d),
+                _ => {}
             }
         }
     }
@@ -533,13 +537,23 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
          const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n\
          const JWC_SOURCE_JOB_MAX_PAYLOAD: usize = {};\n\
          const JWC_SOURCE_JOB_QUEUE_LIMIT: usize = {};\n\
-         const JWC_SOURCE_PORT: u16 = {};\n",
+         const JWC_SOURCE_PORT: u16 = {};\n\
+         const JWC_SOURCE_DB_POOL_SIZE: usize = {};\n\
+         const JWC_SOURCE_DB_POOL_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_STATEMENT_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_CONNECT_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_APPLICATION_NAME: &str = {};\n",
         server.max_body_bytes,
         server.max_sockets,
         server.socket_keepalive.as_secs(),
         server.job_max_payload,
         server.job_queue_limit,
-        server.port
+        server.port,
+        db.pool_size,
+        db.pool_timeout.as_millis(),
+        db.statement_timeout.as_millis(),
+        db.connect_timeout.as_millis(),
+        rust_str_literal(db.application_name.as_deref().unwrap_or(""))
     ));
 
     // The reference, rendered here rather than in the binary: the document
@@ -2156,10 +2170,10 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                     parts.first().cloned().unwrap_or_else(|| "V::Null".into())
                 ));
             }
-            // `int(s)` and `bigint(s)` raise `BadRequest` on a value that
-            // is not a number (types.md §7.2), so they return a `Result`
-            // and the call site propagates.
-            if matches!(name.as_str(), "int" | "bigint") {
+            // `int(s)`, `bigint(s)` and `date(s)` raise `BadRequest` on a
+            // value of the wrong shape (types.md §7.2), so they return a
+            // `Result` and the call site propagates.
+            if matches!(name.as_str(), "int" | "bigint" | "date") {
                 ctx.used.insert(format!("jwc_b_v1_{name}"));
                 return Ok(format!(
                     "jwc_b_v1_{name}({})?",
@@ -3080,7 +3094,7 @@ mod tests {
     fn result_builtins_matches_the_prelude() {
         // `int` / `bigint` are fallible too, but they are special-cased
         // ahead of the generic path because they take one fixed argument.
-        const SPECIAL_CASED: &[&str] = &["jwc_b_v1_int", "jwc_b_v1_bigint"];
+        const SPECIAL_CASED: &[&str] = &["jwc_b_v1_int", "jwc_b_v1_bigint", "jwc_b_v1_date"];
 
         let mut actual: Vec<String> = Vec::new();
         for src in preludes() {

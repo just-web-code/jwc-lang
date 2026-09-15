@@ -27,8 +27,8 @@
     {
       "construct": "builtin.coercion",
       "clause": "types \u00a77.2",
-      "uses": 6,
-      "first_use": "src/app.jwc:5"
+      "uses": 5,
+      "first_use": "src/db/billing.jwc:20"
     },
     {
       "construct": "builtin.crypto",
@@ -52,7 +52,7 @@
       "construct": "builtin.env",
       "clause": "builtins \u00a72",
       "uses": 5,
-      "first_use": "src/app.jwc:5"
+      "first_use": "src/app.jwc:24"
     },
     {
       "construct": "builtin.hash",
@@ -117,8 +117,8 @@
     {
       "construct": "coalesce",
       "clause": "types \u00a76.6",
-      "uses": 5,
-      "first_use": "src/app.jwc:5"
+      "uses": 4,
+      "first_use": "src/routes/billing.jwc:51"
     },
     {
       "construct": "column.default",

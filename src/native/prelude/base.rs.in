@@ -864,6 +864,11 @@ fn jwc_neg(v: V) -> V {
 }
 
 fn jwc_eq(a: &V, b: &V) -> bool {
+    if !matches!((a, b), (V::Null, _) | (_, V::Null)) {
+        if let Some(ord) = jwc_num_cmp(a, b) {
+            return ord.is_eq();
+        }
+    }
     match (a, b) {
         (V::Null, V::Null) => true,
         (V::Bool(x), V::Bool(y)) => x == y,
@@ -898,7 +903,48 @@ fn jwc_eq(a: &V, b: &V) -> bool {
     }
 }
 
+/// The two sides of a comparison share a declared type — the checker proved
+/// it — but not necessarily a runtime representation. A `bigint` read out of
+/// a column arrives as `V::Str`, because the wire form is a string
+/// (JavaScript loses digits above 2^53), while `bigint(x)`, a path parameter
+/// and a request body all build `V::Int`. Nothing in the language separates
+/// them: `string.of` prints both the same.
+///
+/// So when either side is numeric, both are read as numbers. When neither
+/// is, they stay text — `"10" < "9"` is lexicographic and has to remain so,
+/// because a `text` column holding digits is still text.
+fn jwc_num_cmp(a: &V, b: &V) -> Option<std::cmp::Ordering> {
+    if !matches!(a, V::Int(_) | V::Float(_)) && !matches!(b, V::Int(_) | V::Float(_)) {
+        return None;
+    }
+    // `i128`, not `f64`: a `bigint` is 64 bits, and comparing two of them
+    // through a double would make ids above 2^53 equal to their neighbours —
+    // the precision loss the string wire form exists to avoid.
+    let int_of = |v: &V| -> Option<i128> {
+        match v {
+            V::Int(n) => Some(*n as i128),
+            V::Str(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    };
+    if let (Some(x), Some(y)) = (int_of(a), int_of(b)) {
+        return Some(x.cmp(&y));
+    }
+    let float_of = |v: &V| -> Option<f64> {
+        match v {
+            V::Int(n) => Some(*n as f64),
+            V::Float(n) => Some(*n),
+            V::Str(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    };
+    float_of(a)?.partial_cmp(&float_of(b)?)
+}
+
 fn jwc_cmp(a: &V, b: &V) -> Option<std::cmp::Ordering> {
+    if let Some(ord) = jwc_num_cmp(a, b) {
+        return Some(ord);
+    }
     match (a, b) {
         (V::Int(x), V::Int(y)) => Some(x.cmp(y)),
         (V::Float(x), V::Float(y)) => x.partial_cmp(y),

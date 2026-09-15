@@ -2,10 +2,10 @@ namespace app;
 
 database App : Postgres {
     init() {
-        pool_size         = int(env("DB_POOL") ?? "20");
+        pool_size         = 20;
         statement_timeout = "10s";
         connect_timeout   = "5s";
-        tls               = env("DB_TLS") == "1";
+        tls               = false;
     }
 }
 

@@ -47,15 +47,40 @@ async fn jwc_db_init_with(url_override: Option<String>) {
     let mgr_cfg = deadpool_postgres::ManagerConfig {
         recycling_method: deadpool_postgres::RecyclingMethod::Fast,
     };
+    // `database { init() }`, as declared, with the environment over it —
+    // the order `JWC_PORT` takes over `server { port }`. Both backends read
+    // the same declaration; before this the interpreter and the binary each
+    // had a hardcoded pool size and neither had heard of the block.
+    let mut pg_cfg = pg_cfg;
+    let ms = |name: &str, fallback: u64| -> std::time::Duration {
+        std::time::Duration::from_millis(
+            std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(fallback),
+        )
+    };
+    let statement_ms = ms("JWC_DB_STATEMENT_TIMEOUT_MS", JWC_SOURCE_DB_STATEMENT_TIMEOUT_MS);
+    pg_cfg.options(&format!("-c statement_timeout={}", statement_ms.as_millis()));
+    pg_cfg.connect_timeout(ms("JWC_DB_CONNECT_TIMEOUT_MS", JWC_SOURCE_DB_CONNECT_TIMEOUT_MS));
+    let app_name = std::env::var("JWC_DB_APPLICATION_NAME")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| JWC_SOURCE_DB_APPLICATION_NAME.to_string());
+    if !app_name.is_empty() {
+        pg_cfg.application_name(&app_name);
+    }
+
     let mgr = deadpool_postgres::Manager::from_config(pg_cfg, tokio_postgres::NoTls, mgr_cfg);
-    // Default 64 matches the bundled interpreter's pool tuning; override via
-    // `JWC_DB_POOL_SIZE` for memory-constrained deployments.
     let max_size: usize = std::env::var("JWC_DB_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(64);
+        .filter(|v| *v > 0)
+        .unwrap_or(JWC_SOURCE_DB_POOL_SIZE);
     let pool = deadpool_postgres::Pool::builder(mgr)
         .max_size(max_size)
+        // `wait_timeout` needs a runtime to time out *on*; deadpool refuses
+        // the build without one ("Timeouts require a runtime"). The
+        // interpreter gets this for free from `create_pool(Some(Tokio1))`.
+        .runtime(deadpool_postgres::Runtime::Tokio1)
+        .wait_timeout(Some(ms("JWC_DB_POOL_TIMEOUT_MS", JWC_SOURCE_DB_POOL_TIMEOUT_MS)))
         .build()
         .unwrap_or_else(|e| panic!("setConnectionString: pool build failed: {}", e));
     let _ = DB_POOL.set(pool);
@@ -971,7 +996,7 @@ fn jwc_metrics_body() -> String {
         );
         out.push_str(&format!("jwc_db_pool_available {}\n", st.available));
         out.push_str(
-            "# HELP jwc_db_pool_max_size Ceiling from JWC_DB_POOL_SIZE.\n\
+            "# HELP jwc_db_pool_max_size Ceiling from database { pool_size }, or JWC_DB_POOL_SIZE over it.\n\
              # TYPE jwc_db_pool_max_size gauge\n",
         );
         out.push_str(&format!("jwc_db_pool_max_size {}\n", st.max_size));

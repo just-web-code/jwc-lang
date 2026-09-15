@@ -1,0 +1,55 @@
+/// A join the projection does not name, but the query filters and orders
+/// on.
+///
+/// Emitting a child's JSON is what pulls its `LEFT JOIN` into the FROM
+/// clause, so an `as one` child nobody projected was dropped while the
+/// predicate naming it stayed. The SQL then read `WHERE t1.region = …`
+/// with no `t1`, and Postgres answered `missing FROM-clause entry for
+/// table "t1"` — from a program `jwc check` and `jwc explain` both
+/// accepted.
+namespace unprojected_join;
+
+database App : Postgres;
+schema s of App;
+
+table Orgs of App.s {
+    id     bigint primary key identity;
+    name   varchar(120);
+    region varchar(20)?;
+}
+
+table Notes of App.s {
+    id     bigint primary key identity;
+    org_id bigint;
+    body   text;
+
+    foreign key (org_id) references App.s.Orgs (id);
+}
+
+service Notes {
+    /// Filtered on the join, projecting nothing from it.
+    function by_region(region: text) {
+        return select N from App.s.Notes
+            left join App.s.Orgs O on O.id == N.org_id as one org
+            where O.region == @region
+            as { N.id, N.body }
+            orderby N.id asc;
+    }
+
+    /// Ordered by the join, projecting nothing from it.
+    function by_org_name() {
+        return select N from App.s.Notes
+            left join App.s.Orgs O on O.id == N.org_id as one org
+            as { N.id }
+            orderby O.name asc, N.id asc;
+    }
+
+    /// Projected as well as filtered — one join, not two.
+    function with_org(region: text) {
+        return select N from App.s.Notes
+            left join App.s.Orgs O on O.id == N.org_id as one org
+            where O.region == @region
+            as { N.id, org: { id, name } }
+            orderby N.id asc;
+    }
+}

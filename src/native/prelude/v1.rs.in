@@ -111,6 +111,30 @@ fn jwc_b_v1_timestamptz(v: V) -> V {
     v_str(jwc_v1_text(&v))
 }
 
+/// Validated, unlike `uuid` and `timestamptz`: a `date` this rejects is one
+/// Postgres would have rejected later, with a fault instead of a sentence.
+fn jwc_b_v1_date(v: V) -> JwcResult {
+    let raw = jwc_v1_text(&v);
+    // `YYYY-MM-DD` as written, or the UTC day of a timestamp — which is how
+    // a `date` is derived from `date.now()` or from `date.today() +
+    // date.days(n)`, both of which widen to `timestamptz`.
+    let parsed = raw.trim().parse::<chrono::NaiveDate>().ok().or_else(|| {
+        raw.trim()
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .ok()
+            .map(|t| t.date_naive())
+    });
+    match parsed {
+        Some(d) => Ok(v_str(d.to_string())),
+        None => Err(JwcThrown {
+            error: "BadRequest",
+            status: 400,
+            message: format!("`{}` is not a date — expected YYYY-MM-DD", raw),
+            body: None,
+        }),
+    }
+}
+
 /// `enum(E, x)` — the type name is not a value, so codegen drops it and
 /// passes only `x` (builtins.md §2).
 fn jwc_b_v1_enum(v: V) -> V {
