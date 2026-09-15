@@ -89,6 +89,15 @@ argument that removed `serve(int(env("PORT")))` in rc.3.
 config.md §2.4 said 20 from the beginning. 64 was a constant in `engine.rs`
 and a second one in the native prelude.
 
+### rustls 0.23.45
+
+`RUSTSEC-2026-0285`: rustls accepted TLS 1.3 handshake messages sent at the
+wrong encryption level when they followed a key-changing message in the same
+record, where RFC 8446 §5.1 requires the connection be terminated. The
+transcript stays authenticated, so a handshake cannot be altered or completed
+by it. It is in the shipped binary — `jwc` reaches rustls directly and through
+lettre, redis and reqwest — so this is a lockfile bump, not a triage entry.
+
 ### Known
 
 `bigint + bigint` where both sides come from columns is `Text + Text` to the
