@@ -1028,11 +1028,38 @@ impl<'a> Builder<'a> {
         ];
         // config.md §2.3 — `init()` runs before any connection is opened,
         // so a query there is circular and I/O is a surprise at boot.
-        const ALLOWED: [&str; 6] = ["env", "int", "bigint", "boolean", "text", "numeric"];
+        const ALLOWED: [&str; 5] = ["int", "bigint", "boolean", "text", "numeric"];
         for a in &db.init {
             let mut calls = Vec::new();
             init_calls(&a.value, &mut calls);
             for (name, span) in calls {
+                // `env()` used to be allowed here and was the documented way
+                // to make a pool size configurable — `int(env("DB_POOL") ??
+                // "20")`. The runtime read none of it: `init()` reached
+                // `jwc fmt` and a key-name check and nothing else, so the
+                // pool took `JWC_DB_POOL_SIZE` or a built-in default and the
+                // declaration was decoration.
+                //
+                // Now the block is read, and the environment reaches these
+                // keys through the `JWC_DB_*` registry — checked at boot,
+                // listed in the generated config table, one name per knob.
+                // A second path through `env()` would be a value the
+                // registry cannot validate and the table cannot show, which
+                // is the argument that retired `serve(int(env("PORT")))`.
+                if name == "env" {
+                    self.err_note(
+                        Loc {
+                            file: loc.file,
+                            span,
+                        },
+                        "E1209",
+                        "`env(...)` inside `init()`".to_string(),
+                        "write the value the source should default to and let \
+                         the matching `JWC_DB_*` variable override it",
+                        "config.md §2.3",
+                    );
+                    continue;
+                }
                 if !ALLOWED.contains(&name.as_str()) {
                     self.err_note(
                         Loc {
@@ -1042,7 +1069,7 @@ impl<'a> Builder<'a> {
                         "E1201",
                         format!("`{name}(...)` inside `init()`"),
                         "`init()` runs before any connection is opened; it may call \
-                         `env()` and the coercions and nothing else",
+                         the coercions and nothing else",
                         "config.md §2.3",
                     );
                 }

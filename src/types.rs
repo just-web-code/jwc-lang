@@ -325,6 +325,10 @@ pub fn arith(op: crate::ast::BinOp, lhs: &Ty, rhs: &Ty) -> Option<Ty> {
             match (a, b) {
                 (Scalar::Timestamptz, Scalar::Timestamptz) => Some(Ty::interval()),
                 (Scalar::Timestamptz, Scalar::Interval) => Some(Ty::timestamptz()),
+                // Mirrors `date + interval`: a `date` on the left of an
+                // interval is midnight UTC on that day, and the result
+                // widens the same way.
+                (Scalar::Date, Scalar::Interval) => Some(Ty::timestamptz()),
                 (Scalar::Date, Scalar::Date) => Some(Ty::interval()),
                 (Scalar::Interval, Scalar::Interval) => Some(Ty::interval()),
                 _ => None,

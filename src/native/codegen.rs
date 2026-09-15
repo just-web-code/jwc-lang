@@ -483,10 +483,13 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // needs it to lower one. Read from the same declaration `serve.rs`
     // reads so the two backends cap at the same number.
     let mut server = crate::exec::ServerConfig::default();
+    let mut db = crate::engine::DbConfig::default();
     for file in &ws.files {
         for decl in &file.program.decls {
-            if let Decl::Server(d) = decl {
-                server = crate::serve::read_server_config(d);
+            match decl {
+                Decl::Server(d) => server = crate::serve::read_server_config(d),
+                Decl::Database(d) => db = crate::serve::read_db_config(d),
+                _ => {}
             }
         }
     }
@@ -534,13 +537,23 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
          const JWC_SOURCE_SOCKET_KEEPALIVE_SECS: u64 = {};\n\
          const JWC_SOURCE_JOB_MAX_PAYLOAD: usize = {};\n\
          const JWC_SOURCE_JOB_QUEUE_LIMIT: usize = {};\n\
-         const JWC_SOURCE_PORT: u16 = {};\n",
+         const JWC_SOURCE_PORT: u16 = {};\n\
+         const JWC_SOURCE_DB_POOL_SIZE: usize = {};\n\
+         const JWC_SOURCE_DB_POOL_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_STATEMENT_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_CONNECT_TIMEOUT_MS: u64 = {};\n\
+         const JWC_SOURCE_DB_APPLICATION_NAME: &str = {};\n",
         server.max_body_bytes,
         server.max_sockets,
         server.socket_keepalive.as_secs(),
         server.job_max_payload,
         server.job_queue_limit,
-        server.port
+        server.port,
+        db.pool_size,
+        db.pool_timeout.as_millis(),
+        db.statement_timeout.as_millis(),
+        db.connect_timeout.as_millis(),
+        rust_str_literal(db.application_name.as_deref().unwrap_or(""))
     ));
 
     // The reference, rendered here rather than in the binary: the document

@@ -99,12 +99,64 @@ pub fn scrub_database_url(url: &str) -> String {
     format!("{}{}{}", &url[..after_scheme], masked_userinfo, after_at)
 }
 
+/// The `database { init() }` block, as the runtime sees it.
+///
+/// It did not see it at all before. `init()` was read by `jwc fmt`, to
+/// print it, and by a key-name check, to catch a typo — and by nothing
+/// else. A program that declared `pool_size = 20` ran on a pool of 64, and
+/// `statement_timeout`, `connect_timeout`, `pool_timeout`,
+/// `application_name` and `tls_root_cert` reached no connection at all.
+/// config.md §2.4 documented defaults the runtime had never heard of.
+#[derive(Clone, Debug)]
+pub struct DbConfig {
+    pub pool_size: usize,
+    pub pool_timeout: Duration,
+    pub statement_timeout: Duration,
+    pub connect_timeout: Duration,
+    pub tls: bool,
+    pub tls_root_cert: Option<String>,
+    pub application_name: Option<String>,
+}
+
+impl Default for DbConfig {
+    /// config.md §2.4.
+    fn default() -> Self {
+        Self {
+            pool_size: 20,
+            pool_timeout: Duration::from_secs(5),
+            statement_timeout: Duration::from_secs(10),
+            connect_timeout: Duration::from_secs(5),
+            tls: false,
+            tls_root_cert: None,
+            application_name: None,
+        }
+    }
+}
+
+/// Set once, at load, from the program's own `database` declaration.
+static DECLARED: OnceLock<DbConfig> = OnceLock::new();
+
+/// Install the declared configuration. Called when a program is loaded,
+/// which is before any handler can run and therefore before the pool is
+/// built — the pool is lazy and the first query is what creates it.
+pub fn configure(c: DbConfig) {
+    let _ = DECLARED.set(c);
+}
+
+pub fn declared() -> DbConfig {
+    DECLARED.get().cloned().unwrap_or_default()
+}
+
+/// `JWC_DB_POOL_SIZE` over `database { pool_size }` over the documented
+/// default, which is the same order `JWC_PORT` takes over
+/// `server { port }`: the environment is where a deployment differs from
+/// the source, and the source is where the default the author chose lives.
 fn parse_pool_size() -> usize {
     std::env::var("JWC_DB_POOL_SIZE")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|v| *v > 0)
-        .unwrap_or(64)
+        .unwrap_or_else(|| declared().pool_size)
 }
 
 /// **Sprint 4 #21 / #23** — retry ceiling for transient DB failures.
@@ -146,7 +198,7 @@ fn parse_bool_flag(raw: &str) -> bool {
 pub fn should_use_tls() -> bool {
     std::env::var("JWC_DB_TLS")
         .map(|v| parse_bool_flag(&v))
-        .unwrap_or(false)
+        .unwrap_or_else(|_| declared().tls)
 }
 
 /// Returns `true` when `JWC_DB_TLS_INSECURE_SKIP_VERIFY` is truthy. Only
@@ -163,6 +215,19 @@ fn build_tls_connector() -> Result<MakeTlsConnector> {
     if should_skip_tls_verify() {
         builder.danger_accept_invalid_certs(true);
         builder.danger_accept_invalid_hostnames(true);
+    }
+    // `JWC_DB_TLS_ROOT_CERT` over `database { tls_root_cert }`, the same
+    // order every other key takes.
+    let root = std::env::var("JWC_DB_TLS_ROOT_CERT")
+        .ok()
+        .filter(|p| !p.is_empty())
+        .or_else(|| declared().tls_root_cert);
+    if let Some(path) = root {
+        let pem = std::fs::read(&path)
+            .with_context(|| format!("Failed to read tls_root_cert at {path}"))?;
+        let cert = native_tls::Certificate::from_pem(&pem)
+            .with_context(|| format!("{path} is not a PEM certificate"))?;
+        builder.add_root_certificate(cert);
     }
     let connector = builder
         .build()
@@ -213,8 +278,38 @@ fn build_pool(database_url: &str) -> Result<Pool> {
         recycling_method: RecyclingMethod::Fast,
     });
 
+    let declared = declared();
+
+    // Each knob: the environment, then the declaration, then the documented
+    // default — the order `JWC_PORT` takes over `server { port }`.
+    let ms = |name: &str, fallback: Duration| -> Duration {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(fallback)
+    };
+    let pool_timeout = ms("JWC_DB_POOL_TIMEOUT_MS", declared.pool_timeout);
+    let statement_timeout = ms("JWC_DB_STATEMENT_TIMEOUT_MS", declared.statement_timeout);
+    let connect_timeout = ms("JWC_DB_CONNECT_TIMEOUT_MS", declared.connect_timeout);
+    let application_name = std::env::var("JWC_DB_APPLICATION_NAME")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| declared.application_name.clone());
+
+    // `statement_timeout` rides in as a libpq-style connection option
+    // rather than a `SET` on a post-create hook: the option is applied by
+    // the server as the session opens, so there is no window in which a
+    // recycled connection is holding the pool's default instead.
+    let statement_ms = statement_timeout.as_millis();
+    cfg.options = Some(format!("-c statement_timeout={statement_ms}"));
+    cfg.connect_timeout = Some(connect_timeout);
+    cfg.application_name = application_name;
+
     let max_size = parse_pool_size();
-    cfg.pool = Some(deadpool_postgres::PoolConfig::new(max_size));
+    let mut pool_cfg = deadpool_postgres::PoolConfig::new(max_size);
+    pool_cfg.timeouts.wait = Some(pool_timeout);
+    cfg.pool = Some(pool_cfg);
 
     let pool = if should_use_tls() {
         let connector = build_tls_connector()?;

@@ -653,9 +653,23 @@ impl<'a> Vm<'a> {
             // wire form a `date` column already answers with.
             "date" => {
                 let raw = s(0);
-                match raw.trim().parse::<chrono::NaiveDate>() {
-                    Ok(d) => Value::Text(d.to_string()),
-                    Err(_) => {
+                // `YYYY-MM-DD` as written, or the UTC day of a timestamp —
+                // which is how a `date` is derived from `date.now()` or from
+                // `date.today() + date.days(n)`, both of which widen to
+                // `timestamptz` (types.md §12.1).
+                let parsed = raw
+                    .trim()
+                    .parse::<chrono::NaiveDate>()
+                    .ok()
+                    .or_else(|| {
+                        raw.trim()
+                            .parse::<chrono::DateTime<chrono::Utc>>()
+                            .ok()
+                            .map(|t| t.date_naive())
+                    });
+                match parsed {
+                    Some(d) => Value::Text(d.to_string()),
+                    None => {
                         return Err(Abort::Thrown(Thrown {
                             error: "BadRequest".into(),
                             args: vec![Value::Text(format!(

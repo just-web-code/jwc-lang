@@ -21,9 +21,9 @@ Nothing that differs between staging and production is written in source.
 ```jwc
 database App : Postgres {
     init() {
-        pool_size         = int(env("DB_POOL") ?? "20");
+        pool_size         = 20;
         statement_timeout = "10s";
-        tls               = env("DB_TLS") == "1";
+        tls               = false;
     }
 }
 ```
@@ -37,9 +37,37 @@ Declaring a database name would put an environment value in source
 would require a dialect abstraction, which is a declared non-goal
 (ROADMAP §8).
 
-2.3 `init()` runs once at boot, before any connection is opened. It may call
-`env()` and the coercions and nothing else — no queries, no I/O
-(`E1201`).
+2.3 `init()` runs once at boot, before any connection is opened. Every value
+is a literal or a coercion of one — no queries, no I/O (`E1201`), and no
+`env()` (`E1209`).
+
+`env()` was allowed here and was the documented way to make a pool size
+configurable. Nothing read it: `init()` reached `jwc fmt`, to print it, and
+a key-name check, to catch a typo, and no further — so a program declaring
+`pool_size = 20` ran on a pool of 64 and the other six keys reached no
+connection at all. The block is read now, and the environment reaches it
+through the `JWC_DB_*` variables below, which are validated at boot and
+listed in the generated configuration table. A second path through `env()`
+would be a value neither of those can see, which is the argument that
+retired `serve(int(env("PORT")))`.
+
+2.3.1 Each key takes its value from the environment first, then the
+declaration, then the default — the order `JWC_PORT` takes over
+`server { port }`:
+
+| Key | Environment |
+|---|---|
+| `pool_size` | `JWC_DB_POOL_SIZE` |
+| `pool_timeout` | `JWC_DB_POOL_TIMEOUT_MS` |
+| `statement_timeout` | `JWC_DB_STATEMENT_TIMEOUT_MS` |
+| `connect_timeout` | `JWC_DB_CONNECT_TIMEOUT_MS` |
+| `tls` | `JWC_DB_TLS` |
+| `tls_root_cert` | `JWC_DB_TLS_ROOT_CERT` |
+| `application_name` | `JWC_DB_APPLICATION_NAME` |
+
+`statement_timeout` is applied as a libpq connection option rather than a
+`SET` after connecting, so there is no window in which a recycled
+connection holds the server's default instead.
 
 2.4 Keys:
 
@@ -51,7 +79,7 @@ would require a dialect abstraction, which is a declared non-goal
 | `connect_timeout` | duration | `5s` |
 | `tls` | `boolean` | false |
 | `tls_root_cert` | `text?` | none |
-| `application_name` | `text` | the project name |
+| `application_name` | `text` | none |
 
 An unknown key is `E1202`. Duration values are strings: `10s`, `500ms`,
 `2m`.
@@ -446,3 +474,4 @@ under `jwc serve` and could not be built.
 | `E1206` | unknown `server { }` key, or unknown key inside its `cors` / `tls` / `headers` block |
 | `E1207` | `cors { origins = ["*"] }` together with `credentials = true` |
 | `E1208` | `port` is not an integer literal |
+| `E1209` | `env(...)` inside `init()` |

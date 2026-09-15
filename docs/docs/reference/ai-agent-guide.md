@@ -97,7 +97,7 @@ namespace app;
 
 database App : Postgres {
     init() {
-        pool_size         = int(env("DB_POOL") ?? "20");
+        pool_size         = 20;
         statement_timeout = "10s";
     }
 }

@@ -111,14 +111,44 @@ pub const REGISTRY: &[EnvVar] = &[
     EnvVar {
         name: "JWC_DB_POOL_SIZE",
         parse_kind: ParseKind::Usize,
-        default: "64",
-        doc: "Max connections in the deadpool-postgres pool.",
+        default: "20",
+        doc: "Max connections in the pool. `database { pool_size }` sets it; this overrides.",
+    },
+    EnvVar {
+        name: "JWC_DB_POOL_TIMEOUT_MS",
+        parse_kind: ParseKind::DurationMs,
+        default: "5000",
+        doc: "Wait for a free connection before failing. `database { pool_timeout }` sets it; this overrides.",
+    },
+    EnvVar {
+        name: "JWC_DB_STATEMENT_TIMEOUT_MS",
+        parse_kind: ParseKind::DurationMs,
+        default: "10000",
+        doc: "Server-side ceiling on one statement. `database { statement_timeout }` sets it; this overrides.",
+    },
+    EnvVar {
+        name: "JWC_DB_CONNECT_TIMEOUT_MS",
+        parse_kind: ParseKind::DurationMs,
+        default: "5000",
+        doc: "How long opening a connection may take. `database { connect_timeout }` sets it; this overrides.",
+    },
+    EnvVar {
+        name: "JWC_DB_APPLICATION_NAME",
+        parse_kind: ParseKind::Str,
+        default: "",
+        doc: "`application_name` per connection, in pg_stat_activity. `database { application_name }` sets it; this overrides.",
+    },
+    EnvVar {
+        name: "JWC_DB_TLS_ROOT_CERT",
+        parse_kind: ParseKind::Str,
+        default: "",
+        doc: "PEM root cert for the Postgres TLS connection. `database { tls_root_cert }` sets it; this overrides.",
     },
     EnvVar {
         name: "JWC_DB_TLS",
         parse_kind: ParseKind::Bool,
         default: "false",
-        doc: "Connect to Postgres over TLS via tokio-postgres-rustls.",
+        doc: "Connect to Postgres over TLS. `database { tls }` sets it; this overrides.",
     },
     EnvVar {
         name: "JWC_DB_TLS_INSECURE_SKIP_VERIFY",
@@ -781,7 +811,7 @@ mod tests {
             .find(|r| r.name == "JWC_DB_POOL_SIZE")
             .expect("row");
         assert_eq!(row.source, Source::Default);
-        assert_eq!(row.parsed, "64");
+        assert_eq!(row.parsed, "20");
         assert!(row.error.is_none());
     }
 

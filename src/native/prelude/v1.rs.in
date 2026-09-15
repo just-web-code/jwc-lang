@@ -115,9 +115,18 @@ fn jwc_b_v1_timestamptz(v: V) -> V {
 /// Postgres would have rejected later, with a fault instead of a sentence.
 fn jwc_b_v1_date(v: V) -> JwcResult {
     let raw = jwc_v1_text(&v);
-    match raw.trim().parse::<chrono::NaiveDate>() {
-        Ok(d) => Ok(v_str(d.to_string())),
-        Err(_) => Err(JwcThrown {
+    // `YYYY-MM-DD` as written, or the UTC day of a timestamp — which is how
+    // a `date` is derived from `date.now()` or from `date.today() +
+    // date.days(n)`, both of which widen to `timestamptz`.
+    let parsed = raw.trim().parse::<chrono::NaiveDate>().ok().or_else(|| {
+        raw.trim()
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .ok()
+            .map(|t| t.date_naive())
+    });
+    match parsed {
+        Some(d) => Ok(v_str(d.to_string())),
+        None => Err(JwcThrown {
             error: "BadRequest",
             status: 400,
             message: format!("`{}` is not a date — expected YYYY-MM-DD", raw),

@@ -166,7 +166,7 @@ Now the honest accounting.
 
 Line cost: roughly +75 lines across routes (they grow ~34%) and +62 in services, ~140 lines on a ~660-line logic layer — **a 21% increase, none of it domain logic.** And note `err`, `err2`, `berr`, `ierr`, `uerr`: DESIGN.md's style rule is *"Name every intermediate value with `let`"*, and JWC has no shadowing story, so the error variables are forced to be numbered. That is not an aesthetic complaint; it is the mechanism by which the wrong `err` gets checked twice and the right one never.
 
-**Structural cost the line count hides:** multi-value return is not a local addition. It splits every call into fallible and infallible, and a fallible call can no longer appear in expression position. `int(env("DB_POOL") ?? "20")`, `days(trial_days)`, the ternaries, `??` — all of these assume single-value calls. Go-style makes the grammar bifurcate.
+**Structural cost the line count hides:** multi-value return is not a local addition. It splits every call into fallible and infallible, and a fallible call can no longer appear in expression position. `int(env("JWT_TTL_MINUTES") ?? "60")`, `days(trial_days)`, the ternaries, `??` — all of these assume single-value calls. Go-style makes the grammar bifurcate.
 
 **Where the Go camp is genuinely right, and I will not wave it away:** the 40-of-41 count holds *because the sample app is CRUD*. The first retry, the first fallback, the first bulk import that must continue past a bad row needs a branch — and the current design cannot express one at all (G6). That is a real hole. It is just not a hole that multi-value return is the right patch for.
 
@@ -283,9 +283,9 @@ namespace app;
 
 database App : Postgres {
     init() {
-        pool_size         = int(env("DB_POOL") ?? "20");
+        pool_size         = 20;
         statement_timeout = "10s";
-        tls               = env("DB_TLS") == "1";
+        tls               = false;
     }
 }
 

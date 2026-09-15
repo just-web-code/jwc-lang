@@ -143,6 +143,10 @@ pub fn load(ws: &Workspace) -> Result<Program> {
                     jobs.insert(j.name.name.clone(), j.clone());
                 }
                 Decl::Server(s) => server = read_server_config(s),
+                // Installed at load, which is before any handler runs and
+                // therefore before the pool is built — it is lazy, and the
+                // first query is what creates it.
+                Decl::Database(d) => crate::engine::configure(read_db_config(d)),
                 Decl::Routes(block) => {
                     for r in &block.routes {
                         let pattern = pattern_of(&block.prefix, &r.suffix);
@@ -217,6 +221,62 @@ fn pattern_of(prefix: &str, suffix: &str) -> String {
         suffix.trim_start_matches('/')
     ));
     crate::wiring::render(&segments)
+}
+
+/// The `database { init() }` block, read the same way `server { }` is.
+///
+/// Every value is a literal. `env()` inside `init()` is `E1209`: the
+/// environment reaches these keys through the `JWC_DB_*` registry, which
+/// is checked at boot and listed in the generated config table, and a
+/// second path through `env("DB_POOL")` was one the runtime never read
+/// anyway.
+pub(crate) fn read_db_config(d: &DatabaseDecl) -> crate::engine::DbConfig {
+    let mut c = crate::engine::DbConfig::default();
+    for a in &d.init {
+        match a.key.name.as_str() {
+            "pool_size" => {
+                if let ExprKind::Int(n) = &*a.value.kind {
+                    if let Ok(v) = n.parse::<usize>() {
+                        if v > 0 {
+                            c.pool_size = v;
+                        }
+                    }
+                }
+            }
+            "pool_timeout" => {
+                if let Some(v) = config_duration(&a.value) {
+                    c.pool_timeout = v;
+                }
+            }
+            "statement_timeout" => {
+                if let Some(v) = config_duration(&a.value) {
+                    c.statement_timeout = v;
+                }
+            }
+            "connect_timeout" => {
+                if let Some(v) = config_duration(&a.value) {
+                    c.connect_timeout = v;
+                }
+            }
+            "tls" => {
+                if let ExprKind::Bool(b) = &*a.value.kind {
+                    c.tls = *b;
+                }
+            }
+            "tls_root_cert" => {
+                if let ExprKind::Str(v) = &*a.value.kind {
+                    c.tls_root_cert = Some(v.clone());
+                }
+            }
+            "application_name" => {
+                if let ExprKind::Str(v) = &*a.value.kind {
+                    c.application_name = Some(v.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    c
 }
 
 pub(crate) fn read_server_config(s: &ServerDecl) -> ServerConfig {
@@ -784,7 +844,7 @@ async fn metrics_text(program: &Program) -> String {
         );
         out.push_str(&format!("jwc_db_pool_available {}\n", s.available));
         out.push_str(
-            "# HELP jwc_db_pool_max_size Ceiling from JWC_DB_POOL_SIZE.\n\
+            "# HELP jwc_db_pool_max_size Ceiling from database { pool_size }, or JWC_DB_POOL_SIZE over it.\n\
              # TYPE jwc_db_pool_max_size gauge\n",
         );
         out.push_str(&format!("jwc_db_pool_max_size {}\n", s.max_size));
