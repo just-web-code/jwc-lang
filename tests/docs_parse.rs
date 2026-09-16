@@ -309,6 +309,92 @@ fn check_page(page: &str) {
 /// yields nothing here. That makes this safe to run over every fence,
 /// which is the point — the blocks nothing else checks are exactly the
 /// blocks that rot.
+/// The sources a snippet names but does not declare, as declarations.
+///
+/// `check::select` returns on `E0502` (unknown source) before it ever
+/// visits the query's fields, so a snippet that queries `App.notes.Notes`
+/// without declaring it is skipped rather than checked — which is how
+/// `docs/docs/data/writes.md` kept a bare `as { id, title, updated_at }`
+/// even after the tutorial's was found. The columns do not matter: the
+/// projection's binding rule fires on the qualifier alone, before any
+/// column lookup. Only reaching the projection does.
+fn synthesized_sources(src: &str) -> String {
+    let mut dbs: Vec<String> = Vec::new();
+    let mut schemas: Vec<(String, String)> = Vec::new();
+    let mut tables: Vec<(String, String, String)> = Vec::new();
+
+    for (i, _) in src.match_indices('.') {
+        let before = &src[..i];
+        let after = &src[i + 1..];
+        let db: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let rest: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.')
+            .collect();
+        let parts: Vec<&str> = rest.split('.').collect();
+        if db.is_empty() || parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+            continue;
+        }
+        if !db.chars().next().is_some_and(|c| c.is_uppercase()) {
+            continue;
+        }
+        if !parts[1].chars().next().is_some_and(|c| c.is_uppercase()) {
+            continue;
+        }
+        let (sch, tab) = (parts[0].to_string(), parts[1].to_string());
+        if !src.contains(&format!("database {db}")) && !dbs.contains(&db) {
+            dbs.push(db.clone());
+        }
+        if !src.contains(&format!("schema {sch} of"))
+            && !schemas.contains(&(db.clone(), sch.clone()))
+        {
+            schemas.push((db.clone(), sch.clone()));
+        }
+        if !src.contains(&format!("table {tab} of"))
+            && !src.contains(&format!("view {tab} of"))
+            && !tables.contains(&(db.clone(), sch.clone(), tab.clone()))
+        {
+            tables.push((db, sch, tab));
+        }
+    }
+
+    let mut out = String::new();
+    for db in &dbs {
+        out.push_str(&format!("database {db} : Postgres;\n"));
+    }
+    for (db, sch) in &schemas {
+        out.push_str(&format!("schema {sch} of {db};\n"));
+    }
+    for (db, sch, tab) in &tables {
+        out.push_str(&format!(
+            "table {tab} of {db}.{sch} {{ id bigint primary key identity; }}\n"
+        ));
+    }
+    out
+}
+
+/// Every jwc block in the docs, `no-compile` included, is scanned for a
+/// column that does not name its binding.
+///
+/// `every_documented_jwc_example_parses` above only parses, and a bare
+/// column parses perfectly — `E0904` is a resolver error. So when rc.3 made
+/// every column name its binding, the tutorial's queries stayed as they
+/// were and nothing went red; three releases later the first page a reader
+/// meets still showed `where slug == @slug`. The `no-compile` fence, which
+/// exists for excerpts with elisions, had quietly become a place where code
+/// was never checked at all.
+///
+/// A fragment cannot produce `E0904`: it has to resolve before the binding
+/// rule is reached, so a block that fails to parse simply yields nothing
+/// here. That makes this safe to run over every fence, which is the point —
+/// the blocks nothing else checks are exactly the blocks that rot.
 #[test]
 fn every_documented_column_names_its_binding() {
     const HEADER: &str = concat!(
@@ -318,6 +404,7 @@ fn every_documented_column_names_its_binding() {
     );
     let root = repo_root();
     let mut bare: Vec<String> = Vec::new();
+    let mut resolved = 0usize;
 
     for file in markdown_files() {
         let Ok(text) = std::fs::read_to_string(&file) else {
@@ -341,10 +428,15 @@ fn every_documented_column_names_its_binding() {
             .map(|(_, b)| b.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let mut sources = vec![joined.clone(), format!("{HEADER}{joined}\n")];
+        let mut sources = vec![
+            joined.clone(),
+            format!("{HEADER}{joined}\n"),
+            format!("{}{joined}\n", synthesized_sources(&joined)),
+        ];
         for (_, body) in &blocks {
             sources.push(body.clone());
             sources.push(format!("{HEADER}{body}\n"));
+            sources.push(format!("{}{body}\n", synthesized_sources(body)));
             sources.push(format!("{HEADER}function f() {{\n{body}\n}}\n"));
             sources.push(format!(
                 "{HEADER}service S {{\nfunction f() {{\n{body}\n}}\n}}\n"
@@ -361,14 +453,27 @@ fn every_documented_column_names_its_binding() {
             if ws.has_parse_errors() {
                 continue;
             }
+            resolved += 1;
             let built = jwc::model::build(&ws);
             let sym = jwc::symbols::build(&ws, &built.model);
             let out = jwc::check::check(&ws, &sym, &built.model);
-            for (_, d) in built.diags.iter().chain(&sym.diags).chain(&out.diags) {
+            for (loc, d) in built.diags.iter().chain(&sym.diags).chain(&out.diags) {
                 if d.code != "E0904" && d.code != "E0905" {
                     continue;
                 }
-                let hit = format!("{}: {}", d.code, d.message);
+                // The span points into the synthesized program, not the
+                // page, so quote the offending line — that is what makes
+                // the failure findable in the markdown.
+                let at = (loc.span.start as usize).min(src.len());
+                let line = src[..at]
+                    .lines()
+                    .next_back()
+                    .map(|l| {
+                        let rest: &str = src[at..].lines().next().unwrap_or("");
+                        format!("{l}{rest}").trim().to_string()
+                    })
+                    .unwrap_or_default();
+                let hit = format!("{}: {} — `{line}`", d.code, d.message);
                 if !seen.contains(&hit) {
                     seen.push(hit);
                 }
@@ -379,6 +484,14 @@ fn every_documented_column_names_its_binding() {
         }
     }
 
+    // A floor, not a target: without it a fence scanner that stops matching
+    // makes this pass by checking nothing, which is the failure mode the
+    // guard exists to prevent.
+    assert!(
+        resolved > 50,
+        "expected the documented examples to resolve, saw {resolved} — the \
+         block scanner or the fences changed"
+    );
     assert!(
         bare.is_empty(),
         "{} documented example(s) use a column that does not name its \
@@ -404,6 +517,7 @@ fn every_documented_manifest_names_this_release() {
     let root = repo_root();
     let mine = env!("CARGO_PKG_VERSION");
     let mut stale: Vec<String> = Vec::new();
+    let mut found = 0usize;
 
     for file in markdown_files() {
         let Ok(text) = std::fs::read_to_string(&file) else {
@@ -413,11 +527,18 @@ fn every_documented_manifest_names_this_release() {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
                 continue;
             };
-            // `entry` is what makes it a project manifest rather than some
-            // other JSON on the page.
-            if v.get("entry").is_none() {
+            // A package manifest has no `entry` — it is imported, not
+            // deployed — so requiring one skipped `packages.md`'s
+            // `"type": "pkg"` example entirely. `name` + `version` with
+            // either marker is what distinguishes a manifest from the other
+            // JSON on these pages.
+            let is_manifest = v.get("name").is_some()
+                && v.get("version").is_some()
+                && (v.get("entry").is_some() || v.get("type").is_some());
+            if !is_manifest {
                 continue;
             }
+            found += 1;
             let rel: &Path = file.strip_prefix(&root).unwrap_or(&file);
             match v.get("jwc").and_then(|j| j.as_str()) {
                 Some(got) if got == mine => {}
@@ -427,6 +548,13 @@ fn every_documented_manifest_names_this_release() {
         }
     }
 
+    // Without a floor, a fence scanner that stops matching makes this pass
+    // by checking nothing.
+    assert!(
+        found >= 4,
+        "expected the documented manifests, saw {found} — the json fence \
+         scanner or the manifest shape changed"
+    );
     assert!(
         stale.is_empty(),
         "{} documented manifest(s) do not name {mine}. They move with \

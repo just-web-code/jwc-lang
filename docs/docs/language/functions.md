@@ -27,7 +27,7 @@ service OrgService {
     function create(req: OrgCreate, owner_id: bigint) {
         transaction {
             let org = insert Orgs into App.org.Orgs { ...@req }
-                as { id, slug, name, created_at };
+                as { Orgs.id, Orgs.slug, Orgs.name, Orgs.created_at };
 
             insert Members into App.org.Members {
                 org_id     = @org.id,
@@ -41,8 +41,8 @@ service OrgService {
 
     function detail(org_id: bigint) {
         return select O from App.org.Orgs
-            where id == @org_id
-            as { id, slug, name }
+            where O.id == @org_id
+            as { O.id, O.slug, O.name }
             first or throw NotFound("organisation not found");
     }
 }

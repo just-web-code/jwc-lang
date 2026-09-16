@@ -12,7 +12,7 @@ what the runtime guarantees.
 ```jwc no-compile
 job SendWelcome(account_id: bigint, email: text) retries 5 backoff "30s" {
     let account = select A from App.auth.Accounts
-        where id == @account_id
+        where A.id == @account_id
         first or throw NotFound("akkaunt topilmadi");
 
     mail.send(@email, "Welcome", "<p>salom</p>");

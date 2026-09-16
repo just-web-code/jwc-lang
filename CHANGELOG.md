@@ -28,6 +28,25 @@ no such identity and keeps `ctid`.
 Found from a TechEmpower-style `/updates` run at 64 concurrency, where it
 read as 195,733 HTTP 404s.
 
+The guarantee is exactly that the key survives *this* write. `set` may
+assign a key column, so a writer that changes the key while the lock waits
+still loses the row — now confined to schemas that renumber their own keys
+rather than every concurrent write. `DEFERRED-20` records the question of
+making a primary key immutable.
+
+### A renamed column named the wrong thing in its own constraints
+
+`as "name"` was applied in the same pass that reads the physical name, so
+which name a constraint got depended on where the author put the rename.
+`id bigint primary key as "legacy_id"` emitted `PRIMARY KEY (id)` beside a
+column called `legacy_id`, and `unique` and `pattern` did the same:
+
+    ERROR:  column "id" named in key does not exist
+
+`jwc check` called the schema fine and the DDL would not apply. The rename
+now resolves before the other modifiers, so their order stops mattering.
+`update … first` reaches the same metadata, which is how it surfaced.
+
 ### The tutorial's queries, and three manifests
 
 `docs/docs/tutorial/index.md` still wrote every column bare — `where slug ==
