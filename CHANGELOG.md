@@ -3,7 +3,7 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.5] — freeze candidate — 2026-09-16
 
 ### BREAKING: a column names its binding inside a nested shape too
 
@@ -5070,7 +5070,7 @@ wins note on the native-build page, response-phase `after { ... }`
 section on the README + middleware doc, seven-step "shipping a new
 builtin" recipe in CONTRIBUTING.md.
 
-## [Unreleased]
+## [1.0.0-rc.5] — freeze candidate — 2026-09-16
 
 ### Added
 - **W3C `traceparent` propagation.** When an upstream service sends

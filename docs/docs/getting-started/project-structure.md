@@ -16,7 +16,7 @@ tree is compiled together; there is no build order to declare.
   "name": "shop",
   "type": "app",
   "version": "0.1.0",
-  "jwc": "1.0.0-rc.4",
+  "jwc": "1.0.0-rc.5",
   "entry": "src/app.jwc",
   "dependencies": {
     "redis": "^0.2.0"
@@ -36,15 +36,15 @@ A bare version means exactly that version. While the 1.0 candidates are
 running that is usually what you want — `rc.N` and `rc.N+1` promise
 nothing to each other. A range works too, but by the ordinary semver rule
 a range that names no pre-release never matches one: `^1.0` does not
-admit `1.0.0-rc.4`, while `^1.0.0-rc.1` does.
+admit `1.0.0-rc.5`, while `^1.0.0-rc.1` does.
 
 ```console
 $ jwc check
-Error: this is jwc 1.0.0-rc.4, and ./jwcproj.json says the project is
-written for `1.0.0-rc.3`.
+Error: this is jwc 1.0.0-rc.5, and ./jwcproj.json says the project is
+written for `1.0.0-rc.4`.
 
 Install the version it asks for, or — once the source has been moved to
-this one — change `jwc` in that file to `1.0.0-rc.4`. Diagnostics from
+this one — change `jwc` in that file to `1.0.0-rc.5`. Diagnostics from
 the wrong compiler read as though they were about the code.
 ```
 
