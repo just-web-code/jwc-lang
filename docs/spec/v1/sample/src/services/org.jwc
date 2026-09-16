@@ -64,7 +64,7 @@ service OrgService {
                 M.account_id,
                 M.role,
                 M.joined_at,
-                account: { id, email, display_name }
+                account: { A.id, A.email, A.display_name }
             }
             orderby M.joined_at asc;
     }

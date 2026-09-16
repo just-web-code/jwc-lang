@@ -37,7 +37,7 @@ view InvoiceDetail of App.s {
     select I from App.s.Invoices
         left join App.s.Lines L on L.invoice_id == I.id
             as many lines orderby id asc limit 50
-        as { I.id, I.org_id, I.number, I.issued_at, lines: { id, body } }
+        as { I.id, I.org_id, I.number, I.issued_at, lines: { L.id, L.body } }
 }
 
 service Invoices {
@@ -57,7 +57,7 @@ service Invoices {
             left join App.s.Lines L on L.invoice_id == I.id
                 as many lines orderby id asc limit 50
             where I.org_id == @org_id
-            as { I.id, I.number, I.issued_at, lines: { id, body } }
+            as { I.id, I.number, I.issued_at, lines: { L.id, L.body } }
             orderby I.issued_at desc, I.id desc
             limit @size;
     }
@@ -90,7 +90,7 @@ view InvoiceWithOrg of App.s {
         left join App.s.Orgs O on O.id == I.org_id as one org
         left join App.s.Lines L on L.invoice_id == I.id
             as many lines under I orderby id asc limit 50
-        as { I.id, I.org_id, I.number, I.issued_at, org: { id, name }, lines: { id, body } }
+        as { I.id, I.org_id, I.number, I.issued_at, org: { O.id, O.name }, lines: { L.id, L.body } }
 }
 
 service ByOrgName {

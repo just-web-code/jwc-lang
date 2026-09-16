@@ -13,12 +13,29 @@ A project is described by `jwcproj.json` at its root:
   "name": "redis",
   "version": "0.1.0",
   "type": "pkg",
+  "jwc": "1.0.0-rc.4",
   "dependencies": { "redis": "^0.1.0" }
 }
 ```
 
 1.1 `type` is `"app"` (the default) or `"pkg"`. An app is deployed; a
 package is imported.
+
+1.1.1 `jwc` is the release of the language the source is written for. A
+compiler that does not satisfy it refuses the project — `check`, `fmt`,
+`run`, `serve`, `build`, `test` and the rest alike — naming both versions
+and the manifest that holds the field. The field is optional; a project
+that does not say is not asked.
+
+A bare version means **exactly** that version, as it does for a
+dependency (§1.3): `rc.N` and `rc.N+1` carry whatever review turned up
+and promise nothing to each other, so "close enough" is not a useful
+default for the one field whose job is to catch the gap. A range says so
+out loud, and — by the ordinary semver rule — a range that names no
+pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.4`
+while `^1.0.0-rc.1` does. `"*"` is any version.
+
+`jwc new` records the release it scaffolded from.
 
 1.2 A package name matches `^[a-z][a-z0-9_-]{0,63}$` **and must also be a
 legal identifier**, because `import redis;` puts the name in the source.

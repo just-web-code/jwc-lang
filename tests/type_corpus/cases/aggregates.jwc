@@ -30,7 +30,7 @@ service Aggs {
             left join App.s.Members M on M.org_id == O.id
                 as many members orderby account_id asc limit 200
             group by O.id
-            as { O.id, n: count(N.id), members: { account_id } };          // expect: E0531
+            as { O.id, n: count(N.id), members: { M.account_id } };          // expect: E0531
     }
 }
 

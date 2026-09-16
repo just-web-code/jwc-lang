@@ -24,7 +24,7 @@ service Rosters {
     function by_org_name() {
         return select M from App.s.Members
             left join App.s.Orgs O on O.id == M.org_id as one org
-            as { M.account_id, org: { id, name } }
+            as { M.account_id, org: { O.id, O.name } }
             orderby org.name asc, M.id asc;
     }
 
@@ -32,7 +32,7 @@ service Rosters {
     function by_binding_name() {
         return select M from App.s.Members
             left join App.s.Orgs O on O.id == M.org_id as one org
-            as { M.account_id, org: { id, name } }
+            as { M.account_id, org: { O.id, O.name } }
             orderby O.name asc, M.id asc;
     }
 }

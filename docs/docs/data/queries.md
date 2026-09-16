@@ -63,9 +63,9 @@ cannot be named.
 
 ```jwc no-compile
 select O from App.org.Orgs
-    left join App.org.Members M on M.org_id == O.id as many members orderby joined_at asc limit 200
+    left join App.org.Members M on M.org_id == O.id as many members orderby M.joined_at asc limit 200
     left join App.auth.Accounts A on A.id == M.account_id as one account under members
-    as { id, name, members: { role, account: { id, email } } }
+    as { O.id, O.name, members: { M.role, account: { A.id, A.email } } }
 ```
 
 Three results, and every join picks one:
@@ -139,8 +139,8 @@ selects from a table.
 view OrgList of App.org {
     select O from App.org.Orgs
         left join App.org.Members M on M.org_id == O.id
-            as many members orderby account_id asc limit 200
-        as { id, slug, name, members: { account_id, role } }
+            as many members orderby M.account_id asc limit 200
+        as { O.id, O.slug, O.name, members: { M.account_id, M.role } }
 }
 ```
 

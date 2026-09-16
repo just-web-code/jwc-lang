@@ -164,7 +164,14 @@ pub fn create(name: &str, kind: TemplateKind, root: &Path) -> Result<()> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("could not create {}", parent.display()))?;
         }
-        std::fs::write(&target, tf.contents.replace("{{name}}", name))
+        // The scaffolded project says which release it was written for,
+        // so the next compiler to open it can say so rather than
+        // reporting the gap as diagnostics about the code.
+        let contents = tf
+            .contents
+            .replace("{{name}}", name)
+            .replace("{{jwc}}", env!("CARGO_PKG_VERSION"));
+        std::fs::write(&target, contents)
             .with_context(|| format!("could not write {}", target.display()))?;
     }
     Ok(())
@@ -316,7 +323,11 @@ mod tests {
         let manifest = std::fs::read_to_string(dir.join("jwcproj.json")).expect("manifest");
         assert!(manifest.contains("\"name\": \"shop\""), "{manifest}");
         assert!(
-            !manifest.contains("{{name}}"),
+            manifest.contains(&format!("\"jwc\": \"{}\"", env!("CARGO_PKG_VERSION"))),
+            "the scaffold must record the release it came from: {manifest}"
+        );
+        assert!(
+            !manifest.contains("{{"),
             "a placeholder survived: {manifest}"
         );
         let _ = std::fs::remove_dir_all(&dir);

@@ -31,7 +31,7 @@ service Orgs {
                 where removed == null
                 as many admins orderby id asc limit 10
             where O.region != null
-            as { O.id, O.name, O.region, admins: { id, role } }
+            as { O.id, O.name, O.region, admins: { M.id, M.role } }
             orderby O.name asc nulls last;
     }
 }

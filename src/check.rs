@@ -3664,40 +3664,7 @@ impl<'a> Checker<'a> {
                     out.push((alias.name.clone(), ty));
                 }
                 ProjField::Nested { alias, shape, span } => {
-                    let join = s
-                        .joins
-                        .iter()
-                        .find(|j| j.result.as_ref().is_some_and(|r| r.name.name == alias.name));
-                    let Some(join) = join else {
-                        self.err_note(
-                            *span,
-                            "E0534",
-                            format!("`{}` is not a join result", alias.name),
-                            "a nested projection names an `as one` / `as many` binding",
-                            "queries.md §6.1",
-                        );
-                        out.push((alias.name.clone(), Ty::Unknown));
-                        continue;
-                    };
-                    let obj = self
-                        .sym
-                        .by_path
-                        .get(&join.table.text())
-                        .cloned()
-                        .unwrap_or_default();
-                    let inner = self.nested_projection(shape, &obj);
-                    let rec = Ty::Record(inner);
-                    let result = join.result.as_ref().expect("checked above");
-                    let ty = match result.cardinality {
-                        // `as many` is an array, empty rather than null;
-                        // `left join … as one` may not match (types.md §6.3).
-                        Cardinality::Many => rec.array(),
-                        Cardinality::One if join.kind == JoinKind::Left => rec.opt(),
-                        Cardinality::One => rec,
-                        // `as group` produces no field, so a projection
-                        // naming it is E0534 above.
-                        Cardinality::Group => Ty::Unknown,
-                    };
+                    let ty = self.nested_field(alias, shape, *span, &s.joins);
                     out.push((alias.name.clone(), ty));
                 }
             }
@@ -3705,21 +3672,91 @@ impl<'a> Checker<'a> {
         out
     }
 
-    fn nested_projection(&mut self, shape: &ObjectShape, object: &str) -> Fields {
-        shape
-            .fields
+    /// `alias: { … }` — the shape of one join's rows, at any depth.
+    ///
+    /// The joins are a flat list and a nested shape names one by its
+    /// result alias, so a shape nested inside another resolves the same
+    /// way: look the alias up, and check its fields against *its* binder.
+    fn nested_field(
+        &mut self,
+        alias: &Ident,
+        shape: &ObjectShape,
+        span: crate::token::Span,
+        joins: &[crate::ast::JoinClause],
+    ) -> Ty {
+        let join = joins
             .iter()
-            .map(|f| match f {
+            .find(|j| j.result.as_ref().is_some_and(|r| r.name.name == alias.name));
+        let Some(join) = join else {
+            self.err_note(
+                span,
+                "E0534",
+                format!("`{}` is not a join result", alias.name),
+                "a nested projection names an `as one` / `as many` binding",
+                "queries.md §6.1",
+            );
+            return Ty::Unknown;
+        };
+        let obj = self
+            .sym
+            .by_path
+            .get(&join.table.text())
+            .cloned()
+            .unwrap_or_default();
+        let inner = self.nested_projection(shape, &obj, &join.binder.name, joins);
+        let rec = Ty::Record(inner);
+        let result = join.result.as_ref().expect("checked above");
+        match result.cardinality {
+            // `as many` is an array, empty rather than null;
+            // `left join … as one` may not match (types.md §6.3).
+            Cardinality::Many => rec.array(),
+            Cardinality::One if join.kind == JoinKind::Left => rec.opt(),
+            Cardinality::One => rec,
+            // `as group` produces no field, so a projection naming it is
+            // E0534 above.
+            Cardinality::Group => Ty::Unknown,
+        }
+    }
+
+    /// The fields of a nested shape.
+    ///
+    /// A column here names `binder` — the join's own binding — for the
+    /// same reason a column anywhere else names one: the shape says which
+    /// table a field is read from, instead of leaving the reader to work
+    /// it out from where the braces sit. The two positions that stay bare
+    /// are the two that are not references: a `set` target and an
+    /// `insert` key name a column of the table being written.
+    fn nested_projection(
+        &mut self,
+        shape: &ObjectShape,
+        object: &str,
+        binder: &str,
+        joins: &[crate::ast::JoinClause],
+    ) -> Fields {
+        let mut out: Fields = Vec::new();
+        for f in &shape.fields {
+            match f {
                 ProjField::Column { binding, column: i } => {
-                    if let Some(b) = binding {
-                        self.err_note(
+                    match binding {
+                        None => self.err_note(
+                            i.span,
+                            "E0904",
+                            format!("`{}` does not name its binding", i.name),
+                            format!("write `{binder}.{}`", i.name),
+                            "queries.md §6.1",
+                        ),
+                        Some(b) if b.name != binder => self.err_note(
                             b.span,
                             "E0905",
-                            format!("`{}` is not a binding here", b.name),
-                            "a nested shape is already scoped to its join, so its \
-                             fields are bare",
+                            format!("`{}` is not this shape's binding", b.name),
+                            format!(
+                                "`{}` is the rows of `{binder}`; another table's \
+                                 columns go in its own nested shape",
+                                shape_owner(joins, binder)
+                            ),
                             "queries.md §6.1",
-                        );
+                        ),
+                        Some(_) => {}
                     }
                     let ty = self.column_of(object, &i.name).unwrap_or_else(|| {
                         self.err(
@@ -3731,12 +3768,16 @@ impl<'a> Checker<'a> {
                         Ty::Unknown
                     });
                     self.reject_private(object, &i.name, i.span);
-                    (i.name.clone(), ty)
+                    out.push((i.name.clone(), ty));
                 }
-                ProjField::Expr { alias, .. } => (alias.name.clone(), Ty::Unknown),
-                ProjField::Nested { alias, .. } => (alias.name.clone(), Ty::Unknown),
-            })
-            .collect()
+                ProjField::Expr { alias, .. } => out.push((alias.name.clone(), Ty::Unknown)),
+                ProjField::Nested { alias, shape, span } => {
+                    let ty = self.nested_field(alias, shape, *span, joins);
+                    out.push((alias.name.clone(), ty));
+                }
+            }
+        }
+        out
     }
 
     /// schema.md §3.1 — a `private` column never reaches a response.
@@ -5101,6 +5142,17 @@ fn narrowing_target(cond: &Expr, want_is_null: bool) -> Option<String> {
 /// `continue` (types.md §6.6).
 /// A projection that is entirely aggregates — `as { total: count(x) }`.
 /// Such a query answers exactly one row whatever the table holds.
+/// The result alias of the join `binder` drives — what the reader sees as
+/// the name of the shape they are inside.
+fn shape_owner(joins: &[crate::ast::JoinClause], binder: &str) -> String {
+    joins
+        .iter()
+        .find(|j| j.binder.name == binder)
+        .and_then(|j| j.result.as_ref())
+        .map(|r| r.name.name.clone())
+        .unwrap_or_else(|| binder.to_string())
+}
+
 fn is_whole_table_aggregate(s: &SelectExpr) -> bool {
     let Some(p) = &s.projection else { return false };
     !p.fields.is_empty()

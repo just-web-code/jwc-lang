@@ -21,9 +21,9 @@ view OrgWithMembers of App.org {
             O.name,
             O.created_at,
             members: {
-                role,
-                joined_at,
-                account: { id, email, display_name }
+                M.role,
+                M.joined_at,
+                account: { A.id, A.email, A.display_name }
             }
         }
 }
@@ -37,6 +37,6 @@ view MemberAccess of App.org {
             M.org_id,
             M.account_id,
             M.role,
-            org: { id, slug, name }
+            org: { O.id, O.slug, O.name }
         }
 }

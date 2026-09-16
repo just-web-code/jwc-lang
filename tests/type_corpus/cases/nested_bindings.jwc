@@ -1,0 +1,71 @@
+namespace nested_bindings;
+
+// A column names its binding at every depth (queries.md §6.1). A nested
+// shape is scoped to one join, so the binding could be inferred there —
+// but then a reader would count braces to learn which table a field came
+// from, and the same column would be written two ways depending on how
+// deeply it sat.
+service NestedBindings {
+
+    // The shape and the join agree: `org` is what the join produces, `O`
+    // is what it binds, and the fields say `O`.
+    function named(org_id: bigint) {
+        return select M from App.s.Members
+            left join App.s.Orgs O on O.id == M.org_id as one org
+            where M.org_id == @org_id
+            as { M.account_id, org: { O.id, O.slug } };
+    }
+
+    // Bare inside a nested shape is the same error it is at the top.
+    function bare(org_id: bigint) {
+        return select M from App.s.Members
+            left join App.s.Orgs O on O.id == M.org_id as one org
+            where M.org_id == @org_id
+            as { M.account_id, org: { id, slug } };                   // expect: E0904, E0904
+    }
+
+    // The driving binding is not this shape's binding: `M` reads the
+    // members, and `org: { … }` reads the orgs.
+    function the_wrong_binding(org_id: bigint) {
+        return select M from App.s.Members
+            left join App.s.Orgs O on O.id == M.org_id as one org
+            where M.org_id == @org_id
+            as { M.account_id, org: { M.account_id } };                // expect: E0905, E0211
+    }
+
+    // Depth two. `notes` sits under `members` because its `on` names `M`,
+    // and its fields name `N` — the shape it is, not the shape it is in.
+    function two_deep() {
+        return select O from App.s.Orgs
+            left join App.s.Members M on M.org_id == O.id
+                as many members orderby M.account_id asc limit 200
+            left join App.s.Notes N on N.org_id == O.id and N.org_id == M.org_id
+                as many notes under members orderby N.id asc limit 200
+            as { O.id, members: { M.account_id, notes: { N.id, N.body } } };
+    }
+
+    // The same, written bare at the inner level only: the outer shape
+    // checking does not excuse the inner one.
+    function two_deep_bare_inside() {
+        return select O from App.s.Orgs
+            left join App.s.Members M on M.org_id == O.id
+                as many members orderby M.account_id asc limit 200
+            left join App.s.Notes N on N.org_id == O.id and N.org_id == M.org_id
+                as many notes under members orderby N.id asc limit 200
+            as { O.id, members: { M.account_id, notes: { id, body } } };  // expect: E0904, E0904
+    }
+
+    // Two joins to one table: each nested shape names its own alias, which
+    // is the case a rule that inferred the binding could not write at all.
+    function self_join(org_id: bigint) {
+        return select I from App.s.Invites
+            left join App.s.Orgs inviter on inviter.id == I.invited_by as one inviter
+            left join App.s.Orgs acceptor on acceptor.id == I.accepted_by as one acceptor
+            where I.org_id == @org_id
+            as {
+                I.id,
+                inviter:  { inviter.id, inviter.slug },
+                acceptor: { acceptor.id, acceptor.slug }
+            };
+    }
+}
