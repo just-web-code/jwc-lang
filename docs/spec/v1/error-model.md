@@ -103,7 +103,7 @@ route POST "" use RequireOrgAdmin {
 function login(req: Login) -> (Session, Error) {
     let account, err = select Accounts from App.auth.Accounts
         where Accounts.email == req.email
-        as { id, password_hash }
+        as { Accounts.id, Accounts.password_hash }
         first;
 
     if (err != null)      { return null, err; }
@@ -128,7 +128,7 @@ function record_payment(req: WebhookPayment) -> (Receipt, Error) {
     transaction {
         let seen, err = select Payments from App.billing.Payments
             where Payments.provider_ref == req.provider_ref
-            as { id }
+            as { Payments.id }
             first;
 
         if (err != null)  { return null, err; }
@@ -381,7 +381,7 @@ service AuthService {
     function login(req: Login) {
         let account = select Accounts from App.auth.Accounts
             where Accounts.email == req.email
-            as { id, password_hash }
+            as { Accounts.id, Accounts.password_hash }
             first;
 
         if (account == null) { throw Unauthorized("email yoki parol xato"); }
@@ -421,7 +421,7 @@ service WebhookService {
         transaction {
             let seen = select Payments from App.billing.Payments
                 where Payments.provider_ref == req.provider_ref
-                as { id }
+                as { Payments.id }
                 first;
 
             // normal outcome, not an error: commits (an empty tx) and returns 200

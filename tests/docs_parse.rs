@@ -82,6 +82,31 @@ fn jwc_blocks(text: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Every ```jwc fence, whatever its info string — `no-compile` included.
+/// `jwc_blocks` deliberately skips those because they are not programs;
+/// the binding scan below wants them precisely because nothing else reads
+/// them.
+fn all_jwc_blocks(text: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut lines = text.lines().enumerate();
+    while let Some((i, line)) = lines.next() {
+        let t = line.trim();
+        if t != "```jwc" && !t.starts_with("```jwc ") {
+            continue;
+        }
+        let mut body = String::new();
+        for (_, l) in lines.by_ref() {
+            if l.trim_start().starts_with("```") {
+                break;
+            }
+            body.push_str(l);
+            body.push('\n');
+        }
+        out.push((i + 2, body));
+    }
+    out
+}
+
 /// v1 spec blocks, checked with the v1 front-end. Same excerpt problem:
 /// a clause shown on its own is not a program, so try the positions an
 /// excerpt can legally occupy.
@@ -266,4 +291,297 @@ fn check_page(page: &str) {
         broken.len(),
         broken.join("\n  ")
     );
+}
+
+/// Every jwc block in the docs, `no-compile` included, is scanned for a
+/// column that does not name its binding.
+///
+/// `every_documented_jwc_example_parses` above only parses, and a bare
+/// column parses perfectly — `E0904` is a resolver error. So when rc.3 made
+/// every column name its binding, the tutorial's queries stayed as they
+/// were and nothing went red; three releases later the first page a reader
+/// meets still showed `where slug == @slug`. The `no-compile` fence, which
+/// exists for excerpts with elisions, had quietly become a place where code
+/// was never checked at all.
+///
+/// A fragment cannot produce `E0904`: it has to resolve before the binding
+/// rule is reached, so a block that fails to parse or has no schema simply
+/// yields nothing here. That makes this safe to run over every fence,
+/// which is the point — the blocks nothing else checks are exactly the
+/// blocks that rot.
+/// The sources a snippet names but does not declare, as declarations.
+///
+/// `check::select` returns on `E0502` (unknown source) before it ever
+/// visits the query's fields, so a snippet that queries `App.notes.Notes`
+/// without declaring it is skipped rather than checked — which is how
+/// `docs/docs/data/writes.md` kept a bare `as { id, title, updated_at }`
+/// even after the tutorial's was found. The columns do not matter: the
+/// projection's binding rule fires on the qualifier alone, before any
+/// column lookup. Only reaching the projection does.
+fn synthesized_sources(src: &str) -> String {
+    let mut dbs: Vec<String> = Vec::new();
+    let mut schemas: Vec<(String, String)> = Vec::new();
+    let mut tables: Vec<(String, String, String)> = Vec::new();
+
+    for (i, _) in src.match_indices('.') {
+        let before = &src[..i];
+        let after = &src[i + 1..];
+        let db: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let rest: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.')
+            .collect();
+        let parts: Vec<&str> = rest.split('.').collect();
+        if db.is_empty() || parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+            continue;
+        }
+        if !db.chars().next().is_some_and(|c| c.is_uppercase()) {
+            continue;
+        }
+        if !parts[1].chars().next().is_some_and(|c| c.is_uppercase()) {
+            continue;
+        }
+        let (sch, tab) = (parts[0].to_string(), parts[1].to_string());
+        if !src.contains(&format!("database {db}")) && !dbs.contains(&db) {
+            dbs.push(db.clone());
+        }
+        if !src.contains(&format!("schema {sch} of"))
+            && !schemas.contains(&(db.clone(), sch.clone()))
+        {
+            schemas.push((db.clone(), sch.clone()));
+        }
+        if !src.contains(&format!("table {tab} of"))
+            && !src.contains(&format!("view {tab} of"))
+            && !tables.contains(&(db.clone(), sch.clone(), tab.clone()))
+        {
+            tables.push((db, sch, tab));
+        }
+    }
+
+    let mut out = String::new();
+    for db in &dbs {
+        out.push_str(&format!("database {db} : Postgres;\n"));
+    }
+    for (db, sch) in &schemas {
+        out.push_str(&format!("schema {sch} of {db};\n"));
+    }
+    for (db, sch, tab) in &tables {
+        out.push_str(&format!(
+            "table {tab} of {db}.{sch} {{ id bigint primary key identity; }}\n"
+        ));
+    }
+    out
+}
+
+/// Every jwc block in the docs, `no-compile` included, is scanned for a
+/// column that does not name its binding.
+///
+/// `every_documented_jwc_example_parses` above only parses, and a bare
+/// column parses perfectly — `E0904` is a resolver error. So when rc.3 made
+/// every column name its binding, the tutorial's queries stayed as they
+/// were and nothing went red; three releases later the first page a reader
+/// meets still showed `where slug == @slug`. The `no-compile` fence, which
+/// exists for excerpts with elisions, had quietly become a place where code
+/// was never checked at all.
+///
+/// A fragment cannot produce `E0904`: it has to resolve before the binding
+/// rule is reached, so a block that fails to parse simply yields nothing
+/// here. That makes this safe to run over every fence, which is the point —
+/// the blocks nothing else checks are exactly the blocks that rot.
+#[test]
+fn every_documented_column_names_its_binding() {
+    const HEADER: &str = concat!(
+        "database App : Postgres;\n",
+        "schema s of App;\n",
+        "table T of App.s { id bigint primary key identity; }\n",
+    );
+    let root = repo_root();
+    let mut bare: Vec<String> = Vec::new();
+    let mut resolved = 0usize;
+
+    for file in markdown_files() {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let blocks = all_jwc_blocks(&text);
+        if blocks.is_empty() {
+            continue;
+        }
+        let rel: &Path = file.strip_prefix(&root).unwrap_or(&file);
+
+        // A page is read top to bottom: the schema block declares what the
+        // service block below it queries. Checked one at a time the service
+        // block has no tables, resolution stops at the missing schema, and
+        // the binding rule is never reached — which is how the tutorial's
+        // queries stayed unqualified for three releases. So try the page as
+        // one program first, then each block on its own for the pages whose
+        // examples stand alone.
+        let joined: String = blocks
+            .iter()
+            .map(|(_, b)| b.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut sources = vec![
+            joined.clone(),
+            format!("{HEADER}{joined}\n"),
+            format!("{}{joined}\n", synthesized_sources(&joined)),
+        ];
+        for (_, body) in &blocks {
+            sources.push(body.clone());
+            sources.push(format!("{HEADER}{body}\n"));
+            sources.push(format!("{}{body}\n", synthesized_sources(body)));
+            sources.push(format!("{HEADER}function f() {{\n{body}\n}}\n"));
+            sources.push(format!(
+                "{HEADER}service S {{\nfunction f() {{\n{body}\n}}\n}}\n"
+            ));
+        }
+
+        let mut seen: Vec<String> = Vec::new();
+        for src in &sources {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join("a.jwc"), src).expect("write");
+            let Ok(ws) = jwc::workspace::Workspace::load(dir.path()) else {
+                continue;
+            };
+            if ws.has_parse_errors() {
+                continue;
+            }
+            resolved += 1;
+            let built = jwc::model::build(&ws);
+            let sym = jwc::symbols::build(&ws, &built.model);
+            let out = jwc::check::check(&ws, &sym, &built.model);
+            for (loc, d) in built.diags.iter().chain(&sym.diags).chain(&out.diags) {
+                if d.code != "E0904" && d.code != "E0905" {
+                    continue;
+                }
+                // The span points into the synthesized program, not the
+                // page, so quote the offending line — that is what makes
+                // the failure findable in the markdown.
+                let at = (loc.span.start as usize).min(src.len());
+                let line = src[..at]
+                    .lines()
+                    .next_back()
+                    .map(|l| {
+                        let rest: &str = src[at..].lines().next().unwrap_or("");
+                        format!("{l}{rest}").trim().to_string()
+                    })
+                    .unwrap_or_default();
+                let hit = format!("{}: {} — `{line}`", d.code, d.message);
+                if !seen.contains(&hit) {
+                    seen.push(hit);
+                }
+            }
+        }
+        for hit in seen {
+            bare.push(format!("{}: {hit}", rel.display()));
+        }
+    }
+
+    // A floor, not a target: without it a fence scanner that stops matching
+    // makes this pass by checking nothing, which is the failure mode the
+    // guard exists to prevent.
+    assert!(
+        resolved > 50,
+        "expected the documented examples to resolve, saw {resolved} — the \
+         block scanner or the fences changed"
+    );
+    assert!(
+        bare.is_empty(),
+        "{} documented example(s) use a column that does not name its \
+         binding (queries.md §2.4). A reader copies these verbatim and gets \
+         E0904:\n  {}",
+        bare.len(),
+        bare.join("\n  ")
+    );
+}
+
+/// Every `jwcproj.json` shown in the docs carries the `jwc` field, at this
+/// release.
+///
+/// rc.4 made the field the way a project says which compiler it is written
+/// for, and three pages kept showing a manifest without one — including the
+/// first manifest a reader ever sees, on hello-world. Copying it produces a
+/// project that says nothing about its language version, which is the exact
+/// situation the field was added to end.
+///
+/// It pins the version, so it moves with `Cargo.toml` like the sample does.
+#[test]
+fn every_documented_manifest_names_this_release() {
+    let root = repo_root();
+    let mine = env!("CARGO_PKG_VERSION");
+    let mut stale: Vec<String> = Vec::new();
+    let mut found = 0usize;
+
+    for file in markdown_files() {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for (line, body) in json_blocks(&text) {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
+                continue;
+            };
+            // A package manifest has no `entry` — it is imported, not
+            // deployed — so requiring one skipped `packages.md`'s
+            // `"type": "pkg"` example entirely. `name` + `version` with
+            // either marker is what distinguishes a manifest from the other
+            // JSON on these pages.
+            let is_manifest = v.get("name").is_some()
+                && v.get("version").is_some()
+                && (v.get("entry").is_some() || v.get("type").is_some());
+            if !is_manifest {
+                continue;
+            }
+            found += 1;
+            let rel: &Path = file.strip_prefix(&root).unwrap_or(&file);
+            match v.get("jwc").and_then(|j| j.as_str()) {
+                Some(got) if got == mine => {}
+                Some(got) => stale.push(format!("{}:{line}: says {got}", rel.display())),
+                None => stale.push(format!("{}:{line}: no `jwc` field", rel.display())),
+            }
+        }
+    }
+
+    // Without a floor, a fence scanner that stops matching makes this pass
+    // by checking nothing.
+    assert!(
+        found >= 4,
+        "expected the documented manifests, saw {found} — the json fence \
+         scanner or the manifest shape changed"
+    );
+    assert!(
+        stale.is_empty(),
+        "{} documented manifest(s) do not name {mine}. They move with \
+         Cargo.toml:\n  {}",
+        stale.len(),
+        stale.join("\n  ")
+    );
+}
+
+/// ```json fences, with or without an info string (```json title="…").
+fn json_blocks(text: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut lines = text.lines().enumerate();
+    while let Some((i, line)) = lines.next() {
+        let t = line.trim();
+        if t != "```json" && !t.starts_with("```json ") {
+            continue;
+        }
+        let mut body = String::new();
+        for (_, l) in lines.by_ref() {
+            if l.trim_start().starts_with("```") {
+                break;
+            }
+            body.push_str(l);
+            body.push('\n');
+        }
+        out.push((i + 2, body));
+    }
+    out
 }

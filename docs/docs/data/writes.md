@@ -91,8 +91,8 @@ Each is a compile error, not a surprise at runtime.
 ```jwc no-compile
 update Notes of App.notes.Notes
     set title = @req.title
-    where id == @id
-    as { id, title, updated_at }
+    where Notes.id == @id
+    as { Notes.id, Notes.title, Notes.updated_at }
     first
 ```
 
@@ -100,9 +100,9 @@ update Notes of App.notes.Notes
 
 ```jwc no-compile
 update Counters of App.billing.Counters
-    set value = value + 1
-    where name == "invoice"
-    as { value }
+    set value = Counters.value + 1
+    where Counters.name == "invoice"
+    as { Counters.value }
     first
 ```
 
@@ -117,8 +117,8 @@ emitted as SQL, everything else is bound.
 ```jwc no-compile
 update Notes of App.notes.Notes
     set title =? @req.title, body =? @req.body
-    where id == @id
-    as { id, title, body }
+    where Notes.id == @id
+    as { Notes.id, Notes.title, Notes.body }
     first
 ```
 
@@ -142,7 +142,7 @@ row and both write it.
 ## Delete
 
 ```jwc no-compile
-delete Notes from App.notes.Notes where id == @id
+delete Notes from App.notes.Notes where Notes.id == @id
 ```
 
 If the schema declares `on delete cascade`, children go with it. Walking
@@ -156,7 +156,7 @@ service WorkspaceService {
         transaction {
             let ws = insert Workspaces into App.org.Workspaces {
                 name = @req.name, owner_id = @owner_id
-            } as { id, name };
+            } as { Workspaces.id, Workspaces.name };
 
             insert Members into App.org.Members {
                 workspace_id = @ws.id, user_id = @owner_id, role = "owner"

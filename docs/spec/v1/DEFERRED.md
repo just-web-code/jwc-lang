@@ -28,6 +28,7 @@ closed; these are dated omissions.
 | `DEFERRED-17` | Sequences as a declared object class | A counter table plus `update … first` (which emits `FOR UPDATE`) — shown in the sample's `next_invoice_number` | A sequence is a sixth DDL object class with its own diff rules, for one use in the sample. The counter-table form is correct and already specified |
 | `DEFERRED-18` | Generated columns (`GENERATED ALWAYS AS … STORED`) | Compute in application code, or a counter table | The expression would be raw SQL text inside a declaration — a hole in the DBA test, not a feature |
 | `DEFERRED-19` | Server-Sent Events | A `socket` (routing §9), or long-polling | Absent rather than half-implemented: a transport that typechecks and does not run is worse than one that is not there |
+| `DEFERRED-20` | An immutable primary key | `set` may assign a key column; `update … first` names the row by its key, which survives its own write but not a concurrent writer changing it (writes §4) | The residual is confined to schemas that renumber their own keys. Forbidding it is a language rule with migration weight, and `identity` already makes it the odd case |
 
 ---
 

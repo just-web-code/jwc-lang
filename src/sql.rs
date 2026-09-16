@@ -404,6 +404,67 @@ impl<'a> Builder<'a> {
         })
     }
 
+    /// `first` on a write selects one row under a lock, then writes the row
+    /// that selection named. The name it uses has to survive the write it is
+    /// about to authorise, and `ctid` does not: Postgres writes an updated row
+    /// as a new tuple at a new physical location, so the old `ctid` is dead the
+    /// moment any writer commits.
+    ///
+    /// Under concurrency that turns into lost writes rather than an error. The
+    /// inner `FOR UPDATE` blocks on a competing transaction, and when that one
+    /// commits, follows the update chain (EvalPlanQual) and answers the *new*
+    /// tuple's `ctid`. The outer statement is still on the snapshot it started
+    /// with, where that tuple does not yet exist, so `x.ctid = <new>` matches
+    /// nothing: no rows written, `RETURNING` empty, `first` null, and an
+    /// `or throw` turns a write that should have happened into a 404. Serial
+    /// callers never see it — there is no competing transaction to wait for.
+    ///
+    /// A primary key is the identity that does survive: the new tuple carries
+    /// the same key, so the outer statement re-checks its predicate against the
+    /// updated row and writes it. 64 writers against one 10,000-row table for
+    /// 10 s: `ctid` lost 674 statements of 182,479, the primary key 0 of
+    /// 179,791, at the same throughput (18.4k vs 18.1k tps).
+    ///
+    /// A table with no primary key (`W0401`) has no such identity and keeps
+    /// `ctid`, race included — writes.md §4.
+    fn locked_row(
+        &mut self,
+        t: &'a TableObj,
+        filter: Option<&Expr>,
+        order: &[SortKey],
+    ) -> Option<String> {
+        let key: Vec<String> = match &t.primary_key {
+            Some(pk) => pk.columns.clone(),
+            None => vec!["ctid".to_string()],
+        };
+        let projected: Vec<String> = key
+            .iter()
+            .map(|c| format!("y.{}", quote_ident(c)))
+            .collect();
+
+        let mut sub = format!("SELECT {} FROM {} y", projected.join(", "), t.qualified());
+        if let Some(f) = filter {
+            sub.push_str(&format!(" WHERE {}", self.predicate(t, f, "y")?));
+        }
+        if !order.is_empty() {
+            sub.push_str(&format!(" ORDER BY {}", self.order_by(t, order, "y")));
+        } else if t.primary_key.is_some() {
+            sub.push_str(&format!(" ORDER BY {}", projected.join(", ")));
+        }
+        sub.push_str(" FOR UPDATE LIMIT 1");
+
+        // A composite key compares as a row: `(x.a, x.b) = (SELECT y.a, y.b …)`.
+        let lhs: Vec<String> = key
+            .iter()
+            .map(|c| format!("x.{}", quote_ident(c)))
+            .collect();
+        Some(if lhs.len() == 1 {
+            format!(" WHERE {} = ({sub})", lhs[0])
+        } else {
+            format!(" WHERE ({}) = ({sub})", lhs.join(", "))
+        })
+    }
+
     // ------------------------------------------------------------ update
 
     pub fn update(&mut self, u: &UpdateExpr, sets: &[(String, SetValue)]) -> Option<Built> {
@@ -431,22 +492,7 @@ impl<'a> Builder<'a> {
             // writes.md §4 — `first` lowers to a locked row selection.
             // `FOR UPDATE` is always emitted: without it two concurrent
             // callers both select the same row and both write.
-            let mut sub = format!("SELECT y.ctid FROM {} y", t.qualified());
-            if let Some(f) = &u.filter {
-                sub.push_str(&format!(" WHERE {}", self.predicate(t, f, "y")?));
-            }
-            if !u.order_by.is_empty() {
-                sub.push_str(&format!(" ORDER BY {}", self.order_by(t, &u.order_by, "y")));
-            } else if let Some(pk) = &t.primary_key {
-                let cols: Vec<String> = pk
-                    .columns
-                    .iter()
-                    .map(|c| format!("y.{}", quote_ident(c)))
-                    .collect();
-                sub.push_str(&format!(" ORDER BY {}", cols.join(", ")));
-            }
-            sub.push_str(" FOR UPDATE LIMIT 1");
-            sql.push_str(&format!(" WHERE x.ctid = ({sub})"));
+            sql.push_str(&self.locked_row(t, u.filter.as_ref(), &u.order_by)?);
         } else if let Some(f) = &u.filter {
             sql.push_str(&format!(" WHERE {}", self.predicate(t, f, "x")?));
         }
@@ -482,22 +528,7 @@ impl<'a> Builder<'a> {
         let mut sql = format!("DELETE FROM {} x", t.qualified());
 
         if d.first {
-            let mut sub = format!("SELECT y.ctid FROM {} y", t.qualified());
-            if let Some(f) = &d.filter {
-                sub.push_str(&format!(" WHERE {}", self.predicate(t, f, "y")?));
-            }
-            if !d.order_by.is_empty() {
-                sub.push_str(&format!(" ORDER BY {}", self.order_by(t, &d.order_by, "y")));
-            } else if let Some(pk) = &t.primary_key {
-                let cols: Vec<String> = pk
-                    .columns
-                    .iter()
-                    .map(|c| format!("y.{}", quote_ident(c)))
-                    .collect();
-                sub.push_str(&format!(" ORDER BY {}", cols.join(", ")));
-            }
-            sub.push_str(" FOR UPDATE LIMIT 1");
-            sql.push_str(&format!(" WHERE x.ctid = ({sub})"));
+            sql.push_str(&self.locked_row(t, d.filter.as_ref(), &d.order_by)?);
         } else if let Some(f) = &d.filter {
             sql.push_str(&format!(" WHERE {}", self.predicate(t, f, "x")?));
         }

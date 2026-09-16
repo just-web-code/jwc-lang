@@ -114,8 +114,8 @@ selection:
 ```sql
 UPDATE billing.subscriptions t
    SET status = $1, canceled_at = $2
- WHERE t.ctid = (
-        SELECT s.ctid FROM billing.subscriptions s
+ WHERE t.id = (
+        SELECT s.id FROM billing.subscriptions s
          WHERE s.org_id = $3 AND s.status <> 'canceled'
          ORDER BY s.id
          FOR UPDATE
@@ -125,6 +125,31 @@ RETURNING …;
 
 - `FOR UPDATE` is **always** emitted. Two concurrent `cancel(org_id)` calls
   serialise; the second sees the already-canceled row and matches nothing.
+- The subquery answers the **primary key**, never `ctid`. A `ctid` names a
+  tuple's physical location, and an update writes a new tuple at a new one —
+  so a `ctid` read under `FOR UPDATE` is the row as it will be *after* the
+  transaction the lock waited on, which the outer statement's snapshot
+  cannot see. It matches nothing: no rows written, `RETURNING` empty,
+  `first` null, and an `or throw` reports a row that is plainly there as
+  missing. Serial callers never reach it. Measured: 64 writers against one
+  10,000-row table for 10 s lost 674 of 182,479 statements under `ctid`,
+  and 0 of 179,791 under the primary key, at the same throughput.
+- A composite key compares as a row: `(t.a, t.b) = (SELECT s.a, s.b …)`.
+- The guarantee is exactly this: the key survives *this* write. It is not a
+  guarantee that no concurrent writer changes it. `set` may assign a primary
+  key column, and if another transaction changes the key while this lock
+  waits, the subquery answers the new key and the outer statement, still on
+  its own snapshot, matches nothing — the same lost write, now confined to
+  schemas that renumber their own keys. `ctid` lost the row whenever *any*
+  writer touched it; the primary key loses it only when a writer changes the
+  key itself. Treat a primary key as immutable, which is what `identity`
+  already encourages. Making that a rule rather than a convention is
+  `DEFERRED-20`.
+- A table with no primary key (`W0401`) has no identity that survives its
+  own write, so it keeps `ctid` and the race with it.
+- The key is named by the name the column actually carries. `id bigint
+  primary key as "legacy_id"` is `legacy_id` here, whichever order the
+  modifiers came in.
 - `SKIP LOCKED` is not available in 1.0. Work-claiming is `DEFERRED-9`.
 - The same determinism rule as `select … first` applies: `orderby` is
   required unless the `where` provably selects at most one row

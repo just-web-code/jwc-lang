@@ -266,6 +266,7 @@ jobs:
           cargo test
           --test migrate_apply --test migrate_golden
           --test migrate_roundtrip --test jwc_test --test jobs_queue
+          --test write_first_locks_by_key
           -- --nocapture
 
       # The listener, which needs no database but does need a socket and

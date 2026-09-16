@@ -468,8 +468,27 @@ impl<'a> Builder<'a> {
                 loc: cloc,
             };
 
+            // `as "name"` renames the column, and almost every modifier below
+            // reads `col.physical` to name what it constrains — the primary
+            // key, a unique constraint, a check, a touch list. Applying the
+            // rename in the same pass made all of them depend on where the
+            // author put it: `id bigint primary key as "legacy_id"` emitted
+            // `PRIMARY KEY (id)` beside a column called `legacy_id`, which
+            // Postgres refuses with `column "id" named in key does not exist`
+            // — and `jwc check` said the schema was fine. The rename is
+            // resolved first so the order stops mattering.
             for m in &c.modifiers {
                 match m {
+                    ColumnModifier::Physical(p, _) => col.physical = p.clone(),
+                    ColumnModifier::Was(p, _) => col.was = Some(p.clone()),
+                    _ => {}
+                }
+            }
+
+            for m in &c.modifiers {
+                match m {
+                    // Resolved above.
+                    ColumnModifier::Physical(_, _) | ColumnModifier::Was(_, _) => {}
                     ColumnModifier::PrimaryKey(_) => pk_from_column.push(col.physical.clone()),
                     ColumnModifier::Identity(sp) => {
                         if !col.ty.is_integer() {
@@ -492,8 +511,6 @@ impl<'a> Builder<'a> {
                     }
                     ColumnModifier::Private(_) => col.private = true,
                     ColumnModifier::Server(_) => col.server = true,
-                    ColumnModifier::Physical(p, _) => col.physical = p.clone(),
-                    ColumnModifier::Was(p, _) => col.was = Some(p.clone()),
                     ColumnModifier::Default(e, sp) => {
                         match self.const_default(e, &col.ty) {
                             Some(sql) => col.default = Some(sql),
