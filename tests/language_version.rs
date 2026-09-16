@@ -142,3 +142,21 @@ fn a_requirement_that_is_neither_is_an_error_naming_what_to_write() {
         "the message must name what to write:\n{out}"
     );
 }
+
+/// The specification's sample is compiled by this repository's own tests
+/// with this repository's own compiler, so its pin has to move with every
+/// release. Forgetting it turns every suite that loads the sample red at
+/// once, which is loud but says nothing about what to do — this says it.
+#[test]
+fn the_sample_is_pinned_to_this_release() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/spec/v1/sample/jwcproj.json");
+    let text = std::fs::read_to_string(&path).expect("sample manifest");
+    let manifest: serde_json::Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(
+        manifest.get("jwc").and_then(|v| v.as_str()),
+        Some(MINE),
+        "bump `jwc` in {} to {MINE} — it moves with Cargo.toml",
+        path.display()
+    );
+}
