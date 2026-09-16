@@ -3,6 +3,47 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### `update … first` and `delete … first` lost writes under concurrency
+
+`first` on a write selects one row under `FOR UPDATE` and then writes the
+row that selection named. It named it by `ctid` — the one identity that
+does not survive the write it authorises. Postgres stores an updated row as
+a new tuple at a new physical location, so when the inner `FOR UPDATE`
+blocked on a competing transaction and then followed the update chain, it
+answered the *new* tuple's `ctid`, which the outer statement's snapshot
+could not see. `WHERE x.ctid = <new>` matched nothing: no rows written,
+`RETURNING` empty, `first` null, and an `or throw` reported a row that was
+plainly there as missing. Serial callers never reached it, so it only ever
+appeared under load.
+
+It now names the row by its primary key, which the new tuple carries, so
+the outer statement re-checks and writes it. 64 writers against one
+10,000-row table for 10 s: `ctid` lost 674 of 182,479 statements, the
+primary key 0 of 179,791, at the same throughput (18.4k vs 18.1k tps). A
+composite key compares as a row; a table with no primary key (`W0401`) has
+no such identity and keeps `ctid`.
+
+Found from a TechEmpower-style `/updates` run at 64 concurrency, where it
+read as 195,733 HTTP 404s.
+
+### The tutorial's queries, and three manifests
+
+`docs/docs/tutorial/index.md` still wrote every column bare — `where slug ==
+@slug` — which rc.3 made `E0904` three releases ago. The first page a reader
+meets showed code the compiler rejects.
+
+Nothing caught it because `every_documented_jwc_example_parses` only parses,
+and a bare column parses; `E0904` is a resolver error. All four of the
+page's blocks were also fenced ```` ```jwc no-compile ````, so nothing read
+them at all. Two guards now do: `every_documented_column_names_its_binding`
+reads each page as one program — the schema block declares what the service
+block below it queries — and scans every fence, `no-compile` included; and
+`every_documented_manifest_names_this_release` checks that each documented
+`jwcproj.json` carries `"jwc"` at this version, which three pages did not,
+hello-world among them.
+
 ## [1.0.0-rc.5] — freeze candidate — 2026-09-16
 
 ### BREAKING: a column names its binding inside a nested shape too

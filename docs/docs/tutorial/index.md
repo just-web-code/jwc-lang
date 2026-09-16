@@ -15,7 +15,7 @@ mkdir linkbin && cd linkbin
 ```
 
 ```json title="jwcproj.json"
-{ "name": "linkbin", "version": "0.1.0", "entry": "src/app.jwc" }
+{ "name": "linkbin", "version": "0.1.0", "jwc": "1.0.0-rc.5", "entry": "src/app.jwc" }
 ```
 
 ## The schema
@@ -82,13 +82,13 @@ service BinService {
         return insert Bins into App.links.Bins {
             slug  = crypto.token(6),
             title = @req.title
-        } as { id, slug, title, created_at };
+        } as { Bins.id, Bins.slug, Bins.title, Bins.created_at };
     }
 
     function by_slug(slug: text) {
         return select B from App.links.Bins
-            where slug == @slug
-            as { id, slug, title, created_at }
+            where B.slug == @slug
+            as { B.id, B.slug, B.title, B.created_at }
             first;
     }
 
@@ -97,14 +97,14 @@ service BinService {
             bin_id = @bin_id,
             url    = @req.url,
             note   = @req.note
-        } as { id, url, note, created_at };
+        } as { Entries.id, Entries.url, Entries.note, Entries.created_at };
     }
 
     function entries(bin_id: bigint, cursor: text?, size: int) {
         return select E from App.links.Entries
-            where bin_id == @bin_id
-            as { id, url, note, created_at }
-            orderby created_at asc, id asc
+            where E.bin_id == @bin_id
+            as { E.id, E.url, E.note, E.created_at }
+            orderby E.created_at asc, E.id asc
             page after @cursor size @size;
     }
 }

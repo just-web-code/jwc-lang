@@ -16,6 +16,7 @@ yours, and it is checked the same way.
 {
   "name": "my-app",
   "version": "0.1.0",
+  "jwc": "1.0.0-rc.5",
   "entry": "src/app.jwc",
   "dependencies": {
     "redis": "^0.1.0"
