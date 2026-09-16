@@ -219,7 +219,7 @@ the same extraction, so neither can drift from it.
 | `E0902` | a `for` binder without `let` | `names.md` |
 | `E0903` | `@name` — the sigil is `@` | `names.md` |
 | `E0904` | a column that does not name its binding | `queries.md` |
-| `E0905` | a projection field qualified with another query's binding | `queries.md` |
+| `E0905` | a projection field qualified with a binding its shape does not read | `queries.md` |
 | `E1001` | unknown error type in `throw` / `catch` | `errors.md` |
 | `E1002` | `raises` is not a superset of the inferred set | `errors.md` |
 | `E1003` | `raises` in application code | `errors.md` |

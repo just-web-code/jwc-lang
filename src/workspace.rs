@@ -32,6 +32,10 @@ pub struct Workspace {
 pub struct Manifest {
     pub name: String,
     pub version: String,
+    /// `jwcproj.json`'s `"jwc"` — the language version the source is
+    /// written for (packages.md §1). Absent means the project does not
+    /// say, and nothing is checked.
+    pub language: Option<String>,
     /// `"app"` (deployed) or `"pkg"` (imported). Anything else is read as
     /// an app: the content model only *restricts*, so an unknown value
     /// must not silently unlock declarations a package may not have.
@@ -87,6 +91,12 @@ impl Workspace {
         }
         let packages = read_packages(&root);
         let manifest = read_manifest(&root);
+        // Every command that compiles, formats, runs or serves comes
+        // through here, so this is the one place the check can sit and
+        // not be forgotten by one of them. `InvalidData` is the closest
+        // `io::ErrorKind` to "the project is not for this compiler"; what
+        // the reader sees is the message.
+        language_check(&root)?;
         Ok(Workspace {
             root,
             files,
@@ -186,6 +196,7 @@ fn read_manifest(root: &Path) -> Option<Manifest> {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
+                language: json.get("jwc").and_then(|v| v.as_str()).map(str::to_string),
                 kind: match json.get("type").and_then(|v| v.as_str()) {
                     Some("pkg") => Kind::Package,
                     _ => Kind::App,
@@ -196,6 +207,87 @@ fn read_manifest(root: &Path) -> Option<Manifest> {
         dir = d.parent();
     }
     None
+}
+
+/// Refuse a project written for a different release of the language.
+///
+/// `jwc fmt` calls this too: it does not build a `Workspace`, and it
+/// parses with *this* compiler's grammar — rc.2's `--` comments and `$x`
+/// locals are rc.3 errors, so formatting a project written for another
+/// release is how a file gets mangled rather than formatted.
+pub fn language_check(path: &Path) -> std::io::Result<()> {
+    let Some(m) = read_manifest(path) else {
+        return Ok(());
+    };
+    match language_mismatch(&m) {
+        Some(why) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, why)),
+        None => Ok(()),
+    }
+}
+
+/// Why this compiler cannot be used on the project, or `None`.
+///
+/// The episode this exists for: an application written against one
+/// release, compiled by another, and answering fifteen diagnostics that
+/// were about the version gap and read as though they were about the
+/// code. Nothing in the project said which release it was for, so there
+/// was nothing to compare and no way to say so.
+///
+/// A bare version means exactly that version, as it does for a
+/// dependency: `rc.N` and `rc.N+1` carry whatever review turned up and
+/// promise nothing to each other (SEMVER.md), so "close enough" is not a
+/// useful default. A range says so out loud — `"^1.0"`.
+fn language_mismatch(m: &Manifest) -> Option<String> {
+    let req = m.language.as_deref()?.trim();
+    if req.is_empty() || req == "*" {
+        return None;
+    }
+    let mine = env!("CARGO_PKG_VERSION");
+    let here = m.path.display();
+
+    let Ok(mine_parsed) = semver::Version::parse(mine) else {
+        return None;
+    };
+
+    // `1.0.0-rc.4` is a version, not a range: exactly it.
+    let matched = match semver::Version::parse(req) {
+        Ok(exact) => exact == mine_parsed,
+        Err(_) => match semver::VersionReq::parse(req) {
+            Ok(range) => range.matches(&mine_parsed),
+            Err(e) => {
+                return Some(format!(
+                    "{here}: `jwc` is `{req}`, which is neither a version \
+                     nor a range ({e}). Name the version the source is \
+                     written for: `\"jwc\": \"{mine}\"`."
+                ))
+            }
+        },
+    };
+
+    if matched {
+        return None;
+    }
+
+    // A range with no pre-release of its own does not match one, by the
+    // semver rule — `^1.0` is not satisfied by `1.0.0-rc.4`. That is the
+    // answer people reach for first, so it is worth saying rather than
+    // leaving them to read it as a bug here.
+    let prerelease_note = if !mine_parsed.pre.is_empty() && !req.contains('-') {
+        "\n\nThis compiler is a pre-release, and a range that does not name \
+         one never matches it — so name the version rather than a range \
+         while the 1.0 candidates are running."
+    } else {
+        ""
+    };
+
+    Some(format!(
+        "this is jwc {mine}, and {here} says the project is written \
+         for `{req}`.\n\n\
+         Install the version it asks for, or — once the source has been \
+         moved to this one — change `jwc` in that file to `{mine}`. \
+         Diagnostics from the wrong compiler read as though they were \
+         about the code.{prerelease_note}"
+    ))
 }
 
 fn read_packages(root: &Path) -> std::collections::BTreeSet<String> {

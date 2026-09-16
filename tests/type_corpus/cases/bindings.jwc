@@ -12,7 +12,7 @@ service Bindings {
     function self_join_with_an_alias(org_id: bigint) {
         return select O from App.s.Orgs
             left join App.s.Orgs parent on parent.id == O.id as one parent
-            as { O.id, parent: { id, slug } };
+            as { O.id, parent: { parent.id, parent.slug } };
     }
 
     function unqualified_column(org_id: bigint) {

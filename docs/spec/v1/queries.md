@@ -66,10 +66,10 @@ target and an `insert` object key name a column of the table being written,
 and take no qualifier — as in SQL, where `UPDATE t AS a SET a.x = 1` is an
 error.
 
-A projection field qualified with a binding other than the query's own is
-`E0905`; a joined table's columns reach the result through its own `as one`
-/ `as many` nested shape (§6.1), whose fields are already scoped to it and
-so stay bare.
+A projection field qualified with a binding other than the one its shape
+reads is `E0905`; a joined table's columns reach the result through its own
+`as one` / `as many` nested shape (§6.1), whose fields name that join's
+binding for the same reason every other column does.
 
 ---
 
@@ -258,26 +258,35 @@ Postgres's default (`nulls last` for `asc`) applies otherwise.
 
 ```jwc no-compile
 as {
-    id,
-    slug,
-    org_id: id,                       // alias: expression
-    plan: { id, code, name },         // nested, from an `as one` binding
-    lines: { id, description }        // nested, from an `as many` binding
+    S.id,
+    S.slug,
+    org_id: S.id,                     // alias: expression
+    plan: { P.id, P.code, P.name },   // nested, from an `as one` binding
+    lines: { L.id, L.description }    // nested, from an `as many` binding
 }
 ```
 
-- a bare `ident` projects that column under its own name;
+- `B.ident` projects that column of `B` under its own name;
 - `alias: expr` projects an expression;
 - `alias: { … }` projects a nested shape and requires `alias` to be a join
   result name from §4.3.
 
-**A bare name in a projection is a column of the driving binding.** Not of
-"whichever binding has it": a joined table reaches the projection through its
-own nested shape, so resolving across every binding would make `id`
-ambiguous in every joined query. To project a joined table's column at the
-top level, qualify it — `owner_id: M.account_id`. The same rule applies to a
-bare name on the right of `alias:`, which is why `org_id: id` means the
-driving table's `id`.
+**Every column names its binding, at every depth.** A nested shape is
+scoped to one join, so the binding could be inferred there — but a reader
+would then have to count braces to learn which table a field came from,
+and the same field would be written two ways depending on how deeply it
+sat. `P.code` inside `plan: { … }` says what it reads, the way `S.slug`
+does at the top.
+
+A column that names no binding is `E0904`, naming the one it should have
+carried. A column naming a binding other than its shape's is `E0905`: at
+the top level the driving binding, inside `plan: { … }` the binding of the
+join `plan` names. Another table's columns go in that table's own nested
+shape.
+
+The two positions that stay bare are the two that are not references: a
+`set` target and an `insert` object key name a column of the table being
+written, as in SQL, where `UPDATE t AS a SET a.x = 1` is an error.
 
 A projection field naming a `private` column is `E0410` (schema §3.1).
 
@@ -461,7 +470,7 @@ are the answer to #29; the dev-only `/__jwc/queries` endpoint is
 view MemberAccess of App.org {
     select M from App.org.Members
         left join App.org.Orgs on Orgs.id == M.org_id as one org
-        as { org_id, account_id, role, org: { id, slug, name } }
+        as { M.org_id, M.account_id, M.role, org: { Orgs.id, Orgs.slug, Orgs.name } }
 }
 ```
 
@@ -672,7 +681,7 @@ transaction's connection.
 |---|---|
 | `E0501` | query clause out of order |
 | `E0904` | a column that does not name its binding |
-| `E0905` | a projection field qualified with another query's binding |
+| `E0905` | a projection field qualified with a binding its shape does not read |
 | `E0502` | source is not a table or view |
 | `E0503` | `==?` on a non-nullable operand |
 | `E0510` | ambiguous join attachment — add `under <binding>` |

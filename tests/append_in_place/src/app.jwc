@@ -1,0 +1,43 @@
+// The accumulating loop, and the two shapes that must not take the
+// in-place path.
+namespace app;
+
+server {
+    port = 8099;
+}
+
+/// The shape every handler that builds a response body takes. Twenty
+/// thousand elements is enough that a copy per iteration does not finish.
+function accumulate(n: int) {
+    let out = [];
+    for (let i in array.range(0, @n)) {
+        out = array.push(@out, { id: @i, name: "row", value: @i });
+    }
+    return @out;
+}
+
+/// The array is read into a second local before the append. `out` must
+/// grow and `kept` must not — a push that mutated in place regardless of
+/// who else is holding the value would change this answer.
+function aliasing() {
+    let out = [];
+    out = array.push(@out, 1);
+    let kept = @out;
+    out = array.push(@out, 2);
+    return string.of(array.len(@kept)) + "/" + string.of(array.len(@out));
+}
+
+/// The item reads the local being assigned. Appending in place empties it
+/// before the item is evaluated, so this shape must keep the copy.
+function item_reads_the_target() {
+    let out = [];
+    out = array.push(@out, 1);
+    out = array.push(@out, array.len(@out));
+    return string.of(array.len(@out)) + "/" + string.of(@out[1]);
+}
+
+function main() {
+    console.writeln(string.of(array.len(accumulate(20000))));
+    console.writeln(aliasing());
+    console.writeln(item_reads_the_target());
+}

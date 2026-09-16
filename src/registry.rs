@@ -257,11 +257,23 @@ struct VersionView {
 /// The project root: the directory holding `jwcproj.json`, found from
 /// `path` or an ancestor of it.
 pub fn project_root(path: &Path) -> PathBuf {
-    crate::workspace::Workspace::load(path)
-        .ok()
-        .and_then(|ws| ws.manifest.map(|m| m.path))
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| path.to_path_buf())
+    // Walking for the file rather than loading the workspace: this
+    // answers *where* the project is, which does not need every `.jwc`
+    // file parsed, and must keep answering it for a project whose
+    // declared language version this compiler does not satisfy — the
+    // message about that names this path.
+    let mut dir = if path.is_file() {
+        path.parent()
+    } else {
+        Some(path)
+    };
+    while let Some(d) = dir {
+        if d.join("jwcproj.json").is_file() {
+            return d.to_path_buf();
+        }
+        dir = d.parent();
+    }
+    path.to_path_buf()
 }
 
 /// `GET /api/v1/pkg/{name}` — the versions and their checksums.

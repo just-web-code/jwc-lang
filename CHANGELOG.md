@@ -3,6 +3,93 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### BREAKING: a column names its binding inside a nested shape too
+
+rc.3 made every column name its binding and exempted the nested `as one` /
+`as many` shape, on the ground that the shape is already scoped to one
+join. It is — but a reader then has to count braces to learn which table a
+field came from, and the same column is written two ways depending on how
+deeply it sits. The other two exemptions are not like this one: a `set`
+target and an `insert` key name a column of the table being *written*, as
+in SQL. A nested field is a *reference*, the same kind of thing as one in
+a `where` or an `orderby`.
+
+```jwc
+assignment: { A.id, A.teacher_id, subject: { S.id, S.code, S.name } }
+```
+
+A bare column there is now `E0904`, naming the binding it should have
+carried; a column naming some other binding is `E0905`. The diagnostic
+carries the whole fix, so moving a project is mechanical.
+
+Nested shapes are also **checked at depth** now. `nested_projection`
+answered `Ty::Unknown` for a shape inside a shape and stopped, so a
+mistyped column two levels down was never reported and the field came out
+untyped. One function resolves a nested shape at any depth, and the
+emitted SQL is unchanged — the golden corpus matches byte for byte.
+
+### `jwcproj.json` records the language version
+
+The episode: an application written against one release, compiled by
+another, answering fifteen diagnostics that were about the version gap and
+read as though they were about the code. Nothing in the project said which
+release it was for, so there was nothing to compare and no way to say so.
+
+```json
+{ "name": "e-school", "version": "1.0.0", "jwc": "1.0.0-rc.4" }
+```
+
+A compiler that does not satisfy it refuses the project and names both
+versions and the manifest holding the field. The check sits in
+`Workspace::load`, which every command that compiles, formats, runs or
+serves comes through, so none of them can forget it — `jwc fmt` calls it
+directly for the same reason, since rc.2's `--` comments and `$x` locals
+are rc.3 errors and formatting with the wrong grammar is how a file gets
+mangled rather than formatted.
+
+The field is optional. A bare version means exactly that version, as it
+does for a dependency: `rc.N` and `rc.N+1` promise nothing to each other.
+A range works, and by the ordinary semver rule a range that names no
+pre-release never matches one — so `^1.0` does not admit `1.0.0-rc.4`
+while `^1.0.0-rc.1` does, and the refusal says so rather than leaving it
+to read as a bug here. `jwc new` records the release it scaffolded from.
+
+### Appending to an array cost a copy of it
+
+Reading a local copies its value, so `xs = array.push(@xs, v)` — the
+language's spelling of "append", and the shape of every loop that builds a
+response body — left the array shared and the push had to copy it: n
+copies for n elements. A 1000-row endpoint measured 28 responses a second
+with a p99 of 22.5 seconds.
+
+Both backends now move the local into the call when the result is assigned
+back over it, which leaves the callee holding the only reference;
+`Arc::make_mut` appends in place and copies only when somebody else is
+still holding the value, which is what keeps `let kept = @xs;` honest. The
+rule is `ast::self_append_item` and both backends call it, so they cannot
+disagree about which programs take the path. It stands down when the item
+reads the local being assigned.
+
+Measured on the accumulating loop, debug builds, 8000 elements: native
+2667 ms → 13 ms, interpreter 45643 ms → 113 ms.
+
+### `xs[i]` answered null for every index in the native backend
+
+It emitted `jwc_get_field` with the index rendered as a string, so `xs[0]`
+looked up the key `""` — while `jwc serve` answered the element. The two
+backends disagreeing about an operator. `jwc_index` is integer-indexed and
+array-only, which is what the interpreter does.
+
+### Not reproduced
+
+`update … set` on an `int` (int4) column, reported against v0.8.0 as
+binding the value as text or `int8`. It works on both backends in rc.4,
+including through an aliased column (`randomNumber as "randomnumber"`),
+and so do `string.slice` at the edges and `date.now()`'s rendering. What
+caused the HTTP 400s measured on `/updates` is still open.
+
 ## [1.0.0-rc.4] — freeze candidate — 2026-09-15
 
 Eight places where the program said one thing, `jwc check` agreed, and the

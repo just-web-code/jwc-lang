@@ -36,6 +36,6 @@ view OrgRoster of App.s {
         as {
             O.id,
             O.name,
-            members: { id, role, account: { id, email } },
+            members: { M.id, M.role, account: { A.id, A.email } },
         }
 }

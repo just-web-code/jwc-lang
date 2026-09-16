@@ -1058,6 +1058,21 @@ fn jwc_set_field_path(v: &mut V, path: &[&str], value: V) {
     }
 }
 
+/// `xs[i]` — an element of an array by position.
+///
+/// Integer-indexed and array-only, which is what `jwc serve` does: a
+/// non-array, a negative index and an index past the end all answer null.
+/// The native backend used to emit `jwc_get_field` here with the index
+/// rendered as a string, so `xs[0]` looked up the key `""` and every
+/// index answered null while the interpreter answered the element.
+fn jwc_index(base: &V, index: &V) -> V {
+    let i = jwc_to_int(index).unwrap_or(-1);
+    match base {
+        V::Array(items) if i >= 0 => items.get(i as usize).cloned().unwrap_or(V::Null),
+        _ => V::Null,
+    }
+}
+
 fn jwc_get_field(v: &V, k: &str) -> V {
     match v {
         V::Object(m) => m.get(k).cloned().unwrap_or(V::Null),
@@ -3913,13 +3928,18 @@ fn jwc_b_v1_array_take(arr: V, n: V) -> V {
 /// reference, and a `push` that appeared to mutate one would be the only
 /// place in the language where it did.
 fn jwc_b_v1_array_push(arr: V, item: V) -> V {
-    match &arr {
-        V::Array(items) => {
-            let mut out: Vec<V> = items.as_ref().clone();
-            out.push(item);
-            V::Array(::std::sync::Arc::new(out))
+    match arr {
+        // `make_mut` copies only when the array is shared. The caller that
+        // assigns the answer back over its own argument hands us the sole
+        // reference, and the accumulating loop that builds a response is
+        // that caller — so the copy the old code made on every iteration,
+        // which is what made building an n-element array cost n², happens
+        // now only when somebody else is still holding the old value.
+        V::Array(mut items) => {
+            ::std::sync::Arc::make_mut(&mut items).push(item);
+            V::Array(items)
         }
-        _ => arr,
+        other => other,
     }
 }
 

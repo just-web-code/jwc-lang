@@ -38,7 +38,7 @@ view OrgBoard of App.s {
         as {
             O.id,
             O.name,
-            notes: { id, body },
-            tags: { id, label },
+            notes: { N.id, N.body },
+            tags: { T.id, T.label },
         }
 }

@@ -630,6 +630,10 @@ impl<'a> Vm<'a> {
         self.scopes.iter().rev().find_map(|s| s.get(name))
     }
 
+    fn lookup_mut(&mut self, name: &str) -> Option<&mut Value> {
+        self.scopes.iter_mut().rev().find_map(|s| s.get_mut(name))
+    }
+
     fn assign(&mut self, name: &str, v: Value) {
         for s in self.scopes.iter_mut().rev() {
             if s.contains_key(name) {
@@ -715,6 +719,23 @@ impl<'a> Vm<'a> {
                 Ok(Flow::Normal)
             }
             Stmt::Assign { target, value, .. } => {
+                // `xs = array.push(@xs, v)` appends in place. Reading the
+                // local copies the whole array, so the general path below
+                // costs a copy per iteration — n copies to build n
+                // elements. `self_append_item` is the same rule the native
+                // backend applies, so the two agree on which programs take
+                // this path.
+                if let AssignTarget::Local { name, .. } = target {
+                    if let Some(item) = crate::ast::self_append_item(value, &name.name) {
+                        if matches!(self.lookup(&name.name), Some(Value::Array(_))) {
+                            let v = self.eval(item).await?;
+                            if let Some(Value::Array(items)) = self.lookup_mut(&name.name) {
+                                items.push(v);
+                                return Ok(Flow::Normal);
+                            }
+                        }
+                    }
+                }
                 let v = self.eval(value).await?;
                 match target {
                     AssignTarget::Local { name, .. } => self.assign(&name.name, v),

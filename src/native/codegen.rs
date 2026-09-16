@@ -1808,6 +1808,21 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
             out.push_str(&format!("{pad}let mut {} = {v};\n", local(&name.name)));
         }
         Stmt::Assign { target, value, .. } => {
+            // Append in place when the array is being assigned back over
+            // itself — see `self_append_item`.
+            if let crate::ast::AssignTarget::Local { name: i, .. } = target {
+                if ctx.is_local(&i.name) {
+                    if let Some(item) = crate::ast::self_append_item(value, &i.name) {
+                        let v = emit_expr(item, ctx)?;
+                        ctx.used.insert("jwc_b_v1_array_push".to_string());
+                        out.push_str(&format!(
+                            "{pad}{n} = jwc_b_v1_array_push(::std::mem::replace(&mut {n}, V::Null), {v});\n",
+                            n = local(&i.name)
+                        ));
+                        return Ok(());
+                    }
+                }
+            }
             let v = emit_expr(value, ctx)?;
             match target {
                 crate::ast::AssignTarget::Local { name: i, .. } => {
@@ -2038,7 +2053,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
         ExprKind::Index { base, index } => {
             let b = emit_expr(base, ctx)?;
             let i = emit_expr(index, ctx)?;
-            format!("jwc_get_field(&{b}, jwc_str_view(&{i}).unwrap_or(\"\"))")
+            format!("jwc_index(&{b}, &{i})")
         }
 
         ExprKind::Unary { op, rhs } => {

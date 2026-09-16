@@ -18,14 +18,14 @@ view AccountManager of App.s {
     select A from App.s.Accounts
         left join App.s.Accounts M on M.id == A.manager_id
             as one manager
-        as { A.id, A.email, manager: { id, email } }
+        as { A.id, A.email, manager: { M.id, M.email } }
 }
 
 view AccountReports of App.s {
     select A from App.s.Accounts
         left join App.s.Accounts R on R.manager_id == A.id
             as many reports orderby email asc limit 100
-        as { A.id, A.email, reports: { id, email } }
+        as { A.id, A.email, reports: { R.id, R.email } }
 }
 
 /// Two self-joins in one query: an invite's inviter and its acceptor are
@@ -47,8 +47,8 @@ view InviteParties of App.s {
         as {
             I.id,
             I.email,
-            inviter:  { id, email },
-            acceptor: { id, email },
+            inviter:  { B.id, B.email },
+            acceptor: { C.id, C.email },
         }
 }
 
@@ -59,7 +59,7 @@ service Chains {
         return select A from App.s.Accounts
             left join App.s.Accounts M on M.id == A.manager_id as one manager
             left join App.s.Accounts G on G.id == M.manager_id as one manager under manager
-            as { A.id, A.email, manager: { id, email, manager: { id, email } } }
+            as { A.id, A.email, manager: { M.id, M.email, manager: { M.id, M.email } } }
             orderby A.id asc;
     }
 
@@ -71,7 +71,7 @@ service Chains {
             left join App.s.Accounts R on R.manager_id == A.id
                 where R.email like @pattern
                 as many reports orderby email asc limit 100
-            as { A.id, A.email, reports: { id, email } }
+            as { A.id, A.email, reports: { R.id, R.email } }
             orderby A.id asc;
     }
 

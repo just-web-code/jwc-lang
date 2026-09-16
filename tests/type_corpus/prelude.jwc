@@ -84,7 +84,7 @@ view OrgList of App.s {
     select O from App.s.Orgs
         left join App.s.Members M on M.org_id == O.id
             as many members orderby account_id asc limit 200
-        as { O.id, O.slug, O.name, members: { account_id, role } }
+        as { O.id, O.slug, O.name, members: { M.account_id, M.role } }
 }
 
 /// A view with both a nested `one` and a collection: ordering by the
@@ -95,7 +95,7 @@ view NoteWithOrg of App.s {
         left join App.s.Orgs O on O.id == N.org_id as one org
         left join App.s.Invites I on I.org_id == N.org_id
             as many invites under N orderby id asc limit 200
-        as { N.id, N.body, org: { id, name }, invites: { id, email } }
+        as { N.id, N.body, org: { O.id, O.name }, invites: { I.id, I.email } }
 }
 
 class NoteInput {

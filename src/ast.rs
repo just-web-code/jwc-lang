@@ -1126,3 +1126,89 @@ pub struct DeleteExpr {
     pub first: bool,
     pub span: Span,
 }
+
+// ------------------------------------------------- shared shape queries
+
+/// Whether `callee` spells `<ns>.<name>`.
+fn is_callee(callee: &Expr, ns: &str, name: &str) -> bool {
+    let ExprKind::Field { base, field } = &*callee.kind else {
+        return false;
+    };
+    if field.name != name {
+        return false;
+    }
+    matches!(&*base.kind, ExprKind::Name(i) if i.name == ns)
+}
+
+/// Whether `e` could read the local `name`.
+///
+/// Conservative on purpose: a shape this does not enumerate answers
+/// `true`, so a variant added later costs the append optimisation below
+/// rather than the meaning of the program.
+pub fn mentions_local(e: &Expr, name: &str) -> bool {
+    match &*e.kind {
+        ExprKind::Int(_)
+        | ExprKind::Decimal(_)
+        | ExprKind::Str(_)
+        | ExprKind::RawStr(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Null => false,
+        ExprKind::Name(i) | ExprKind::Local(i) => i.name == name,
+        ExprKind::Field { base, .. } => mentions_local(base, name),
+        ExprKind::Index { base, index } => {
+            mentions_local(base, name) || mentions_local(index, name)
+        }
+        ExprKind::Call { callee, args, .. } => {
+            mentions_local(callee, name) || args.iter().any(|a| mentions_local(a, name))
+        }
+        ExprKind::Unary { rhs, .. } => mentions_local(rhs, name),
+        ExprKind::Binary { lhs, rhs, .. } | ExprKind::Coalesce { lhs, rhs } => {
+            mentions_local(lhs, name) || mentions_local(rhs, name)
+        }
+        ExprKind::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => {
+            mentions_local(cond, name)
+                || mentions_local(then, name)
+                || mentions_local(otherwise, name)
+        }
+        ExprKind::In { lhs, items, .. } => {
+            mentions_local(lhs, name) || items.iter().any(|i| mentions_local(i, name))
+        }
+        ExprKind::Object(entries) => entries.iter().any(|e| match e {
+            ObjEntry::Field { value, .. } => mentions_local(value, name),
+            // `...@xs except a` names the local outright.
+            ObjEntry::Spread { source, .. } => source.name == name,
+        }),
+        ExprKind::Array(items) => items.iter().any(|i| mentions_local(i, name)),
+        _ => true,
+    }
+}
+
+/// The item of `xs = array.push(@xs, item)` — the language's spelling of
+/// "append", and the shape of every loop that accumulates a response.
+///
+/// Emitting the first argument as `xs.clone()` leaves the array shared, so
+/// the push has to copy it: n copies to build n elements, which is what
+/// made a 1000-row response quadratic. Moving the local into the call
+/// instead leaves the callee holding the only reference, and
+/// `jwc_b_v1_array_push` appends in place.
+///
+/// `None` unless the call really is that shape and the item cannot read
+/// the local — the move empties it, and Rust evaluates arguments
+/// left to right, so an item that read it would see the wrong value.
+pub fn self_append_item<'e>(value: &'e Expr, target: &str) -> Option<&'e Expr> {
+    let ExprKind::Call { callee, args, .. } = &*value.kind else {
+        return None;
+    };
+    if !is_callee(callee, "array", "push") || args.len() != 2 {
+        return None;
+    }
+    match &*args[0].kind {
+        ExprKind::Name(i) | ExprKind::Local(i) if i.name == target => {}
+        _ => return None,
+    }
+    (!mentions_local(&args[1], target)).then_some(&args[1])
+}

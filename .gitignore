@@ -1,6 +1,8 @@
 /target
 examples/*/bin/
 examples/*/.jwc-build/
+tests/*/bin/
+tests/*/.jwc-build/
 
 # Claude Code session artefacts
 .claude/scheduled_tasks.lock

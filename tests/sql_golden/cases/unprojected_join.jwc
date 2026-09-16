@@ -49,7 +49,7 @@ service Notes {
         return select N from App.s.Notes
             left join App.s.Orgs O on O.id == N.org_id as one org
             where O.region == @region
-            as { N.id, org: { id, name } }
+            as { N.id, org: { O.id, O.name } }
             orderby N.id asc;
     }
 }

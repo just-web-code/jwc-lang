@@ -12,7 +12,7 @@ view MemberUnderOrg of App.s {
     select N from App.s.Notes
         left join App.s.Orgs O on O.id == N.org_id as one org
         left join App.s.Members M on M.org_id == O.id as one membership
-        as { N.id, N.body, org: { id, name, membership: { account_id, role } } }
+        as { N.id, N.body, org: { O.id, O.name, membership: { M.account_id, M.role } } }
 }
 
 // The same joins with the shape written flat. The checker accepted it and
@@ -21,7 +21,7 @@ view MemberBesideOrg of App.s {                 // expect: E0543
     select N from App.s.Notes
         left join App.s.Orgs O on O.id == N.org_id as one org
         left join App.s.Members M on M.org_id == O.id as one membership
-        as { N.id, N.body, org: { id, name }, membership: { account_id, role } }
+        as { N.id, N.body, org: { O.id, O.name }, membership: { M.account_id, M.role } }
 }
 
 // Two joins that both hang off the driving table stay flat, and emit.
@@ -29,5 +29,5 @@ view BothOffTheDriver of App.s {
     select I from App.s.Invites
         left join App.s.Orgs O on O.id == I.org_id as one org
         left join App.s.Orgs B on B.id == I.invited_by as one inviter
-        as { I.id, I.email, org: { id, name }, inviter: { id, name } }
+        as { I.id, I.email, org: { O.id, O.name }, inviter: { B.id, B.name } }
 }

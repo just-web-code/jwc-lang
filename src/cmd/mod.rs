@@ -208,6 +208,7 @@ pub fn fmt(paths: Vec<PathBuf>, check_only: bool, to_stdout: bool) -> Result<()>
 
     let mut files: Vec<PathBuf> = Vec::new();
     for p in &paths {
+        crate::workspace::language_check(p)?;
         files.extend(collect_sources(p)?);
     }
     // Two inputs can name the same file — `jwc fmt src src/app.jwc`. Left

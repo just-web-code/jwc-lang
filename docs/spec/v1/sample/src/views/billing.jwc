@@ -15,8 +15,8 @@ view SubscriptionDetail of App.billing {
             S.current_period_start,
             S.current_period_end,
             S.cancel_at,
-            plan: { id, code, name, price, currency, interval },
-            org: { id, slug, name }
+            plan: { P.id, P.code, P.name, P.price, P.currency, P.interval },
+            org: { O.id, O.slug, O.name }
         }
 }
 
@@ -37,8 +37,8 @@ view InvoiceDetail of App.billing {
             I.issued_at,
             I.due_at,
             I.paid_at,
-            lines: { id, description, quantity, unit_price },
-            payments: { id, provider, provider_ref, amount, status, created_at }
+            lines: { L.id, L.description, L.quantity, L.unit_price },
+            payments: { Y.id, Y.provider, Y.provider_ref, Y.amount, Y.status, Y.created_at }
         }
 }
 
