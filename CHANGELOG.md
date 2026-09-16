@@ -5070,7 +5070,7 @@ wins note on the native-build page, response-phase `after { ... }`
 section on the README + middleware doc, seven-step "shipping a new
 builtin" recipe in CONTRIBUTING.md.
 
-## [1.0.0-rc.5] — freeze candidate — 2026-09-16
+## [Unreleased]
 
 ### Added
 - **W3C `traceparent` propagation.** When an upstream service sends
