@@ -24,10 +24,14 @@ Companion to [`TODO.md`](TODO.md), which holds field defects found against
 | 7 | MyWallet, shortener | rc.3's write binder shipped without a migration diagnostic | ergonomics |
 | 8 | MyWallet, shortener | 116 diagnostics carried a machine-applicable fix and nothing applies them | ergonomics |
 | 9 | MyWallet, shortener | `jwc fmt` cannot format a file with a comment inside `server { }` | ergonomics |
+| 10 | reading the language | `after` runs *before* the response is sent, and only a write can be taken off that path | naming, gap |
+| 11 | shortener | nothing in the language runs two things at once inside one request | gap |
 
 Classes: **soundness** (a wrong answer), **wrong status** (the right refusal
 at the wrong layer, so a client mistake reads as a server fault),
-**ergonomics** (correct, but the program has to say it the long way).
+**ergonomics** (correct, but the program has to say it the long way),
+**naming** (right thing, wrong word), **gap** (the language has no way to
+say it at all — a 1.1 question, not an rc.7 fix).
 
 ---
 
@@ -358,6 +362,137 @@ style rule the author broke.
 
 ---
 
+## 10. `after` runs *before* the response is sent
+
+**Class:** naming, and a gap behind it · **Found:** a reader asking what
+`after` does
+
+`after` is not a deferred hook. It is the unwind half of the middleware
+onion — after the *handler chain*, before the *socket write* — and it has
+to be, for three reasons the spec is right about:
+
+- it may set response headers (§5.4), and nothing that touches the response
+  can run once the bytes are gone;
+- `response.status()` and `response.duration_ms()` exist nowhere else
+  (`E0734`), and the status is not known until the handler **and** the
+  `errorHandler` are done. jwc-shortener's 0.9.x version is the proof: with
+  no `after`, it hardcoded `status = 200` for 404s and 500s and
+  `latency_ms = 0`, so every percentile it reported was a zero;
+- it runs for **every** outcome, including a middleware short-circuit where
+  the handler never ran at all (§4.3). Nothing written in a handler covers
+  that case.
+
+So the mechanism is sound. Three things around it are not.
+
+**The name promises the opposite of what it does.** Measured, on a
+middleware whose `after` block spins a million turns:
+
+| | latency |
+|---|---|
+| route with no `after` | 0.001 s |
+| same route, `after` spinning 10⁶ | **5.8 s**, and `x-spun: 1000000` on the response |
+
+With `request_timeout = "2s"` the same request is a **504 at 2.004 s** — the
+200 the handler built is discarded. A block named `after` can turn a
+finished response into a gateway timeout.
+
+**Only a write can be taken off that path.** `writes.md §7.3` states the
+problem in as many words — *"an ordinary insert there puts a database round
+trip in front of every response: every request waits for its own log row"* —
+and answers it with `buffered`. Measured on jwc-shortener:
+
+| | median | p90 |
+|---|---|---|
+| `insert … buffered` | 2.3 ms | 2.8 ms |
+| the same insert, plain | 3.8 ms | 4.8 ms |
+
+`BENCHMARK.md` records 6.28 ms → 482 µs and 7 951 → 102 551 req/s on the
+native backend. But `buffered` is a write form. An `http.post` to a webhook,
+a `redis` write or a `mail.send` in an `after` block still sits in front of
+the response, and `E0811` means each also needs a postfix `catch`.
+
+**There is no hook that runs after the write.** Between `after` (in the
+request) and `job` + `dispatch` (a durable row in `_jwc_jobs`, replayed by a
+worker) there is nothing. Telemetry wants neither: the first charges the
+client, and the second writes a queue row per request, which costs more than
+the insert it was avoiding.
+
+**Proposal.** Not a rename — `after` is the right word for the chain
+position and every middleware system uses it. Say what it means in the one
+place a reader looks first: middleware.md §5 opens with *"after the handler
+chain, before the response is written"*, and the `E0811` help says so too.
+Then decide whether the third point is a gap worth closing in 1.1, next to
+finding 11 — they are the same question asked from two ends.
+
+---
+
+## 11. Nothing in the language runs two things at once inside one request
+
+**Class:** gap — a 1.1 question, not an rc.7 fix · **Found:** reading
+jwc-shortener's `/api/v1/stats`
+
+The route runs four queries that do not depend on each other. With
+`JWC_LOG_SQL=1`:
+
+```
+[sql] 4.73ms  count(*) over api_call
+[sql] 2.62ms  count/sum/max over link
+[sql] 1.56ms  top 5 links by hits
+[sql] 1.12ms  count(*) over api_call in the last 24h
+```
+
+10.03 ms, one after another, inside a 17.2 ms request. Nothing reads another's
+result — all four are combined only in the final `json({ … })`. Run together
+the wall clock is the slowest of them, 4.73 ms, so **5.3 ms of a 17 ms request
+is spent waiting in series for no reason**.
+
+The language has no way to express it. `dispatch` is durable and answers
+minutes later; `after` is in the same request and in front of the response;
+everything else is sequential. The runtime is already multi-threaded *across*
+requests — this is the gap *within* one.
+
+Three different needs sit behind this, and they should not get one answer:
+
+**(a) Concurrent I/O in one handler.** The shortener's case, and any handler
+that calls two services. The JWC-shaped form is structured and scoped, the
+way `transaction { }` already is:
+
+```
+parallel {
+    let calls = select A from App.public.ApiCalls as { total: count(A.id) } first;
+    let links = select L from App.public.Links   as { … } first;
+    let top   = select L from App.public.Links … limit 5;
+}
+```
+
+The bindings are in scope after the block; the block joins before it ends.
+What makes it a design question rather than a feature request is what it has
+to answer:
+
+| | |
+|---|---|
+| connections | N branches want N pool connections. `pool_size = 10` with ten requests each holding one and wanting two is a deadlock, not a slowdown. A cap, or a rule that a branch borrows from a reservation the request already holds |
+| inside `transaction { }` | one connection by definition, so this has to be an error there — the same shape of rule `buffered` already carries (`E0612`) |
+| raise sets | two branches can raise. The language computes raise sets statically, so it can require them compatible and pick a deterministic winner — first in source order, the others cancelled |
+| writes | two concurrent writes to one table in one block is a self-deadlock a reader will not see. Reads and pure computation first |
+
+**(b) Fire-and-forget that is not durable.** Finding 10's third point. A
+webhook call or a cache warm that should not charge the client and does not
+deserve a `_jwc_jobs` row.
+
+**(c) CPU work off the request.** The million-turn loop from finding 10. This
+is not concurrency inside a request at all — it wants a worker, which is what
+`job` already is. Worth stating explicitly so it stops being asked as though
+it were the same thing as (a).
+
+**Proposal.** None yet, deliberately — this is the one item on the list that
+is a language change rather than a defect. Recorded here so the question is
+written down with the measurement attached, and so rc.7's scope can be
+decided knowing it is waiting. (a) has the number; (b) is the one that keeps
+coming back through `after`.
+
+---
+
 ## Migration log
 
 What each application needed to reach rc.6 from the release it was written
@@ -404,10 +539,16 @@ already printing. Neither port surfaced a *language* gap — both services do
 under rc.6 exactly what they did under 0.9.x, verified against a real
 Postgres and Redis.
 
-That is the shape of the whole list. rc.6 does not get the answers wrong,
+That is the shape of most of the list. rc.6 does not get the answers wrong,
 except in the two coercions at the top. What it gets wrong is the walk from
 an older release to this one: it knows every step and makes the reader take
 each one by hand.
+
+Findings 10 and 11 are the exception, and they did not come from a
+migration. They came from reading the language and asking what it can say.
+11 is a language change and does not belong in rc.7 at all; it is written
+down here because the measurement was in hand and the question keeps
+arriving through 10.
 
 ### Suggested order
 
@@ -420,5 +561,13 @@ each one by hand.
 4. **5 and 7** — say which release the source is from, and name the
    rc-series removals the way the 0.9 ones are named.
 5. **3 and 9** — small honesty fixes in `fmt`.
-6. **4** — `jwc explain` over writes. The largest, and the one with a
-   defect already charged to it.
+6. **4** — `jwc explain` over writes. The largest of the defects, and the
+   one with a defect of its own already charged to it.
+7. **10**, the documentation half only — one sentence in middleware.md §5
+   and one in the `E0811` help. The gap behind it waits for 11.
+
+Not rc.7: **11**. It is a language change with a pool-deadlock question
+inside it, and the right time to decide it is when rc.7 is out and the
+freeze gates are what is left. The number to hold onto is 5.3 ms of a
+17 ms request, on a route that was written the only way the language
+allows.
