@@ -44,7 +44,7 @@ mkdir src
   "name": "hello",
   "type": "app",
   "version": "0.1.0",
-  "jwc": "1.0.0-rc.5",
+  "jwc": "1.0.0-rc.6",
   "entry": "src/app.jwc"
 }
 ```

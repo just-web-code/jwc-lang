@@ -90,8 +90,9 @@ Postgres:
 | **Redis** | `redis.*` over a pooled driver behind the `redis` Cargo feature, with an atomic `rate_limit` |
 
 [`ROADMAP.md`](ROADMAP.md) is the source of truth for what counts as done,
-partial, and **non-goal**. Next is **v1.0.0-rc.1**: the conformance corpus
-blocking in CI, an external review, and migrating a pilot application.
+partial, and **non-goal**. The syntax freeze is still gated on the
+conformance corpus blocking in CI, an external review, and migrating a
+pilot application.
 
 ---
 

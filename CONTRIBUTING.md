@@ -269,9 +269,9 @@ that, work that reliably needs doing:
 - **`docs/archive-0.9/`** is frozen; do not fix things there beyond
   broken links.
 
-Larger work is tracked in [`ROADMAP.md`](ROADMAP.md). The next milestone
-is **v1.0.0-rc.1**: the conformance corpus blocking in CI, an external
-review, and a migrated pilot application.
+Larger work is tracked in [`ROADMAP.md`](ROADMAP.md). The syntax freeze is
+still gated on the conformance corpus blocking in CI, an external review,
+and a migrated pilot application.
 
 ## Licence and Code of Conduct
 
