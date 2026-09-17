@@ -3,7 +3,7 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.6] — freeze candidate — 2026-09-17
 
 ### `update … first` and `delete … first` lost writes under concurrency
 
@@ -62,6 +62,23 @@ block below it queries — and scans every fence, `no-compile` included; and
 `every_documented_manifest_names_this_release` checks that each documented
 `jwcproj.json` carries `"jwc"` at this version, which three pages did not,
 hello-world among them.
+
+### Every version the docs write out
+
+A release moves `Cargo.toml` and twenty-odd places that spell the same
+version by hand — install commands, a Dockerfile arg, a `--version`
+transcript, SEMVER.md's own heading — and nothing but a reader's eye
+connected them to the crate. Writing this bump turned up two that had
+drifted: SEMVER.md still illustrated compatibility with the pair of
+releases before the current one, and the README and `CONTRIBUTING.md` both
+announced rc.1 as the **next** milestone, five releases after it shipped.
+
+`every_documented_version_names_this_release` reads them now. A version
+that names another release on purpose says so in the words before it — a
+range bound (`^1.0.0-rc.1`), `as of`, a `ROADMAP` milestone, or the
+compiler's own `written for`, which exists to show two versions
+disagreeing — so the exemptions are visible in the line rather than kept
+as a list of paths somewhere else.
 
 ## [1.0.0-rc.5] — freeze candidate — 2026-09-16
 

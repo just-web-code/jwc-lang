@@ -585,3 +585,150 @@ fn json_blocks(text: &str) -> Vec<(usize, String)> {
     }
     out
 }
+
+/// Every release version written out in the docs is *this* release.
+///
+/// A bump moves `Cargo.toml`; twenty-odd other places spell the same
+/// version by hand, and only a reader's eye connected them. Two had gone
+/// stale without anyone noticing: SEMVER.md illustrated compatibility with
+/// the previous pair of releases, and the README and CONTRIBUTING both
+/// announced rc.1 as the *next* milestone five releases after it shipped.
+///
+/// `ROADMAP.md` is deliberately not read. Its milestone names are section
+/// titles, and shipping a release does not rename them.
+///
+/// Four shapes name another release on purpose, each recognised from the
+/// words immediately before it rather than listed by path:
+///
+/// - `^1.0.0-rc.1` — a range bound; a fixed fact about what the field admits
+/// - `as of 1.0.0-rc.1` — when something became true
+/// - `ROADMAP v1.0.0-rc.1` — a milestone's name, owned by that file
+/// - ``written for `1.0.0-rc.4` `` — the compiler's own wording for a *gap*
+///
+/// A bare `` `rc.N` `` is the `rc.N → rc.N+1` sentence, so it may also name
+/// the release before this one.
+#[test]
+fn every_documented_version_names_this_release() {
+    let root = repo_root();
+    let mine = env!("CARGO_PKG_VERSION");
+    // The policy and the contributor guide pin the version too, and neither
+    // is under `docs/`.
+    let mut files = markdown_files();
+    files.push(root.join("SEMVER.md"));
+    files.push(root.join("CONTRIBUTING.md"));
+
+    let mut stale: Vec<String> = Vec::new();
+    let mut found = 0usize;
+
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let rel: &Path = file.strip_prefix(&root).unwrap_or(&file);
+        for (n, line) in text.lines().enumerate() {
+            let at =
+                |what: &str| format!("{}:{}: {what}\n      {}", rel.display(), n + 1, line.trim());
+
+            for (col, token) in release_tokens(line) {
+                if names_another_release_on_purpose(line, col) {
+                    continue;
+                }
+                found += 1;
+                let got = token.strip_prefix('v').unwrap_or(token);
+                if got != mine {
+                    stale.push(at(&format!("says {got}")));
+                }
+            }
+
+            for written in bare_candidates(line) {
+                match this_candidate() {
+                    Some(now) if written == now || written + 1 == now => {}
+                    Some(_) => stale.push(at(&format!("says `rc.{written}`"))),
+                    // Not a candidate release; the sentence does not apply.
+                    None => {}
+                }
+            }
+        }
+    }
+
+    // Without a floor, a scanner that stops matching makes this pass by
+    // checking nothing.
+    assert!(
+        found >= 15,
+        "expected the documented version pins, saw {found} — the scanner or \
+         the way the docs write a version changed"
+    );
+    assert!(
+        stale.is_empty(),
+        "{} documented version(s) do not name {mine}. They move with \
+         Cargo.toml:\n  {}",
+        stale.len(),
+        stale.join("\n  ")
+    );
+}
+
+/// This release's candidate number, if it is one: `1.0.0-rc.6` → `6`.
+fn this_candidate() -> Option<u32> {
+    env!("CARGO_PKG_VERSION").split_once("-rc.")?.1.parse().ok()
+}
+
+/// `1.0.0-rc.6` and `v1.0.0-rc.6`, each with the byte it starts at.
+fn release_tokens(line: &str) -> Vec<(usize, &str)> {
+    runs(line)
+        .into_iter()
+        .filter(|(_, t)| is_release(t.strip_prefix('v').unwrap_or(t)))
+        .collect()
+}
+
+/// Maximal runs of the characters a version is written with. A sigil like
+/// `^` is not one of them, which is what leaves it visible to the check
+/// below.
+fn runs(line: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, c) in line.char_indices() {
+        match (c.is_ascii_alphanumeric() || c == '.' || c == '-', start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                out.push((s, &line[s..i]));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        out.push((s, &line[s..]));
+    }
+    out
+}
+
+fn is_release(t: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let Some((core, n)) = t.split_once("-rc.") else {
+        return false;
+    };
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| digits(p)) && digits(n)
+}
+
+/// Whether the words immediately before a version say it is a fact about
+/// some other release rather than a pin on this one.
+fn names_another_release_on_purpose(line: &str, at: usize) -> bool {
+    let before = &line[..at];
+    if before.ends_with('^') || before.ends_with('~') {
+        return true;
+    }
+    let lead = before.trim_end_matches(['`', '\'', '"', '*', ' ']);
+    lead.ends_with("as of") || lead.ends_with("ROADMAP") || lead.ends_with("written for")
+}
+
+/// `` `rc.6` `` — the bare form. Only inside backticks, so prose about an
+/// older release is not swept up with it.
+fn bare_candidates(line: &str) -> Vec<u32> {
+    line.split('`')
+        .skip(1)
+        .step_by(2)
+        .filter_map(|t| t.strip_prefix("rc."))
+        .filter_map(|n| n.parse().ok())
+        .collect()
+}
