@@ -5,6 +5,17 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### middleware.md §5 says where `after` runs
+
+`after` is the unwind half of the middleware onion — after the handler
+chain, before the socket write — and the section that defines it never
+said so. Measured: a block that spins a million turns adds 5.8 s to the
+response, and under `request_timeout = "2s"` turns the handler's 200 into
+a 504. The section now opens with the position, why it has to be there
+(headers, `response.status()`), and what belongs elsewhere (`buffered`
+for a write, `job` for work that should not charge the client). The
+`E0811` help says the same.
+
 ### `jwc explain` lists the writes
 
 A site was a `select`, so `explain` could not list an `insert`, `update`
