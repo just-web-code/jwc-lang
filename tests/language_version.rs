@@ -189,7 +189,10 @@ fn an_undated_project_with_old_dialect_diagnostics_is_told_so_once() {
     let note = out.find("names no `jwc` version").expect("note");
     let first = out.find("error[E09").expect("a migration diagnostic");
     assert!(note < first, "the note comes first:\n{out}");
-    assert!(out.contains("E0901, E0903"), "it names the codes it saw:\n{out}");
+    assert!(
+        out.contains("E0901, E0903"),
+        "it names the codes it saw:\n{out}"
+    );
     assert!(out.contains(&format!("\"jwc\": \"{MINE}\"")), "{out}");
 
     // The same manifest, source that is merely wrong: no note. The gap

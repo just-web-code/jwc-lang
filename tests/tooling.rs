@@ -657,19 +657,31 @@ fn fix_applies_every_replacement_the_compiler_carries() {
     assert!(!refused.status.success());
 
     let dry = jwc(&["fix", path, "--dry-run"]);
-    assert!(dry.status.success(), "{}", String::from_utf8_lossy(&dry.stderr));
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
     let dry_out = stdout(&dry);
     assert!(dry_out.contains("would fix"), "{dry_out}");
     assert!(dry_out.contains("nothing written"), "{dry_out}");
     let untouched = std::fs::read_to_string(&src).expect("read");
-    assert!(untouched.contains("-- it's"), "--dry-run must write nothing");
+    assert!(
+        untouched.contains("-- it's"),
+        "--dry-run must write nothing"
+    );
 
     let fixed = jwc(&["fix", path]);
-    assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
     let out = stdout(&fixed);
     assert!(out.contains("fixed "), "{out}");
     assert!(
-        out.contains("`jwc` is `0.9.901`") && out.contains(&format!("set it to `{}`", env!("CARGO_PKG_VERSION"))),
+        out.contains("`jwc` is `0.9.901`")
+            && out.contains(&format!("set it to `{}`", env!("CARGO_PKG_VERSION"))),
         "it names the manifest field left to change:\n{out}"
     );
 
@@ -767,7 +779,11 @@ fn explain_lists_the_writes_with_their_sql() {
     .expect("write");
     let path = dir.path().to_str().expect("utf8");
     let out = jwc(&["explain", path, "--sql"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = stdout(&out);
 
     assert!(text.contains("4 statements"), "{text}");
@@ -775,7 +791,10 @@ fn explain_lists_the_writes_with_their_sql() {
         ("(select)", "SELECT "),
         ("(insert)", "INSERT INTO s.todos (title) VALUES"),
         ("(update)", "UPDATE s.todos x SET title = "),
-        ("(delete)", "DELETE FROM s.todos x WHERE x.id = (SELECT y.id FROM s.todos y"),
+        (
+            "(delete)",
+            "DELETE FROM s.todos x WHERE x.id = (SELECT y.id FROM s.todos y",
+        ),
     ] {
         assert!(text.contains(kind), "`{kind}` in:\n{text}");
         assert!(text.contains(sql), "`{sql}` in:\n{text}");
@@ -783,6 +802,9 @@ fn explain_lists_the_writes_with_their_sql() {
     // The lock the lost-write fix was about, visible at last.
     assert_eq!(text.matches("FOR UPDATE LIMIT 1").count(), 2, "{text}");
     // A spread prints its class's fields and says which are sent.
-    assert!(text.contains("`...@req` sends title, done — only the fields present"), "{text}");
+    assert!(
+        text.contains("`...@req` sends title, done — only the fields present"),
+        "{text}"
+    );
     assert!(!text.contains("not compilable"), "{text}");
 }

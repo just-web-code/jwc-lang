@@ -21,7 +21,11 @@ fn program(source: &str) -> Arc<jwc::exec::Program> {
     Arc::new(serve::load(&ws).unwrap_or_else(|e| panic!("{e}")))
 }
 
-async fn get(program: Arc<jwc::exec::Program>, path: &str, query: &[(&str, &str)]) -> jwc::exec::Response {
+async fn get(
+    program: Arc<jwc::exec::Program>,
+    path: &str,
+    query: &[(&str, &str)],
+) -> jwc::exec::Response {
     serve::handle(
         program,
         Incoming {

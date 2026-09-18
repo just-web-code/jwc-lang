@@ -215,9 +215,17 @@ fn an_arrow_return_annotation_names_the_colon() {
                function f(x: int) -> int {\n    return @x;\n}\n";
     let p = jwc::parse_str("<arrow>", src);
     let arrows: Vec<_> = p.diags.iter().filter(|d| d.code == "E0906").collect();
-    assert_eq!(arrows.len(), 1, "one `->`, one diagnostic:\n{}", p.render_all());
+    assert_eq!(
+        arrows.len(),
+        1,
+        "one `->`, one diagnostic:\n{}",
+        p.render_all()
+    );
     assert!(
-        arrows[0].note.as_deref().is_some_and(|n| n.contains("write `: T`")),
+        arrows[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("write `: T`")),
         "the note must show the form: {:?}",
         arrows[0].note
     );

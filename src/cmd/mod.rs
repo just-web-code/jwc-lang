@@ -2029,9 +2029,17 @@ pub fn fix(path: PathBuf, dry_run: bool) -> Result<()> {
             let built = crate::model::build(&ws);
             let symbols = crate::symbols::build(&ws, &built.model);
             let checked = crate::check::check(&ws, &symbols, &built.model);
-            for (loc, d) in built.diags.iter().chain(&symbols.diags).chain(&checked.diags) {
+            for (loc, d) in built
+                .diags
+                .iter()
+                .chain(&symbols.diags)
+                .chain(&checked.diags)
+            {
                 if let Some(fix) = &d.fix {
-                    fixes.entry(loc.file).or_default().push((loc.span, fix.clone()));
+                    fixes
+                        .entry(loc.file)
+                        .or_default()
+                        .push((loc.span, fix.clone()));
                 }
             }
         }

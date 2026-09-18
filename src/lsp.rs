@@ -348,16 +348,18 @@ impl Analysis {
         let Some(select) = site.select() else {
             // A write: the statement the runtime sends, with what it
             // cannot know from the source named beside it.
-            return Some(match crate::query_sql::write_sql(&self.model, &self.sym, &site.owner, site.stmt) {
-                Ok((sql, notes)) => {
-                    let mut out = sql;
-                    for n in notes {
-                        out.push_str(&format!("\n-- {n}"));
+            return Some(
+                match crate::query_sql::write_sql(&self.model, &self.sym, &site.owner, site.stmt) {
+                    Ok((sql, notes)) => {
+                        let mut out = sql;
+                        for n in notes {
+                            out.push_str(&format!("\n-- {n}"));
+                        }
+                        (span, out)
                     }
-                    (span, out)
-                }
-                Err(why) => (span, format!("-- not compilable: {why}")),
-            });
+                    Err(why) => (span, format!("-- not compilable: {why}")),
+                },
+            );
         };
         let plan = crate::query::plan(select, &self.sym);
         if let Some(d) = plan.diags.iter().find(|d| d.severity == Severity::Error) {

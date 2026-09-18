@@ -674,8 +674,7 @@ async fn the_port_is_declared_and_the_environment_wins_over_it() {
 /// through `check`, `fmt` and `serve` without trouble.
 #[tokio::test]
 async fn a_long_concatenation_is_not_nesting() {
-    let mut src =
-        String::from("namespace h;\nfunction page(): text {\n    return \"line 0\\n\"\n");
+    let mut src = String::from("namespace h;\nfunction page(): text {\n    return \"line 0\\n\"\n");
     for i in 1..=300 {
         src.push_str(&format!("        + \"line {i}\\n\"\n"));
     }

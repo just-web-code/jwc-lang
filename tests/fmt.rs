@@ -602,12 +602,19 @@ fn comments_inside_server_record_and_insert_survive_formatting() {
         ("port          = 8080;", "/// Required by any `page` query"),
         ("/// Required by any `page` query", "cursor_secret = \"x\";"),
         ("pool {", "// ten is plenty here"),
-        ("insert T into App.s.Todos {", "// the title the client sent"),
+        (
+            "insert T into App.s.Todos {",
+            "// the title the client sent",
+        ),
         ("return json({", "// the reason for the next line"),
         ("// the reason for the next line", "a: 1,"),
     ] {
-        let b = printed.find(before).unwrap_or_else(|| panic!("`{before}` in:\n{printed}"));
-        let a = printed.find(after).unwrap_or_else(|| panic!("`{after}` in:\n{printed}"));
+        let b = printed
+            .find(before)
+            .unwrap_or_else(|| panic!("`{before}` in:\n{printed}"));
+        let a = printed
+            .find(after)
+            .unwrap_or_else(|| panic!("`{after}` in:\n{printed}"));
         assert!(b < a, "`{before}` must precede `{after}`:\n{printed}");
     }
     // Already canonical: the printer's own output round-trips.

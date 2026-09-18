@@ -1956,9 +1956,10 @@ impl Parser {
             // nowhere.
             if !self.at_word("let") {
                 let span = self.span();
-                let mut d = Diagnostic::error("E0902", span, "a `for` binder is declared with `let`")
-                    .note("write `for (let x in xs)`")
-                    .clause("names.md §5.5");
+                let mut d =
+                    Diagnostic::error("E0902", span, "a `for` binder is declared with `let`")
+                        .note("write `for (let x in xs)`")
+                        .clause("names.md §5.5");
                 // A name is there: `let` goes in front of it, and that is
                 // the whole edit.
                 if let Tok::Ident(w) = &self.peek().tok {

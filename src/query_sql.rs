@@ -1738,7 +1738,11 @@ fn spread_note(source: &Ident, except: &[Ident], fields: &[(String, Expr)]) -> S
     } else {
         format!(
             " except {}",
-            except.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(", ")
+            except
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     };
     if fields.is_empty() {
@@ -1750,7 +1754,11 @@ fn spread_note(source: &Ident, except: &[Ident], fields: &[(String, Expr)]) -> S
         format!(
             "`...@{}{except}` sends {} — only the fields present in the request",
             source.name,
-            fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+            fields
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
