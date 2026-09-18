@@ -830,4 +830,38 @@ fn an_enum_coercion_names_a_type_and_still_compiles() {
         !rust.contains("jwc_b_v1_enum(v_str(\"Status\")"),
         "the type name must not be emitted as a value"
     );
+    // What is emitted in its place is the name and the members, so the
+    // runtime can refuse `?status=bogus` with a 400 naming them — the
+    // interpreter reads the same table (builtins.md §2).
+    assert!(
+        rust.contains("\"Status\", &[\"open\", \"done\"])?"),
+        "the members must reach the runtime, and the call must propagate:\n{rust}"
+    );
+}
+
+/// `boolean(x)` raises on anything but `true` / `false`, so its native
+/// call is a `Result` the site propagates — the shape `int` and `date`
+/// already have.
+#[test]
+fn a_boolean_coercion_propagates_like_int_and_date() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace n;\n\
+         routes \"/b\" {\n\
+         \x20   route GET \"\" {\n\
+         \x20       let done = boolean(request.query(\"done\"));\n\
+         \x20       return json({ done: @done });\n\
+         \x20   }\n\
+         }\n\
+         function main() { serve(); }\n",
+    )
+    .expect("write");
+    let ws = jwc::workspace::Workspace::load(dir.path()).expect("load");
+    assert!(!ws.has_parse_errors(), "{}", ws.parse_errors().join(""));
+    let rust = jwc::native::codegen_for_test(&ws).expect("codegen");
+    assert!(
+        rust.contains("jwc_b_v1_boolean(") && rust.contains(")?"),
+        "the coercion must reach the prelude and propagate:\n{rust}"
+    );
 }

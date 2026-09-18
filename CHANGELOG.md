@@ -5,6 +5,24 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `boolean(x)` answered `false` for everything it did not recognise
+
+`boolean("bogus")`, `boolean("yes")`, `boolean(null)` — all `false`,
+silently. With `where T.done ==? @done` the absent case was the damaging
+one: a `?done=` the client never sent became `done = false`, and every
+finished row vanished from an unfiltered list, with a 200 on it. The same
+type as a route parameter accepted `true` and `false` and refused the
+rest. Now `boolean(x)` does too: `true`, `false`, or `BadRequest` — the
+shape `int(x)` and `date(x)` already had, null included.
+
+### `enum(E, x)` never read `E`
+
+The type name was dropped and whatever the client sent went to Postgres
+as text, so `?status=bogus` was a 500 — on the specification's own
+sample too. `builtins.md §2` promised a 400 in two places. Now a
+non-member raises `BadRequest` naming the value and the members, in both
+the interpreter and the native backend.
+
 ### BREAKING: a return annotation is `: T`, not `-> T`
 
 A parameter is typed with `:`; the function's result was typed with `->`.

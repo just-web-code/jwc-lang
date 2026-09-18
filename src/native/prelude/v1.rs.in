@@ -97,8 +97,21 @@ fn jwc_b_v1_numeric(v: V) -> V {
     v_str(jwc_v1_text(&v))
 }
 
-fn jwc_b_v1_boolean(v: V) -> V {
-    V::Bool(matches!(jwc_v1_text(&v).as_str(), "true" | "1"))
+/// `boolean(s)` accepts `true` and `false` — the two strings a
+/// `{x: boolean}` path segment accepts — and raises `BadRequest` on
+/// anything else, including null.
+fn jwc_b_v1_boolean(v: V) -> JwcResult {
+    let raw = jwc_v1_text(&v);
+    match raw.as_str() {
+        "true" => Ok(V::Bool(true)),
+        "false" => Ok(V::Bool(false)),
+        _ => Err(JwcThrown {
+            error: "BadRequest",
+            status: 400,
+            message: format!("`{}` is not a boolean — expected `true` or `false`", raw),
+            body: None,
+        }),
+    }
 }
 
 /// `uuid(s)` and `timestamptz(s)` are assertions the checker already made;
@@ -135,13 +148,28 @@ fn jwc_b_v1_date(v: V) -> JwcResult {
     }
 }
 
-/// `enum(E, x)` — the type name is not a value, so codegen drops it and
-/// passes only `x` (builtins.md §2).
-fn jwc_b_v1_enum(v: V) -> V {
+/// `enum(E, x)` — the type name is not a value, so codegen passes `E`'s
+/// name and members instead of `E` itself (builtins.md §2). Null in gives
+/// null out; a non-member raises `BadRequest` naming the members.
+fn jwc_b_v1_enum(v: V, name: &str, members: &[&str]) -> JwcResult {
     if matches!(v, V::Null) {
-        V::Null
+        return Ok(V::Null);
+    }
+    let raw = jwc_v1_text(&v);
+    if members.contains(&raw.as_str()) {
+        Ok(v_str(raw))
     } else {
-        v_str(jwc_v1_text(&v))
+        Err(JwcThrown {
+            error: "BadRequest",
+            status: 400,
+            message: format!(
+                "`{}` is not a {} — expected one of: {}",
+                raw,
+                name,
+                members.join(", ")
+            ),
+            body: None,
+        })
     }
 }
 
