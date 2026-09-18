@@ -1099,6 +1099,7 @@ fails.
 jwc new myapp --template api   # empty | api | auth | jobs
 jwc check                    # types, schema, routes — offline, no database
 jwc fmt                      # canonical form; --check for CI
+jwc fix                      # the migrations the compiler knows how to do
 jwc lint --deny-warnings     # whole-program advisory lints
 jwc lint --explain E0211       # what a diagnostic means
 jwc routes                   # the resolved route table

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: "The `jwc` command"
-description: "Every subcommand: new, check, fmt, run, serve, build, migrate, test, lint, routes, explain, gen-sql, ast, openapi, swagger, lsp, and the registry commands."
+description: "Every subcommand: new, check, fmt, fix, run, serve, build, migrate, test, lint, routes, explain, gen-sql, ast, openapi, swagger, lsp, and the registry commands."
 ---
 
 # The `jwc` command
@@ -40,6 +40,22 @@ jwc fmt src/app.jwc --stdout   # print the formatted text, rewrite nothing
 
 `--stdout` takes one file: concatenating two formatted files produces
 something that is not a program, so it refuses rather than doing that.
+
+## Moving to a newer release
+
+```bash
+jwc fix                      # apply the migrations the compiler knows how to do
+jwc fix --dry-run            # say what it would change; write nothing
+```
+
+`jwc fix` re-runs the check and applies every diagnostic that carries a
+literal replacement — `--` comments, `$name` sigils, unqualified columns,
+`-> T` return annotations, writes without a binder — until none is left.
+Two ports off 0.9.x needed 573 edits between them; 566 were these. What
+remains is for `jwc check` to report and a person to decide. It does not
+refuse a project whose manifest still names the old release, because
+moving the source is what it is for; when the tree checks clean, set
+`jwc` in `jwcproj.json` to the release you are now on.
 
 `jwc check` is the one to put in a pre-commit hook. It needs no database
 and no network: the schema is in the source, so the queries are checked

@@ -325,6 +325,13 @@ impl Parser {
         table: &QualifiedTable,
     ) -> Ident {
         let binder = table.object.name.clone();
+        // `insert into` and `delete from` keep their preposition; the old
+        // `update T set` had none, so the fix supplies `of`.
+        let fix = if keyword == "update" {
+            format!("{keyword} {binder} {preposition}")
+        } else {
+            format!("{keyword} {binder}")
+        };
         self.diags.push(
             Diagnostic::error(
                 "E0907",
@@ -335,7 +342,8 @@ impl Parser {
                 "write `{keyword} {binder} {preposition} {}`",
                 table.text()
             ))
-            .clause("queries.md §2.4"),
+            .clause("queries.md §2.4")
+            .fix(fix),
         );
         Ident::new(binder, keyword_span)
     }
@@ -1170,11 +1178,16 @@ impl Parser {
         let returns = if self.eat(&Tok::Colon) {
             Some(self.parse_type()?)
         } else if self.at(&Tok::Arrow) {
+            // The diagnostic points at `->`; the fix also takes the blank
+            // before it, so `) -> T` becomes `): T` and not `) : T`.
             let span = self.span();
+            let paren_end = self.toks[self.i.saturating_sub(1)].span.end;
+            let fix_span = Span::new(paren_end.min(span.start) as usize, span.end as usize);
             self.diags.push(
-                Diagnostic::error("E0906", span, "`->` — the return annotation is `:`")
+                Diagnostic::error("E0906", fix_span, "`->` — the return annotation is `:`")
                     .note("write `: T`, the way a parameter is typed")
-                    .clause("types.md §10.2"),
+                    .clause("types.md §10.2")
+                    .fix(":"),
             );
             self.bump();
             Some(self.parse_type()?)
@@ -1941,13 +1954,15 @@ impl Parser {
             // nowhere.
             if !self.at_word("let") {
                 let span = self.span();
-                self.err_note(
-                    "E0902",
-                    span,
-                    "a `for` binder is declared with `let`",
-                    "write `for (let x in xs)`",
-                    "names.md §5.5",
-                );
+                let mut d = Diagnostic::error("E0902", span, "a `for` binder is declared with `let`")
+                    .note("write `for (let x in xs)`")
+                    .clause("names.md §5.5");
+                // A name is there: `let` goes in front of it, and that is
+                // the whole edit.
+                if let Tok::Ident(w) = &self.peek().tok {
+                    d = d.fix(format!("let {w}"));
+                }
+                self.diags.push(d);
                 return Err(());
             }
             self.bump();

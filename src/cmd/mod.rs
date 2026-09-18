@@ -1956,3 +1956,138 @@ pub fn build(path: PathBuf, release: bool, emit_rust: bool, target: Option<Strin
     println!("{}", report.binary_path.display());
     Ok(())
 }
+
+/// `jwc fix <path>` — the migrations the compiler already knows how to do.
+///
+/// Re-runs the check, applies every diagnostic that carries a literal
+/// replacement (`Diagnostic::fix`), and repeats until the count stops
+/// falling — a fix can uncover the next one, as `--` comments hide the
+/// `$name` sigils behind them. Prints what it changed. The rest is
+/// `jwc check`'s to report.
+///
+/// Only `fix` is applied, never `note`: the note is prose for a person and
+/// may be an example or two alternatives (tooling.md §5).
+pub fn fix(path: PathBuf, dry_run: bool) -> Result<()> {
+    use crate::diag::Severity;
+    use std::collections::BTreeMap;
+
+    // A fix can uncover the next one, but not forever: an edit that
+    // reproduces its own diagnostic would loop, and this is the bound.
+    const ROUNDS: usize = 16;
+
+    let mut applied_total = 0usize;
+    let mut touched: BTreeMap<PathBuf, usize> = BTreeMap::new();
+
+    let mut manifest = None;
+    for _ in 0..ROUNDS {
+        let ws = crate::workspace::Workspace::load_for_migration(&path)?;
+        if ws.files.is_empty() {
+            bail!("no .jwc files under {}", path.display());
+        }
+        manifest = ws.manifest.clone();
+
+        // Every fix this round, per file: the front-end's first, and the
+        // checker's only once the front-end is clean, because the checker
+        // runs on the tree the parser produced.
+        let mut fixes: BTreeMap<usize, Vec<(crate::token::Span, String)>> = BTreeMap::new();
+        let mut parse_errors = 0usize;
+        for (i, f) in ws.files.iter().enumerate() {
+            for d in &f.diags {
+                if d.severity == Severity::Error {
+                    parse_errors += 1;
+                }
+                if let Some(fix) = &d.fix {
+                    fixes.entry(i).or_default().push((d.span, fix.clone()));
+                }
+            }
+        }
+        if fixes.is_empty() && parse_errors == 0 {
+            let built = crate::model::build(&ws);
+            let symbols = crate::symbols::build(&ws, &built.model);
+            let checked = crate::check::check(&ws, &symbols, &built.model);
+            for (loc, d) in built.diags.iter().chain(&symbols.diags).chain(&checked.diags) {
+                if let Some(fix) = &d.fix {
+                    fixes.entry(loc.file).or_default().push((loc.span, fix.clone()));
+                }
+            }
+        }
+        if fixes.is_empty() {
+            break;
+        }
+
+        let mut applied_round = 0usize;
+        for (i, mut edits) in fixes {
+            let f = &ws.files[i];
+            // Back to front, so an earlier edit does not move a later
+            // span. Two fixes on overlapping text: the first is applied
+            // and the other waits for the next round, where it is
+            // recomputed against the text as it then is.
+            edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+            let mut text = f.source.text.clone();
+            let mut floor = usize::MAX;
+            let mut n = 0usize;
+            for (span, replacement) in edits {
+                let (start, end) = (span.start as usize, span.end as usize);
+                if end > floor || end > text.len() || start > end {
+                    continue;
+                }
+                text.replace_range(start..end, &replacement);
+                floor = start;
+                n += 1;
+            }
+            if n == 0 {
+                continue;
+            }
+            if !dry_run {
+                std::fs::write(&f.source.path, &text)?;
+            }
+            *touched.entry(f.source.path.clone()).or_default() += n;
+            applied_round += n;
+        }
+        if applied_round == 0 {
+            break;
+        }
+        applied_total += applied_round;
+        if dry_run {
+            // Nothing was written, so the next round would find the same
+            // fixes: one pass is the whole answer.
+            break;
+        }
+    }
+
+    for (p, n) in &touched {
+        println!(
+            "{} {}: {n} fix{}",
+            if dry_run { "would fix" } else { "fixed" },
+            display_relative(p),
+            if *n == 1 { "" } else { "es" }
+        );
+    }
+    if applied_total == 0 {
+        println!("nothing to fix");
+    } else {
+        println!(
+            "{applied_total} fix{} in {} file{}{} — run `jwc check` for what is left",
+            if applied_total == 1 { "" } else { "es" },
+            touched.len(),
+            plural(touched.len()),
+            if dry_run { " (nothing written)" } else { "" }
+        );
+    }
+    // The manifest still names the release the source was written for,
+    // and every other command will refuse the project until it names
+    // this one. Say so here, where the reader is, rather than there.
+    if let Some(m) = manifest.as_ref() {
+        if let Some(req) = m.language.as_deref() {
+            if crate::workspace::language_mismatch_of(m).is_some() {
+                println!(
+                    "{}: `jwc` is `{req}` — once the source checks clean under this \
+                     release, set it to `{}`",
+                    display_relative(&m.path),
+                    env!("CARGO_PKG_VERSION")
+                );
+            }
+        }
+    }
+    Ok(())
+}

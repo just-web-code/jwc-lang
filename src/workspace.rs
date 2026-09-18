@@ -69,6 +69,23 @@ impl Workspace {
         root: impl AsRef<Path>,
         overlay: &std::collections::BTreeMap<PathBuf, String>,
     ) -> std::io::Result<Workspace> {
+        Self::load_inner(root, overlay, true)
+    }
+
+    /// `load`, without refusing a project written for another release.
+    ///
+    /// For `jwc fix` alone: moving the source to this release is what the
+    /// command is for, so the manifest naming the old one is its starting
+    /// state, not a reason to stop. Every other command keeps the refusal.
+    pub fn load_for_migration(root: impl AsRef<Path>) -> std::io::Result<Workspace> {
+        Self::load_inner(root, &std::collections::BTreeMap::new(), false)
+    }
+
+    fn load_inner(
+        root: impl AsRef<Path>,
+        overlay: &std::collections::BTreeMap<PathBuf, String>,
+        check_language: bool,
+    ) -> std::io::Result<Workspace> {
         let root = root.as_ref().to_path_buf();
         let mut paths = Vec::new();
         if root.is_file() {
@@ -96,7 +113,9 @@ impl Workspace {
         // not be forgotten by one of them. `InvalidData` is the closest
         // `io::ErrorKind` to "the project is not for this compiler"; what
         // the reader sees is the message.
-        language_check(&root)?;
+        if check_language {
+            language_check(&root)?;
+        }
         Ok(Workspace {
             root,
             files,
@@ -268,6 +287,11 @@ pub fn undated_migration_note(ws: &Workspace) -> Option<String> {
         manifest.path.display(),
         codes.join(", ")
     ))
+}
+
+/// `language_mismatch` for a caller that already holds the manifest.
+pub fn language_mismatch_of(m: &Manifest) -> Option<String> {
+    language_mismatch(m)
 }
 
 /// Why this compiler cannot be used on the project, or `None`.

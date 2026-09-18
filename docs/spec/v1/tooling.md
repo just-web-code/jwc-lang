@@ -185,6 +185,35 @@ One compiler, one answer.
 
 ---
 
+## 8. `jwc fix`
+
+8.1 `jwc fix [path]` applies the migrations the compiler already knows how
+to do. It re-runs the check, applies every diagnostic that carries a
+literal replacement, and repeats until none is left — a fix can uncover
+the next one, as a `--` comment hides the `$name` sigils behind it. It
+prints each file it changed and how many fixes it made; what remains is
+`jwc check`'s to report. `--dry-run` reports and writes nothing.
+
+8.2 A diagnostic carries a replacement only where the compiler has made
+the whole decision. The `help:` line is prose for a person — it may be an
+example (`E0301`) or two alternatives (`E0904` across two bindings) — and
+`fix` never reads it. The diagnostics that carry one:
+
+| Replaces | With | Code |
+|---|---|---|
+| `--` at the start of a line | `//` | `E0901` |
+| `x` in `for (x in …)` | `let x` | `E0902` |
+| `$name` | `@name` | `E0903` |
+| an unqualified column, when one binding has it | `Binding.column` | `E0904` |
+| `->` | `:` | `E0906` |
+| `insert into`, `update`, `delete from` | the form with the table's name as binder | `E0907` |
+
+8.3 `jwc fix` alone does not refuse a project whose manifest names another
+release (packages §1.1.1): moving the source is what the command is for.
+It says at the end what the field should become.
+
+---
+
 ## 7. Diagnostics introduced here
 
 | Code | Meaning |

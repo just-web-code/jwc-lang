@@ -109,7 +109,8 @@ impl<'a> Lexer<'a> {
                         "`--` does not start a comment",
                     )
                     .note("a line comment starts with `//`, a doc comment with `///`")
-                    .clause("names.md §1.4"),
+                    .clause("names.md §1.4")
+                    .fix("//"),
                 );
                 while self.i < self.src.len() && self.peek() != b'\n' {
                     self.i += 1;
@@ -268,7 +269,8 @@ impl<'a> Lexer<'a> {
                         format!("`${name}` — the sigil is `@`"),
                     )
                     .note(format!("write `@{name}`"))
-                    .clause("names.md §5.2"),
+                    .clause("names.md §5.2")
+                    .fix(format!("@{name}")),
                 );
             }
             return Some(Tok::Local(name));

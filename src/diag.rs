@@ -29,10 +29,16 @@ pub struct Diagnostic {
     pub code: &'static str,
     pub message: String,
     pub span: Span,
-    /// Fix-it text, rendered under the caret.
+    /// Fix-it text, rendered under the caret. Prose for a person: it may
+    /// be an example, or two alternatives, and nothing applies it.
     pub note: Option<String>,
     /// The clause that defines this rule, e.g. `routing.md §10`.
     pub clause: Option<&'static str>,
+    /// The literal text that replaces `span`, set only where the compiler
+    /// has made the whole decision. `jwc fix` applies these and nothing
+    /// else (tooling.md §5). A diagnostic that gains one edits the
+    /// user's file, and is reviewed as a code change.
+    pub fix: Option<String>,
 }
 
 impl Diagnostic {
@@ -44,6 +50,7 @@ impl Diagnostic {
             span,
             note: None,
             clause: None,
+            fix: None,
         }
     }
 
@@ -55,6 +62,7 @@ impl Diagnostic {
             span,
             note: None,
             clause: None,
+            fix: None,
         }
     }
 
@@ -65,6 +73,11 @@ impl Diagnostic {
 
     pub fn clause(mut self, clause: &'static str) -> Self {
         self.clause = Some(clause);
+        self
+    }
+
+    pub fn fix(mut self, replacement: impl Into<String>) -> Self {
+        self.fix = Some(replacement.into());
         self
     }
 }

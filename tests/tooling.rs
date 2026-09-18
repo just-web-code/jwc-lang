@@ -605,3 +605,130 @@ fn fmt_check_and_fmt_report_their_own_outcome() {
     assert!(write.status.success());
     assert_eq!(stdout(&write).trim(), "ok — 1 file formatted");
 }
+
+/// `jwc fix` — one of every diagnostic that carries a replacement, in a
+/// project still pinned to the release it was written for. One run, and
+/// the tree checks clean under this one.
+///
+/// The count is the point: both 0.9.x ports were 98% these edits, made by
+/// hand from the compiler's own `help:` lines.
+#[test]
+fn fix_applies_every_replacement_the_compiler_carries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("jwcproj.json"),
+        r#"{ "name": "old", "version": "0.1.0", "jwc": "0.9.901" }"#,
+    )
+    .expect("manifest");
+    let src = dir.path().join("app.jwc");
+    std::fs::write(
+        &src,
+        "namespace app;\n\
+         -- it's `old` — see §2\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Todos of App.s {\n\
+         \x20   -- the key\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   title text;\n\
+         \x20   done boolean default false;\n\
+         }\n\
+         function first_title() -> text? {\n\
+         \x20   for (t in select T from App.s.Todos where done == false as { id, title }) {\n\
+         \x20       return $t.title;\n\
+         \x20   }\n\
+         \x20   return null;\n\
+         }\n\
+         function add(title: text) -> bigint {\n\
+         \x20   let row = insert into App.s.Todos { title: $title } as { id };\n\
+         \x20   return @row.id;\n\
+         }\n\
+         function finish(id: bigint) {\n\
+         \x20   update App.s.Todos set done = true where id == $id;\n\
+         \x20   delete from App.s.Todos where done == true;\n\
+         }\n",
+    )
+    .expect("source");
+    let path = dir.path().to_str().expect("utf8");
+
+    // Pinned to another release, `check` refuses; `fix` is how the source
+    // gets to this one, so it does not.
+    let refused = jwc(&["check", path]);
+    assert!(!refused.status.success());
+
+    let dry = jwc(&["fix", path, "--dry-run"]);
+    assert!(dry.status.success(), "{}", String::from_utf8_lossy(&dry.stderr));
+    let dry_out = stdout(&dry);
+    assert!(dry_out.contains("would fix"), "{dry_out}");
+    assert!(dry_out.contains("nothing written"), "{dry_out}");
+    let untouched = std::fs::read_to_string(&src).expect("read");
+    assert!(untouched.contains("-- it's"), "--dry-run must write nothing");
+
+    let fixed = jwc(&["fix", path]);
+    assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+    let out = stdout(&fixed);
+    assert!(out.contains("fixed "), "{out}");
+    assert!(
+        out.contains("`jwc` is `0.9.901`") && out.contains(&format!("set it to `{}`", env!("CARGO_PKG_VERSION"))),
+        "it names the manifest field left to change:\n{out}"
+    );
+
+    let after = std::fs::read_to_string(&src).expect("read");
+    for want in [
+        "// it's `old` — see §2",
+        "    // the key",
+        "function first_title(): text?",
+        "for (let t in select T from App.s.Todos where T.done == false as { T.id, T.title })",
+        "return @t.title;",
+        "function add(title: text): bigint",
+        "insert Todos into App.s.Todos { title: @title } as { Todos.id }",
+        "update Todos of App.s.Todos set done = true where Todos.id == @id",
+        "delete Todos from App.s.Todos where Todos.done == true",
+    ] {
+        assert!(after.contains(want), "missing `{want}` in:\n{after}");
+    }
+
+    // With the field moved, the tree is this release's.
+    std::fs::write(
+        dir.path().join("jwcproj.json"),
+        format!(
+            r#"{{ "name": "old", "version": "0.1.0", "jwc": "{}" }}"#,
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .expect("manifest");
+    let check = jwc(&["check", path]);
+    assert!(
+        check.status.success(),
+        "clean after one `jwc fix`:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let again = jwc(&["fix", path]);
+    assert_eq!(stdout(&again).trim(), "nothing to fix");
+}
+
+/// A `help:` line that is an example is not a replacement. `E0301`'s
+/// says ``write `enum(InvoiceStatus, request.query("status"))` `` — a
+/// `fix` that read notes would overwrite the author's call with the
+/// sample. Nothing carries a `fix` here, so nothing is written.
+#[test]
+fn fix_never_applies_a_help_line() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("app.jwc");
+    let text = "namespace app;\n\
+                function f() {\n\
+                \x20   let s = enum(NotAType, \"x\");\n\
+                \x20   return @s;\n\
+                }\n";
+    std::fs::write(&src, text).expect("source");
+    let path = dir.path().to_str().expect("utf8");
+
+    let check = jwc(&["check", path]);
+    assert!(String::from_utf8_lossy(&check.stderr).contains("E0301"));
+
+    let fixed = jwc(&["fix", path]);
+    assert!(fixed.status.success());
+    assert_eq!(stdout(&fixed).trim(), "nothing to fix");
+    assert_eq!(std::fs::read_to_string(&src).expect("read"), text);
+}

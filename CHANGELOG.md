@@ -5,6 +5,17 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `jwc fix` — the migrations the compiler already knows how to do
+
+Of the 358 edits MyWallet took to reach rc.6, 351 were ones the compiler
+had already specified in a `help:` line; the shortener's 218 held 215.
+`jwc fix` re-runs the check, applies every diagnostic that carries a
+literal replacement, and repeats until none is left. `Diagnostic` gains a
+`fix` field for that replacement, set only where the compiler has made
+the whole decision — `E0901`, `E0902`, `E0903`, `E0904` (one candidate),
+`E0906`, `E0907` — and never read from the `help:` prose, which may be an
+example. `--dry-run` reports and writes nothing.
+
 ### An absent `jwc` field meant "any version"
 
 rc.4 added the manifest's `jwc` field for the project compiled by the

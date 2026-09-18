@@ -207,6 +207,29 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// `err_note` with the literal replacement `jwc fix` applies.
+    #[allow(clippy::too_many_arguments)]
+    fn err_fix(
+        &mut self,
+        span: Span,
+        code: &'static str,
+        msg: impl Into<String>,
+        note: impl Into<String>,
+        clause: &'static str,
+        fix: String,
+    ) {
+        self.diags.push((
+            Loc {
+                file: self.file,
+                span,
+            },
+            Diagnostic::error(code, span, msg)
+                .note(note)
+                .clause(clause)
+                .fix(fix),
+        ));
+    }
+
     fn err_note(
         &mut self,
         span: Span,
@@ -1956,20 +1979,37 @@ impl<'a> Checker<'a> {
             .iter()
             .any(|b| self.column_of(&b.object, &i.name).is_some())
         {
-            let names = scope
+            let candidates: Vec<String> = scope
                 .bindings
                 .iter()
                 .filter(|b| self.column_of(&b.object, &i.name).is_some())
-                .map(|b| format!("`{}.{}`", b.name, i.name))
+                .map(|b| format!("{}.{}", b.name, i.name))
+                .collect();
+            let names = candidates
+                .iter()
+                .map(|c| format!("`{c}`"))
                 .collect::<Vec<_>>()
                 .join(" or ");
-            self.err_note(
-                i.span,
-                "E0904",
-                format!("`{}` does not name its binding", i.name),
-                format!("write {names}"),
-                "queries.md §2.4",
-            );
+            // One binding has the column: the compiler has decided, and
+            // `jwc fix` may apply it. Two: a person chooses.
+            if let [only] = candidates.as_slice() {
+                self.err_fix(
+                    i.span,
+                    "E0904",
+                    format!("`{}` does not name its binding", i.name),
+                    format!("write {names}"),
+                    "queries.md §2.4",
+                    only.clone(),
+                );
+            } else {
+                self.err_note(
+                    i.span,
+                    "E0904",
+                    format!("`{}` does not name its binding", i.name),
+                    format!("write {names}"),
+                    "queries.md §2.4",
+                );
+            }
             return Ty::Unknown;
         }
         // The characteristic slip: a local written without its sigil
@@ -3610,12 +3650,13 @@ impl<'a> Checker<'a> {
                         .unwrap_or_else(|| object.to_string());
                     match binding {
                         None => {
-                            self.err_note(
+                            self.err_fix(
                                 i.span,
                                 "E0904",
                                 format!("`{}` does not name its binding", i.name),
                                 format!("write `{driving}.{}`", i.name),
                                 "queries.md §2.4",
+                                format!("{driving}.{}", i.name),
                             );
                         }
                         Some(b) if b.name != driving => {
