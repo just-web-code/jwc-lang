@@ -1103,7 +1103,7 @@ jwc fix                      # the migrations the compiler knows how to do
 jwc lint --deny-warnings     # whole-program advisory lints
 jwc lint --explain E0211       # what a diagnostic means
 jwc routes                   # the resolved route table
-jwc explain                  # every query, with the SQL it becomes
+jwc explain                  # every statement, reads and writes, with the SQL it becomes
 jwc openapi                  # OpenAPI 3.1, from the typed signatures
 jwc migrate new init         # diff the schema, write up/down SQL
 jwc migrate up               # apply

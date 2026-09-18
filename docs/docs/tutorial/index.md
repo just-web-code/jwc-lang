@@ -248,7 +248,7 @@ content-type: application/json; charset=utf-8
 
 ```bash
 jwc routes      # method, path, middleware chain
-jwc explain     # every query, with the SQL it lowers to
+jwc explain     # every statement, reads and writes, with the SQL it lowers to
 jwc openapi     # OpenAPI 3.1, from the types the checker inferred
 ```
 

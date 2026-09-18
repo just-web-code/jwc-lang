@@ -108,6 +108,15 @@ An `after` block runs on **every** outcome — the handler's response, a
 middleware's short-circuit, an `errorHandler`'s answer — and it sees the
 status actually being sent.
 
+It runs **after the handler chain and before the response is written**.
+It is not a hook that fires once the client has its bytes: everything in
+the block sits in front of the answer, so a slow `after` is a slow
+response, and under `request_timeout` it is a 504 that throws away the
+200 the handler built. That position is what lets it set headers and
+read `response.status()` at all. A write there costs every request a
+round trip — `buffered` takes it off that path — and work that should
+not charge the client belongs in a `job`.
+
 Every middleware that *started* runs its `after` block, in reverse chain
 order, including the one that short-circuited. A middleware that opened
 something has to be able to close it even when the request stopped at it.

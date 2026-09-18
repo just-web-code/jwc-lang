@@ -50,6 +50,13 @@ against this compiler.
 It stays in the repository because it is the only description of what
 those binaries do.
 
+A project written for a 0.9.x release is moved with `jwc fix`
+([cli/index.md](cli/index.md#moving-to-a-newer-release)): it applies the
+edits the compiler already knows — comments, sigils, binders,
+qualification — and `jwc check` then reports what a person has to
+decide. Both 0.9.x ports that shaped rc.7 needed five such decisions
+between them.
+
 ## Building
 
 ```bash

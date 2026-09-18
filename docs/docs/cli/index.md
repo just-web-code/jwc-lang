@@ -198,7 +198,7 @@ names, and the rename would fail there.
 
 ```bash
 jwc routes                   # method, path, middleware chain
-jwc explain                  # every query, with the SQL it lowers to
+jwc explain                  # every statement — select, insert, update, delete — with its SQL
 jwc openapi > openapi.json   # OpenAPI 3.1 for the route table
 jwc openapi --compact        # one line, no indentation
 jwc ast                      # the parsed AST — a debugging aid
