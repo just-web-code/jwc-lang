@@ -160,3 +160,54 @@ fn the_sample_is_pinned_to_this_release() {
         path.display()
     );
 }
+
+/// A project that does not say, whose source says it for it.
+///
+/// The field exists for the project compiled by the wrong release, and
+/// the project that predates the field is exactly that project. When the
+/// manifest names no version and the source raises the diagnostics only
+/// an older dialect produces, the gap is named once, before the list —
+/// and a project that does not say and has none of them hears nothing.
+#[test]
+fn an_undated_project_with_old_dialect_diagnostics_is_told_so_once() {
+    let dir = project(None);
+    std::fs::write(
+        dir.path().join("old.jwc"),
+        "namespace app;\n\
+         -- a comment from 0.9\n\
+         -- and another\n\
+         function f() {\n    let x = $y;\n    return 1;\n}\n",
+    )
+    .expect("source");
+    let (ok, out) = run("check", dir.path());
+    assert!(!ok);
+    assert_eq!(
+        out.matches("names no `jwc` version").count(),
+        1,
+        "once, before the list:\n{out}"
+    );
+    let note = out.find("names no `jwc` version").expect("note");
+    let first = out.find("error[E09").expect("a migration diagnostic");
+    assert!(note < first, "the note comes first:\n{out}");
+    assert!(out.contains("E0901, E0903"), "it names the codes it saw:\n{out}");
+    assert!(out.contains(&format!("\"jwc\": \"{MINE}\"")), "{out}");
+
+    // The same manifest, source that is merely wrong: no note. The gap
+    // is what the note is about, not the errors.
+    let dir = project(None);
+    std::fs::write(
+        dir.path().join("bad.jwc"),
+        "namespace app;\nfunction f() {\n    let = 1;\n}\n",
+    )
+    .expect("source");
+    let (ok, out) = run("check", dir.path());
+    assert!(!ok);
+    assert!(!out.contains("names no `jwc` version"), "{out}");
+
+    // And a manifest that does say: the field is the answer, so the note
+    // has nothing to add.
+    let dir = project(Some(MINE));
+    std::fs::write(dir.path().join("old.jwc"), "namespace app;\n-- old\n").expect("source");
+    let (_, out) = run("check", dir.path());
+    assert!(!out.contains("names no `jwc` version"), "{out}");
+}

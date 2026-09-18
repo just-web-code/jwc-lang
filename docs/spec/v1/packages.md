@@ -25,7 +25,11 @@ package is imported.
 compiler that does not satisfy it refuses the project — `check`, `fmt`,
 `run`, `serve`, `build`, `test` and the rest alike — naming both versions
 and the manifest that holds the field. The field is optional; a project
-that does not say is not asked.
+that does not say is not asked — unless its source answers for it. When
+the field is absent and the source raises the diagnostics only an older
+dialect produces (`E0900`–`E0903`, `E0906`–`E0907`), `check` says so once,
+before the list: the manifest names no version, these diagnostics are what
+an older release's source looks like, and here is the field to add.
 
 A bare version means **exactly** that version, as it does for a
 dependency (§1.3): `rc.N` and `rc.N+1` carry whatever review turned up

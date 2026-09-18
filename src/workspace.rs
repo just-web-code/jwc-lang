@@ -225,6 +225,51 @@ pub fn language_check(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// The migration diagnostics: what source written for an older release
+/// produces under this one. `E0900`–`E0903` are the 0.9 → 1.0 cutover,
+/// `E0906`–`E0907` the changes inside the candidate series.
+pub fn is_migration_code(code: &str) -> bool {
+    matches!(
+        code,
+        "E0900" | "E0901" | "E0902" | "E0903" | "E0906" | "E0907"
+    )
+}
+
+/// The one thing to say before a wall of migration diagnostics from a
+/// project whose manifest names no `jwc` version, or `None`.
+///
+/// The `jwc` field exists so that a project compiled by the wrong release
+/// is told so before its diagnostics. A project that predates the field
+/// is exactly the project that needs it and exactly the one that cannot
+/// have it — MyWallet, written for 0.9.901, answered 290 errors under
+/// rc.6 and not one mentioned a version. When the field is absent *and*
+/// the source raises the diagnostics only an old dialect produces, that
+/// is the version gap showing, and it is said once, before the list.
+pub fn undated_migration_note(ws: &Workspace) -> Option<String> {
+    let manifest = ws.manifest.as_ref()?;
+    if manifest.language.is_some() {
+        return None;
+    }
+    let mut codes: Vec<&str> = ws
+        .files
+        .iter()
+        .flat_map(|f| f.diags.iter().map(|d| d.code))
+        .filter(|c| is_migration_code(c))
+        .collect();
+    if codes.is_empty() {
+        return None;
+    }
+    codes.sort_unstable();
+    codes.dedup();
+    let mine = env!("CARGO_PKG_VERSION");
+    Some(format!(
+        "note: {} names no `jwc` version, and the diagnostics below ({}) are          what source written for an older release looks like under jwc {mine}.\n\
+         \x20     Add `\"jwc\": \"<the release it was written for>\"` and compile          with that release, or move the source to this one and add          `\"jwc\": \"{mine}\"`.\n",
+        manifest.path.display(),
+        codes.join(", ")
+    ))
+}
+
 /// Why this compiler cannot be used on the project, or `None`.
 ///
 /// The episode this exists for: an application written against one

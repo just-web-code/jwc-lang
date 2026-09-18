@@ -117,6 +117,9 @@ pub fn check(path: PathBuf, quiet: bool, parse_only: bool, deny_warnings: bool) 
 
     let mut errors = 0usize;
     let mut warnings = 0usize;
+    if let Some(note) = crate::workspace::undated_migration_note(&ws) {
+        eprintln!("{note}");
+    }
     for f in &ws.files {
         for d in &f.diags {
             match d.severity {

@@ -5,6 +5,17 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### An absent `jwc` field meant "any version"
+
+rc.4 added the manifest's `jwc` field for the project compiled by the
+wrong release. A project that predates the field is exactly that project,
+and it is the one that cannot have it: MyWallet, written for 0.9.901,
+answered 290 errors under rc.6 and not one mentioned a version. When the
+manifest names no version and the source raises the diagnostics only an
+older dialect produces (`E0900`–`E0903`, `E0906`–`E0907`), `jwc check`
+now says so once, before the list, naming the codes it saw and the field
+to add.
+
 ### rc.3's write binder shipped without a migration diagnostic
 
 `$name` → `@name` got `E0903` naming the fix. `insert into T` →
