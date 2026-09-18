@@ -13,9 +13,19 @@ output readable without deploying it.
 
 ## 1. `jwc explain`
 
-1.1 `jwc explain [path]` prints every query the program issues, in
-declaration order, with the SQL it compiles to. It is **offline**: no
+1.1 `jwc explain [path]` prints every statement the program issues — each
+`select`, `insert`, `update` and `delete` — in declaration order, with the
+SQL it compiles to and which of the four it is. It is **offline**: no
 database is opened unless `--analyze` is given.
+
+1.1.1 A write is printed from the source alone, by the builder the runtime
+uses, so the `WHERE` clause, the lock and the `RETURNING` list are the
+statement's own. What the source cannot decide is named beside the SQL
+rather than guessed at: a spread lists the fields its parameter's class
+can carry, with the note that only the present ones are sent; an `=?`
+assignment is noted as skipped when null; and an update whose only
+assignments are a spread notes that with every field absent the row is
+read instead (types §9.5).
 
 1.2 Three ways to narrow it. Without one, every site is printed:
 

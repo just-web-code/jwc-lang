@@ -1235,10 +1235,13 @@ impl Wiring<'_> {
             }
             if paging.is_none() {
                 for site in crate::query_sql::sites(&file.program) {
-                    if site.select.page.is_some() {
+                    let Some(select) = site.select() else {
+                        continue;
+                    };
+                    if select.page.is_some() {
                         paging = Some(Loc {
                             file: fi,
-                            span: site.select.span,
+                            span: select.span,
                         });
                         break;
                     }

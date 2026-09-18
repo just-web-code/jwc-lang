@@ -335,26 +335,40 @@ impl Analysis {
         let mut best: Option<&crate::query_sql::Site> = None;
         let sites = crate::query_sql::sites(&file.program);
         for site in &sites {
-            let span = site.select.span;
+            let span = site.span();
             if offset < span.start as usize || offset > span.end as usize {
                 continue;
             }
-            if best.is_none_or(|b| span.end - span.start < b.select.span.end - b.select.span.start)
-            {
+            if best.is_none_or(|b| span.end - span.start < b.span().end - b.span().start) {
                 best = Some(site);
             }
         }
         let site = best?;
-        let plan = crate::query::plan(site.select, &self.sym);
+        let span = site.span();
+        let Some(select) = site.select() else {
+            // A write: the statement the runtime sends, with what it
+            // cannot know from the source named beside it.
+            return Some(match crate::query_sql::write_sql(&self.model, &self.sym, &site.owner, site.stmt) {
+                Ok((sql, notes)) => {
+                    let mut out = sql;
+                    for n in notes {
+                        out.push_str(&format!("\n-- {n}"));
+                    }
+                    (span, out)
+                }
+                Err(why) => (span, format!("-- not compilable: {why}")),
+            });
+        };
+        let plan = crate::query::plan(select, &self.sym);
         if let Some(d) = plan.diags.iter().find(|d| d.severity == Severity::Error) {
-            return Some((site.select.span, format!("-- {} {}", d.code, d.message)));
+            return Some((span, format!("-- {} {}", d.code, d.message)));
         }
         let mut c = crate::query_sql::Compiler::new(&self.model);
-        let sql = match c.compile(site.select, &plan) {
+        let sql = match c.compile(select, &plan) {
             Some(compiled) => compiled.sql,
             None => format!("-- not compilable: {}", c.gap()),
         };
-        Some((site.select.span, sql))
+        Some((span, sql))
     }
 
     /// A markdown summary of a declared name.

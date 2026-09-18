@@ -454,13 +454,33 @@ pub fn explain(
                 continue;
             }
             queries += 1;
-            let (line, _) = file.source.line_col(site.select.span.start);
+            let (line, _) = file.source.line_col(site.span().start);
             println!(
-                "\x1b[1m{}:{line}\x1b[0m  {}",
+                "\x1b[1m{}:{line}\x1b[0m  {}  ({})",
                 file.source.path.display(),
-                site.label
+                site.label,
+                site.kind()
             );
-            let plan = crate::query::plan(site.select, &sym);
+            let Some(select) = site.select() else {
+                match crate::query_sql::write_sql(&built.model, &sym, &site.owner, site.stmt) {
+                    Ok((sql, notes)) => {
+                        for line in sql.lines() {
+                            println!("  {line}");
+                        }
+                        for n in notes {
+                            println!("  -- {n}");
+                        }
+                        statements.push(sql);
+                    }
+                    Err(why) => {
+                        println!("  not compilable: {why}");
+                        gaps += 1;
+                    }
+                }
+                println!();
+                continue;
+            };
+            let plan = crate::query::plan(select, &sym);
             if let Some(d) = plan.diags.iter().find(|d| d.severity == Severity::Error) {
                 println!("  rejected: {} {}", d.code, d.message);
                 gaps += 1;
@@ -469,11 +489,11 @@ pub fn explain(
             if !sql_only {
                 println!(
                     "  {}",
-                    crate::query_sql::raw_state(&built.model, site.select, &plan)
+                    crate::query_sql::raw_state(&built.model, select, &plan)
                 );
             }
             let mut c = crate::query_sql::Compiler::new(&built.model);
-            match c.compile(site.select, &plan) {
+            match c.compile(select, &plan) {
                 Some(compiled) => {
                     for line in compiled.sql.lines() {
                         println!("  {line}");
@@ -493,7 +513,7 @@ pub fn explain(
         analyze_statements(&statements)?;
     }
 
-    println!("{queries} quer{}", if queries == 1 { "y" } else { "ies" });
+    println!("{queries} statement{}", plural(queries));
     if gaps > 0 {
         println!("{gaps} not compiled");
     }
@@ -523,7 +543,10 @@ fn expand_views(
                 if !wanted.contains(&owner_key(&site.owner)) {
                     continue;
                 }
-                let plan = crate::query::plan(site.select, sym);
+                let Some(select) = site.select() else {
+                    continue;
+                };
+                let plan = crate::query::plan(select, sym);
                 let mut objects = Vec::new();
                 plan.root.walk(&mut objects);
                 let names: Vec<String> = objects

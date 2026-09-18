@@ -5,6 +5,18 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `jwc explain` lists the writes
+
+A site was a `select`, so `explain` could not list an `insert`, `update`
+or `delete` at all: e-school's 98 statements printed as 67, and the
+`WHERE … FOR UPDATE LIMIT 1` clause rc.6's lost-write fix was entirely
+about was the one thing the command whose job is to show SQL could not
+show. A site now carries any of the four statements. A write prints from
+the same builder the runtime uses; a spread lists the fields its
+parameter's class can carry, and what the source cannot decide is noted
+beside the SQL. Hover in the editor answers over a write too, as
+tooling.md §6.2 always said it did.
+
 ### `jwc fmt` keeps a comment inside `server { }`, a record literal and an `insert`
 
 The AST carried a comment on a declaration or a statement and nowhere

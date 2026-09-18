@@ -446,12 +446,12 @@ fn section<'a>(text: &'a str, route: &str) -> &'a str {
     &rest[..end]
 }
 
-/// `jwc explain` ends with `N queries`.
+/// `jwc explain` ends with `N statements`.
 fn count(text: &str) -> usize {
     text.lines()
         .find_map(|l| {
-            l.strip_suffix(" queries")
-                .or_else(|| l.strip_suffix(" query"))
+            l.strip_suffix(" statements")
+                .or_else(|| l.strip_suffix(" statement"))
         })
         .and_then(|n| n.trim().parse().ok())
         .unwrap_or(0)
@@ -731,4 +731,58 @@ fn fix_never_applies_a_help_line() {
     assert!(fixed.status.success());
     assert_eq!(stdout(&fixed).trim(), "nothing to fix");
     assert_eq!(std::fs::read_to_string(&src).expect("read"), text);
+}
+
+/// `explain` lists every statement, not every `select`: e-school's 98
+/// printed as 67, and the `WHERE … FOR UPDATE LIMIT 1` clause rc.6's
+/// lost-write fix was entirely about was the one thing the command could
+/// not show.
+#[test]
+fn explain_lists_the_writes_with_their_sql() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("app.jwc"),
+        "namespace app;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Todos of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   title text;\n\
+         \x20   done boolean default false;\n\
+         }\n\
+         class Edit { title text; done boolean; }\n\
+         function all() {\n\
+         \x20   return select T from App.s.Todos as { T.id, T.title };\n\
+         }\n\
+         function add(title: text) {\n\
+         \x20   return insert T into App.s.Todos { title: @title } as { T.id };\n\
+         }\n\
+         function edit(id: bigint, req: Edit) {\n\
+         \x20   return update T of App.s.Todos set ...@req where T.id == @id as { T.id } first;\n\
+         }\n\
+         function remove(id: bigint) {\n\
+         \x20   return delete T from App.s.Todos where T.id == @id as { T.id } first;\n\
+         }\n",
+    )
+    .expect("write");
+    let path = dir.path().to_str().expect("utf8");
+    let out = jwc(&["explain", path, "--sql"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = stdout(&out);
+
+    assert!(text.contains("4 statements"), "{text}");
+    for (kind, sql) in [
+        ("(select)", "SELECT "),
+        ("(insert)", "INSERT INTO s.todos (title) VALUES"),
+        ("(update)", "UPDATE s.todos x SET title = "),
+        ("(delete)", "DELETE FROM s.todos x WHERE x.id = (SELECT y.id FROM s.todos y"),
+    ] {
+        assert!(text.contains(kind), "`{kind}` in:\n{text}");
+        assert!(text.contains(sql), "`{sql}` in:\n{text}");
+    }
+    // The lock the lost-write fix was about, visible at last.
+    assert_eq!(text.matches("FOR UPDATE LIMIT 1").count(), 2, "{text}");
+    // A spread prints its class's fields and says which are sent.
+    assert!(text.contains("`...@req` sends title, done — only the fields present"), "{text}");
+    assert!(!text.contains("not compilable"), "{text}");
 }

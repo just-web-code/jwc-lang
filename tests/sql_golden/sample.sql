@@ -44,7 +44,7 @@ SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.
   WHERE (t0.org_id = ($1::text)::bigint) AND (t0.status <> ($2::text)::billing.subscription_status)
   LIMIT 1) q
 
--- ── BillingService.subscribe ──
+-- ── BillingService.subscribe #1 ──
 -- $1 = @req.plan_code :: varchar(40)
 -- $2 = true :: boolean
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'interval', t0.interval) AS j
@@ -124,7 +124,7 @@ SELECT coalesce(json_agg(q.j), '[]'::json)::text FROM (SELECT json_build_object(
   WHERE (t0.org_id = ($1::text)::bigint) AND (t0.accepted_at IS NULL)
   ORDER BY t0.created_at DESC) q
 
--- ── OrgService.accept_invite ──
+-- ── OrgService.accept_invite #1 ──
 -- $1 = @token_hash :: varchar(64)
 -- $2 = date.now() :: timestamptz
 SELECT q.j::text FROM (SELECT json_build_object('id', t0.id::text, 'org_id', t0.org_id::text, 'role', t0.role) AS j
