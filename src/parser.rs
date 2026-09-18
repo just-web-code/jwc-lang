@@ -311,6 +311,35 @@ impl Parser {
         }
     }
 
+    /// `insert into T`, `update T set`, `delete from T` — the rc.2 write
+    /// forms, from before every query bound a name (queries.md §2.4).
+    /// `E0907` names the form with a binder, and the statement is parsed
+    /// under that binder so the rest of it is checked as written. The
+    /// binder offered is the table's own name, which is what the two
+    /// migrations that motivated this wrote by hand.
+    fn unbound_write(
+        &mut self,
+        keyword_span: Span,
+        keyword: &str,
+        preposition: &str,
+        table: &QualifiedTable,
+    ) -> Ident {
+        let binder = table.object.name.clone();
+        self.diags.push(
+            Diagnostic::error(
+                "E0907",
+                keyword_span,
+                format!("`{keyword} {preposition}` — a write names its binding"),
+            )
+            .note(format!(
+                "write `{keyword} {binder} {preposition} {}`",
+                table.text()
+            ))
+            .clause("queries.md §2.4"),
+        );
+        Ident::new(binder, keyword_span)
+    }
+
     /// Emits `E0900` for a keyword the pre-1.0 language had (routing.md §10),
     /// or `E0901` for its `--` comment, and returns true.
     fn check_removed_keyword(&mut self) -> bool {
@@ -2796,17 +2825,17 @@ impl Parser {
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Select(Box::new(s)), sp))
                 }
-                "insert" if self.word_at(2, "into") => {
+                "insert" if self.word_at(2, "into") || self.word_at(1, "into") => {
                     let s = self.parse_insert()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Insert(Box::new(s)), sp))
                 }
-                "update" if self.word_at(2, "of") => {
+                "update" if self.word_at(2, "of") || self.peek_at(2).is(&Tok::Dot) => {
                     let s = self.parse_update()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Update(Box::new(s)), sp))
                 }
-                "delete" if self.word_at(2, "from") => {
+                "delete" if self.word_at(2, "from") || self.word_at(1, "from") => {
                     let s = self.parse_delete()?;
                     let sp = s.span;
                     Ok(Expr::new(ExprKind::Delete(Box::new(s)), sp))
@@ -3226,9 +3255,17 @@ impl Parser {
 
     fn parse_insert(&mut self) -> PResult<InsertExpr> {
         let start = self.expect_word("insert")?.span;
-        let binder = self.expect_ident()?;
+        let binder = if self.at_word("into") {
+            None
+        } else {
+            Some(self.expect_ident()?)
+        };
         self.expect_word("into")?;
         let table = self.parse_qualified_table()?;
+        let binder = match binder {
+            Some(b) => b,
+            None => self.unbound_write(start, "insert", "into", &table),
+        };
         self.query_depth += 1;
         let r = (|| -> PResult<InsertExpr> {
             let (values, mut end) = self.parse_object_entries()?;
@@ -3352,9 +3389,18 @@ impl Parser {
 
     fn parse_update(&mut self) -> PResult<UpdateExpr> {
         let start = self.expect_word("update")?.span;
-        let binder = self.expect_ident()?;
-        self.expect_word("of")?;
+        let binder = if self.peek_at(1).is(&Tok::Dot) {
+            None
+        } else {
+            let b = self.expect_ident()?;
+            self.expect_word("of")?;
+            Some(b)
+        };
         let table = self.parse_qualified_table()?;
+        let binder = match binder {
+            Some(b) => b,
+            None => self.unbound_write(start, "update", "of", &table),
+        };
         self.query_depth += 1;
         let r = (|| -> PResult<UpdateExpr> {
             let sets = self.parse_set_clause()?;
@@ -3401,9 +3447,17 @@ impl Parser {
 
     fn parse_delete(&mut self) -> PResult<DeleteExpr> {
         let start = self.expect_word("delete")?.span;
-        let binder = self.expect_ident()?;
+        let binder = if self.at_word("from") {
+            None
+        } else {
+            Some(self.expect_ident()?)
+        };
         self.expect_word("from")?;
         let table = self.parse_qualified_table()?;
+        let binder = match binder {
+            Some(b) => b,
+            None => self.unbound_write(start, "delete", "from", &table),
+        };
         self.query_depth += 1;
         let r = (|| -> PResult<DeleteExpr> {
             let mut end = table.span;

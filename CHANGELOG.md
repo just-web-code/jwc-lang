@@ -5,6 +5,16 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### rc.3's write binder shipped without a migration diagnostic
+
+`$name` → `@name` got `E0903` naming the fix. `insert into T` →
+`insert T into T` got `expected `;`, found `into``, and three or four
+more as the parser resynchronised — same release, same reader. The three
+rc.2 write forms are now `E0907`, naming the form with a binder, and the
+statement is read under that binder so the rest of it is checked as
+written. `grammar.ebnf` had never been updated for the binder either; it
+has now.
+
 ### One `--` comment produced one diagnostic per character on the line
 
 `E0901` named `//` and then the lexer read the rest of the line as source,

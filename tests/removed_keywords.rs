@@ -242,3 +242,60 @@ fn an_arrow_return_annotation_names_the_colon() {
               function f(x: int): int {\n    return @x;\n}\n";
     assert!(!jwc::parse_str("<arrow>", ok).has_errors());
 }
+
+/// `E0907` — a write from before rc.3, with no binder.
+///
+/// `insert into T` used to be `E0001: expected \`;\`, found \`into\``, and
+/// then three or four more as the parser resynchronised. One diagnostic,
+/// naming the form with a binder, and the statement is read under that
+/// binder so the rest of it is checked as written.
+#[test]
+fn a_write_without_a_binder_names_the_form_with_one() {
+    let head = "database App : Postgres;\nschema s of App;\n\
+                table Todos of App.s {\n    id bigint primary key identity;\n    title text;\n}\n";
+    for (old, want) in [
+        (
+            "function f() {\n    insert into App.s.Todos { title: \"x\" };\n}\n",
+            "write `insert Todos into App.s.Todos`",
+        ),
+        (
+            "function f() {\n    update App.s.Todos set title = \"y\" where Todos.id == 1;\n}\n",
+            "write `update Todos of App.s.Todos`",
+        ),
+        (
+            "function f() {\n    delete from App.s.Todos where Todos.id == 1;\n}\n",
+            "write `delete Todos from App.s.Todos`",
+        ),
+    ] {
+        let src = format!("{head}{old}");
+        let p = jwc::parse_str("<unbound>", &src);
+        let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            vec!["E0907"],
+            "one diagnostic, no cascade, for:\n{old}\ngot:\n{}",
+            p.render_all()
+        );
+        let d = &p.diags[0];
+        assert!(
+            d.note.as_deref().is_some_and(|n| n.contains(want)),
+            "the note must show the form: {:?}",
+            d.note
+        );
+        assert!(
+            d.message.contains("names its binding"),
+            "the message must say what is missing: {}",
+            d.message
+        );
+    }
+
+    // Under a binder the same statements are the language.
+    let ok = format!(
+        "{head}function f() {{\n\
+         \x20   insert T into App.s.Todos {{ title: \"x\" }};\n\
+         \x20   update T of App.s.Todos set title = \"y\" where T.id == 1;\n\
+         \x20   delete T from App.s.Todos where T.id == 1;\n\
+         }}\n"
+    );
+    assert!(!jwc::parse_str("<bound>", &ok).has_errors());
+}
