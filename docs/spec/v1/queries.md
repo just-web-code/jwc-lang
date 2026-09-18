@@ -288,6 +288,11 @@ The two positions that stay bare are the two that are not references: a
 `set` target and an `insert` object key name a column of the table being
 written, as in SQL, where `UPDATE t AS a SET a.x = 1` is an error.
 
+A write with no binder — `insert into T`, `update T set`, `delete from T`,
+the forms before rc.3 — is `E0907`, naming the form with one. The
+statement is read under the binder the diagnostic offers, so what follows
+it is checked as written rather than reported again as the parser resynchronises.
+
 A projection field naming a `private` column is `E0410` (schema §3.1).
 
 ### 6.2 Bare joins and aggregates (#4)
@@ -682,6 +687,7 @@ transaction's connection.
 | `E0501` | query clause out of order |
 | `E0904` | a column that does not name its binding |
 | `E0905` | a projection field qualified with a binding its shape does not read |
+| `E0907` | a write with no binder: `insert into`, `update … set`, `delete from` |
 | `E0502` | source is not a table or view |
 | `E0503` | `==?` on a non-nullable operand |
 | `E0510` | ambiguous join attachment — add `under <binding>` |

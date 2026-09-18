@@ -158,5 +158,5 @@ raw("SELECT count(*) FROM notes.notes WHERE org_id = {}", [@org_id])
 
 ```bash
 JWC_LOG_SQL=1 jwc serve        # every statement, with its binds and timing
-jwc explain                    # the statement each query lowers to
+jwc explain                    # the SQL each select, insert, update and delete lowers to
 ```

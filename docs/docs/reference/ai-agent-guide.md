@@ -641,6 +641,7 @@ cannot lower it **refuses by name** rather than dropping silently.
 jwc new myapp --template api    # empty | api | auth | jobs
 jwc check                     # types, schema, routes — offline
 jwc fmt                       # canonical form
+jwc fix                       # apply the mechanical migrations, then re-check
 jwc lint --deny-warnings      # + advisory whole-program lints
 jwc lint --explain E0211        # what a code means
 jwc migrate new init          # diff the schema, write up/down SQL

@@ -101,7 +101,7 @@ without it:
 namespace intro;
 
 service Greeter {
-    function hello(who: text) -> text {
+    function hello(who: text): text {
         let name = who;
         return "salom, " + @name;
     }
@@ -1099,10 +1099,11 @@ fails.
 jwc new myapp --template api   # empty | api | auth | jobs
 jwc check                    # types, schema, routes — offline, no database
 jwc fmt                      # canonical form; --check for CI
+jwc fix                      # the migrations the compiler knows how to do
 jwc lint --deny-warnings     # whole-program advisory lints
 jwc lint --explain E0211       # what a diagnostic means
 jwc routes                   # the resolved route table
-jwc explain                  # every query, with the SQL it becomes
+jwc explain                  # every statement, reads and writes, with the SQL it becomes
 jwc openapi                  # OpenAPI 3.1, from the typed signatures
 jwc migrate new init         # diff the schema, write up/down SQL
 jwc migrate up               # apply

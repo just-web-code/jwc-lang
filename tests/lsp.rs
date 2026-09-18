@@ -236,7 +236,7 @@ fn completion_offers_members_after_a_dot_and_names_otherwise() {
          \x20   secret varchar(40) private;\n\
          }\n\
          service Svc {\n\
-         \x20   function one(id: bigint) -> text { return \"x\"; }\n\
+         \x20   function one(id: bigint): text { return \"x\"; }\n\
          }\n\
          // completion probes\n\
          // Orgs.\n\

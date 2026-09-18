@@ -446,12 +446,12 @@ fn section<'a>(text: &'a str, route: &str) -> &'a str {
     &rest[..end]
 }
 
-/// `jwc explain` ends with `N queries`.
+/// `jwc explain` ends with `N statements`.
 fn count(text: &str) -> usize {
     text.lines()
         .find_map(|l| {
-            l.strip_suffix(" queries")
-                .or_else(|| l.strip_suffix(" query"))
+            l.strip_suffix(" statements")
+                .or_else(|| l.strip_suffix(" statement"))
         })
         .and_then(|n| n.trim().parse().ok())
         .unwrap_or(0)
@@ -581,4 +581,230 @@ fn run_without_a_main_says_what_to_do() {
         err.contains("jwc serve"),
         "it should name the alternative: {err}"
     );
+}
+
+/// `fmt --check` reads and `fmt` writes, and each used to print the
+/// other's summary on a clean tree: the read-only command said
+/// "formatted", the writing one said "already formatted". Each now says
+/// what it did.
+#[test]
+fn fmt_check_and_fmt_report_their_own_outcome() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace n;\n\nfunction f() {\n    return 1;\n}\n",
+    )
+    .expect("write");
+    let path = dir.path().to_str().expect("utf8");
+
+    let check = jwc(&["fmt", "--check", path]);
+    assert!(check.status.success());
+    assert_eq!(stdout(&check).trim(), "ok — 1 file already formatted");
+
+    let write = jwc(&["fmt", path]);
+    assert!(write.status.success());
+    assert_eq!(stdout(&write).trim(), "ok — 1 file formatted");
+}
+
+/// `jwc fix` — one of every diagnostic that carries a replacement, in a
+/// project still pinned to the release it was written for. One run, and
+/// the tree checks clean under this one.
+///
+/// The count is the point: both 0.9.x ports were 98% these edits, made by
+/// hand from the compiler's own `help:` lines.
+#[test]
+fn fix_applies_every_replacement_the_compiler_carries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("jwcproj.json"),
+        r#"{ "name": "old", "version": "0.1.0", "jwc": "0.9.901" }"#,
+    )
+    .expect("manifest");
+    let src = dir.path().join("app.jwc");
+    std::fs::write(
+        &src,
+        "namespace app;\n\
+         -- it's `old` — see §2\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Todos of App.s {\n\
+         \x20   -- the key\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   title text;\n\
+         \x20   done boolean default false;\n\
+         }\n\
+         function first_title() -> text? {\n\
+         \x20   for (t in select T from App.s.Todos where done == false as { id, title }) {\n\
+         \x20       return $t.title;\n\
+         \x20   }\n\
+         \x20   return null;\n\
+         }\n\
+         function add(title: text) -> bigint {\n\
+         \x20   let row = insert into App.s.Todos { title: $title } as { id };\n\
+         \x20   return @row.id;\n\
+         }\n\
+         function finish(id: bigint) {\n\
+         \x20   update App.s.Todos set done = true where id == $id;\n\
+         \x20   delete from App.s.Todos where done == true;\n\
+         }\n",
+    )
+    .expect("source");
+    let path = dir.path().to_str().expect("utf8");
+
+    // Pinned to another release, `check` refuses; `fix` is how the source
+    // gets to this one, so it does not.
+    let refused = jwc(&["check", path]);
+    assert!(!refused.status.success());
+
+    let dry = jwc(&["fix", path, "--dry-run"]);
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    let dry_out = stdout(&dry);
+    assert!(dry_out.contains("would fix"), "{dry_out}");
+    assert!(dry_out.contains("nothing written"), "{dry_out}");
+    let untouched = std::fs::read_to_string(&src).expect("read");
+    assert!(
+        untouched.contains("-- it's"),
+        "--dry-run must write nothing"
+    );
+
+    let fixed = jwc(&["fix", path]);
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    let out = stdout(&fixed);
+    assert!(out.contains("fixed "), "{out}");
+    assert!(
+        out.contains("`jwc` is `0.9.901`")
+            && out.contains(&format!("set it to `{}`", env!("CARGO_PKG_VERSION"))),
+        "it names the manifest field left to change:\n{out}"
+    );
+
+    let after = std::fs::read_to_string(&src).expect("read");
+    for want in [
+        "// it's `old` — see §2",
+        "    // the key",
+        "function first_title(): text?",
+        "for (let t in select T from App.s.Todos where T.done == false as { T.id, T.title })",
+        "return @t.title;",
+        "function add(title: text): bigint",
+        "insert Todos into App.s.Todos { title: @title } as { Todos.id }",
+        "update Todos of App.s.Todos set done = true where Todos.id == @id",
+        "delete Todos from App.s.Todos where Todos.done == true",
+    ] {
+        assert!(after.contains(want), "missing `{want}` in:\n{after}");
+    }
+
+    // With the field moved, the tree is this release's.
+    std::fs::write(
+        dir.path().join("jwcproj.json"),
+        format!(
+            r#"{{ "name": "old", "version": "0.1.0", "jwc": "{}" }}"#,
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .expect("manifest");
+    let check = jwc(&["check", path]);
+    assert!(
+        check.status.success(),
+        "clean after one `jwc fix`:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let again = jwc(&["fix", path]);
+    assert_eq!(stdout(&again).trim(), "nothing to fix");
+}
+
+/// A `help:` line that is an example is not a replacement. `E0301`'s
+/// says ``write `enum(InvoiceStatus, request.query("status"))` `` — a
+/// `fix` that read notes would overwrite the author's call with the
+/// sample. Nothing carries a `fix` here, so nothing is written.
+#[test]
+fn fix_never_applies_a_help_line() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("app.jwc");
+    let text = "namespace app;\n\
+                function f() {\n\
+                \x20   let s = enum(NotAType, \"x\");\n\
+                \x20   return @s;\n\
+                }\n";
+    std::fs::write(&src, text).expect("source");
+    let path = dir.path().to_str().expect("utf8");
+
+    let check = jwc(&["check", path]);
+    assert!(String::from_utf8_lossy(&check.stderr).contains("E0301"));
+
+    let fixed = jwc(&["fix", path]);
+    assert!(fixed.status.success());
+    assert_eq!(stdout(&fixed).trim(), "nothing to fix");
+    assert_eq!(std::fs::read_to_string(&src).expect("read"), text);
+}
+
+/// `explain` lists every statement, not every `select`: e-school's 98
+/// printed as 67, and the `WHERE … FOR UPDATE LIMIT 1` clause rc.6's
+/// lost-write fix was entirely about was the one thing the command could
+/// not show.
+#[test]
+fn explain_lists_the_writes_with_their_sql() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("app.jwc"),
+        "namespace app;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Todos of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   title text;\n\
+         \x20   done boolean default false;\n\
+         }\n\
+         class Edit { title text; done boolean; }\n\
+         function all() {\n\
+         \x20   return select T from App.s.Todos as { T.id, T.title };\n\
+         }\n\
+         function add(title: text) {\n\
+         \x20   return insert T into App.s.Todos { title: @title } as { T.id };\n\
+         }\n\
+         function edit(id: bigint, req: Edit) {\n\
+         \x20   return update T of App.s.Todos set ...@req where T.id == @id as { T.id } first;\n\
+         }\n\
+         function remove(id: bigint) {\n\
+         \x20   return delete T from App.s.Todos where T.id == @id as { T.id } first;\n\
+         }\n",
+    )
+    .expect("write");
+    let path = dir.path().to_str().expect("utf8");
+    let out = jwc(&["explain", path, "--sql"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+
+    assert!(text.contains("4 statements"), "{text}");
+    for (kind, sql) in [
+        ("(select)", "SELECT "),
+        ("(insert)", "INSERT INTO s.todos (title) VALUES"),
+        ("(update)", "UPDATE s.todos x SET title = "),
+        (
+            "(delete)",
+            "DELETE FROM s.todos x WHERE x.id = (SELECT y.id FROM s.todos y",
+        ),
+    ] {
+        assert!(text.contains(kind), "`{kind}` in:\n{text}");
+        assert!(text.contains(sql), "`{sql}` in:\n{text}");
+    }
+    // The lock the lost-write fix was about, visible at last.
+    assert_eq!(text.matches("FOR UPDATE LIMIT 1").count(), 2, "{text}");
+    // A spread prints its class's fields and says which are sent.
+    assert!(
+        text.contains("`...@req` sends title, done — only the fields present"),
+        "{text}"
+    );
+    assert!(!text.contains("not compilable"), "{text}");
 }

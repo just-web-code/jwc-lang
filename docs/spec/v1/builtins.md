@@ -53,16 +53,30 @@ Coercions — types §7.2 decides their failure class:
 | `int(x)` | `int` |
 | `bigint(x)` | `bigint` |
 | `numeric(x)` | `numeric` |
-| `boolean(x)` | `boolean` |
+| `boolean(x)` | `boolean` — `true` or `false`, the two strings a `{x: boolean}` path segment accepts; anything else, including null, raises `BadRequest` |
 | `uuid(x)` | `uuid` |
 | `timestamptz(x)` | `timestamptz` — RFC 3339 only |
 | `date(x)` | `date` — `YYYY-MM-DD`; anything else raises `BadRequest` |
-| `enum(E, x)` | `E?` — `null` in gives `null` out; a non-member raises |
+| `enum(E, x)` | `E?` — `null` in gives `null` out; a non-member raises `BadRequest` naming the members |
 
 `enum(E, x)` takes an enum **type name** as its first argument, the way
 `request.body() as C` takes a class name. It accepts `text?` and returns
 `E?`, so `enum(InvoiceStatus, request.query("status"))` is one line and
 `?status=bogus` is a 400 rather than a silently dropped filter.
+
+`boolean(x)` is not nullable, on purpose: `int(null)` and `date(null)`
+raise, and so does `boolean(null)`. The optional flag is written the way
+the optional enum is — narrow first, coerce after:
+
+```jwc
+function flag(raw: text?): boolean? {
+    if (@raw == null) {
+        return null;
+    }
+
+    return boolean(@raw);
+}
+```
 
 ---
 

@@ -8,7 +8,7 @@ service Retry {
     /// Insert under a generated key, going round again on a conflict.
     /// With only `return` and `throw` available the handler could not stay
     /// in the loop, and this function was not expressible.
-    function claim(name: text) -> bigint {
+    function claim(name: text): bigint {
         for (let attempt in [1, 2, 3]) {
             let row = insert Orgs into App.s.Orgs {
                 slug = @name + string.of(@attempt),
@@ -21,7 +21,7 @@ service Retry {
         throw Conflict("bo'sh slug topilmadi");
     }
 
-    function first_live(names: text[]) -> text {
+    function first_live(names: text[]): text {
         let found = "";
         for (let n in @names) {
             if (@n != "") {
@@ -33,10 +33,10 @@ service Retry {
     }
 }
 
-function stray() -> int {
+function stray(): int {
     break;         // expect: E0813
 }
 
-function stray_continue() -> int {
+function stray_continue(): int {
     continue;      // expect: E0813
 }

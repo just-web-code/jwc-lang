@@ -137,6 +137,36 @@ fn a_dash_comment_names_the_slash_that_replaced_it() {
     }
 }
 
+/// One `--` line is one diagnostic, whatever the prose behind it holds.
+///
+/// The lexer used to read the comment as source, so every apostrophe, em
+/// dash, backtick and `§` in it was its own `E0100` — a third of
+/// MyWallet's first-check errors and two thirds of the shortener's, all
+/// restating one fact. The line is now skipped once `E0901` has named the
+/// fix, and the rest of the file is read as though the line were a comment.
+#[test]
+fn a_dash_comment_line_is_one_diagnostic_not_one_per_character() {
+    let src = "database App : Postgres;\n\
+               -- it's `x` — see §2 (and don't read the rest)\n\
+               \x20   -- indented, with a trailing string \"unclosed\n\
+               function f() {\n    return 1;\n}\n";
+    let p = jwc::parse_str("<prose>", src);
+    let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+    assert_eq!(
+        codes,
+        vec!["E0901", "E0901"],
+        "two comment lines, two diagnostics, nothing else:\n{}",
+        p.render_all()
+    );
+    assert!(
+        p.program
+            .decls
+            .iter()
+            .any(|d| matches!(d, jwc::ast::Decl::Function(_))),
+        "the declaration after the comments is still read"
+    );
+}
+
 /// And the arithmetic it must not claim.
 #[test]
 fn subtracting_a_negative_is_not_a_comment() {
@@ -174,4 +204,106 @@ fn a_for_binder_without_let_names_the_let() {
     let ok = "database App : Postgres;\n\
               function f() {\n    for (let x in [1, 2]) {\n        return x;\n    }\n}\n";
     assert!(!jwc::parse_str("<for>", ok).has_errors());
+}
+
+/// `E0906` — a return annotation is `: T`, the mark a parameter already
+/// carries. `-> T` is the rc.6 spelling: one diagnostic naming the fix, and
+/// the annotation is still read so the body is checked against it.
+#[test]
+fn an_arrow_return_annotation_names_the_colon() {
+    let src = "database App : Postgres;\n\
+               function f(x: int) -> int {\n    return @x;\n}\n";
+    let p = jwc::parse_str("<arrow>", src);
+    let arrows: Vec<_> = p.diags.iter().filter(|d| d.code == "E0906").collect();
+    assert_eq!(
+        arrows.len(),
+        1,
+        "one `->`, one diagnostic:\n{}",
+        p.render_all()
+    );
+    assert!(
+        arrows[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("write `: T`")),
+        "the note must show the form: {:?}",
+        arrows[0].note
+    );
+    assert_eq!(
+        p.diags.len(),
+        1,
+        "the declaration after the arrow parses as written:\n{}",
+        p.render_all()
+    );
+    let f = p
+        .program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            jwc::ast::Decl::Function(f) => Some(f),
+            _ => None,
+        })
+        .expect("the function is still declared");
+    assert!(f.returns.is_some(), "the annotation is kept");
+
+    let ok = "database App : Postgres;\n\
+              function f(x: int): int {\n    return @x;\n}\n";
+    assert!(!jwc::parse_str("<arrow>", ok).has_errors());
+}
+
+/// `E0907` — a write from before rc.3, with no binder.
+///
+/// `insert into T` used to be `E0001: expected \`;\`, found \`into\``, and
+/// then three or four more as the parser resynchronised. One diagnostic,
+/// naming the form with a binder, and the statement is read under that
+/// binder so the rest of it is checked as written.
+#[test]
+fn a_write_without_a_binder_names_the_form_with_one() {
+    let head = "database App : Postgres;\nschema s of App;\n\
+                table Todos of App.s {\n    id bigint primary key identity;\n    title text;\n}\n";
+    for (old, want) in [
+        (
+            "function f() {\n    insert into App.s.Todos { title: \"x\" };\n}\n",
+            "write `insert Todos into App.s.Todos`",
+        ),
+        (
+            "function f() {\n    update App.s.Todos set title = \"y\" where Todos.id == 1;\n}\n",
+            "write `update Todos of App.s.Todos`",
+        ),
+        (
+            "function f() {\n    delete from App.s.Todos where Todos.id == 1;\n}\n",
+            "write `delete Todos from App.s.Todos`",
+        ),
+    ] {
+        let src = format!("{head}{old}");
+        let p = jwc::parse_str("<unbound>", &src);
+        let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            vec!["E0907"],
+            "one diagnostic, no cascade, for:\n{old}\ngot:\n{}",
+            p.render_all()
+        );
+        let d = &p.diags[0];
+        assert!(
+            d.note.as_deref().is_some_and(|n| n.contains(want)),
+            "the note must show the form: {:?}",
+            d.note
+        );
+        assert!(
+            d.message.contains("names its binding"),
+            "the message must say what is missing: {}",
+            d.message
+        );
+    }
+
+    // Under a binder the same statements are the language.
+    let ok = format!(
+        "{head}function f() {{\n\
+         \x20   insert T into App.s.Todos {{ title: \"x\" }};\n\
+         \x20   update T of App.s.Todos set title = \"y\" where T.id == 1;\n\
+         \x20   delete T from App.s.Todos where T.id == 1;\n\
+         }}\n"
+    );
+    assert!(!jwc::parse_str("<bound>", &ok).has_errors());
 }

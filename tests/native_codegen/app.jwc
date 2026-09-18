@@ -35,7 +35,7 @@ service Notes {
     }
 }
 
-function greeting(who: text) -> text {
+function greeting(who: text): text {
     return "salom, " + @who;
 }
 

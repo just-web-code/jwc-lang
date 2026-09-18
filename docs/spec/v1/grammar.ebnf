@@ -119,7 +119,7 @@ error_decl      = { doc_comment } "error" ident [ "(" [ param_list ] ")" ]
 service_decl    = { doc_comment } "service" ident "{" { function_decl } "}" ;
 
 function_decl   = { doc_comment } "function" ident "(" [ param_list ] ")"
-                  [ "->" type_ref ] [ raises_clause ] block ;
+                  [ ":" type_ref ] [ raises_clause ] block ;
 param_list      = param { "," param } ;
 param           = ident ":" type_ref [ "=" expr ] ;
 raises_clause   = "raises" "(" ident { "," ident } ")" ;
@@ -225,18 +225,18 @@ sort_key        = expr [ "asc" | "desc" ] [ "nulls" ( "first" | "last" ) ] ;
 limit_clause    = "limit" expr ;
 page_clause     = "page" [ "after" expr ] "size" expr [ "max" expr ] ;
 
-insert_expr     = "insert" "into" qualified_table object_literal
+insert_expr     = "insert" ident "into" qualified_table object_literal
                   [ conflict_clause ] [ projection ] [ "buffered" ] ;
 conflict_clause = "on" "conflict" [ "(" ident_list ")" ]
                   ( "do" "nothing" | "do" "update" set_clause ) ;
 
-update_expr     = "update" qualified_table set_clause
+update_expr     = "update" ident "of" qualified_table set_clause
                   [ "where" expr ] [ projection ] [ "first" ] ;
 set_clause      = "set" set_item { "," set_item } ;
 set_item        = ident ( "=" | "=?" ) expr
                 | spread ;
 
-delete_expr     = "delete" "from" qualified_table
+delete_expr     = "delete" ident "from" qualified_table
                   [ "where" expr ] [ projection ] [ "first" ] ;
 
 (* ---------- expressions ---------- *)

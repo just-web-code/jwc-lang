@@ -69,6 +69,23 @@ impl Workspace {
         root: impl AsRef<Path>,
         overlay: &std::collections::BTreeMap<PathBuf, String>,
     ) -> std::io::Result<Workspace> {
+        Self::load_inner(root, overlay, true)
+    }
+
+    /// `load`, without refusing a project written for another release.
+    ///
+    /// For `jwc fix` alone: moving the source to this release is what the
+    /// command is for, so the manifest naming the old one is its starting
+    /// state, not a reason to stop. Every other command keeps the refusal.
+    pub fn load_for_migration(root: impl AsRef<Path>) -> std::io::Result<Workspace> {
+        Self::load_inner(root, &std::collections::BTreeMap::new(), false)
+    }
+
+    fn load_inner(
+        root: impl AsRef<Path>,
+        overlay: &std::collections::BTreeMap<PathBuf, String>,
+        check_language: bool,
+    ) -> std::io::Result<Workspace> {
         let root = root.as_ref().to_path_buf();
         let mut paths = Vec::new();
         if root.is_file() {
@@ -96,7 +113,9 @@ impl Workspace {
         // not be forgotten by one of them. `InvalidData` is the closest
         // `io::ErrorKind` to "the project is not for this compiler"; what
         // the reader sees is the message.
-        language_check(&root)?;
+        if check_language {
+            language_check(&root)?;
+        }
         Ok(Workspace {
             root,
             files,
@@ -223,6 +242,56 @@ pub fn language_check(path: &Path) -> std::io::Result<()> {
         Some(why) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, why)),
         None => Ok(()),
     }
+}
+
+/// The migration diagnostics: what source written for an older release
+/// produces under this one. `E0900`–`E0903` are the 0.9 → 1.0 cutover,
+/// `E0906`–`E0907` the changes inside the candidate series.
+pub fn is_migration_code(code: &str) -> bool {
+    matches!(
+        code,
+        "E0900" | "E0901" | "E0902" | "E0903" | "E0906" | "E0907"
+    )
+}
+
+/// The one thing to say before a wall of migration diagnostics from a
+/// project whose manifest names no `jwc` version, or `None`.
+///
+/// The `jwc` field exists so that a project compiled by the wrong release
+/// is told so before its diagnostics. A project that predates the field
+/// is exactly the project that needs it and exactly the one that cannot
+/// have it — MyWallet, written for 0.9.901, answered 290 errors under
+/// rc.6 and not one mentioned a version. When the field is absent *and*
+/// the source raises the diagnostics only an old dialect produces, that
+/// is the version gap showing, and it is said once, before the list.
+pub fn undated_migration_note(ws: &Workspace) -> Option<String> {
+    let manifest = ws.manifest.as_ref()?;
+    if manifest.language.is_some() {
+        return None;
+    }
+    let mut codes: Vec<&str> = ws
+        .files
+        .iter()
+        .flat_map(|f| f.diags.iter().map(|d| d.code))
+        .filter(|c| is_migration_code(c))
+        .collect();
+    if codes.is_empty() {
+        return None;
+    }
+    codes.sort_unstable();
+    codes.dedup();
+    let mine = env!("CARGO_PKG_VERSION");
+    Some(format!(
+        "note: {} names no `jwc` version, and the diagnostics below ({}) are          what source written for an older release looks like under jwc {mine}.\n\
+         \x20     Add `\"jwc\": \"<the release it was written for>\"` and compile          with that release, or move the source to this one and add          `\"jwc\": \"{mine}\"`.\n",
+        manifest.path.display(),
+        codes.join(", ")
+    ))
+}
+
+/// `language_mismatch` for a caller that already holds the manifest.
+pub fn language_mismatch_of(m: &Manifest) -> Option<String> {
+    language_mismatch(m)
 }
 
 /// Why this compiler cannot be used on the project, or `None`.

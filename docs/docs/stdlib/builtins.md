@@ -19,9 +19,9 @@ this page is the same set with the reasons.
 |---|---|
 | `int(v)`, `bigint(v)` | parse. A value that is not a number is a **400**, not a plausible-looking `0`. |
 | `numeric(v)` | exact decimal, kept as text — money never touches a float |
-| `boolean(v)` | `"true"` and `"1"` are true |
+| `boolean(v)` | `"true"` or `"false"` — the two strings a `{x: boolean}` route parameter takes. Anything else, null included, is a **400**: `?done=bogus` used to become `done = false` and hide every finished row |
 | `uuid(v)`, `timestamptz(v)` | assertions the checker already made |
-| `enum(E, v)` | the type name is not a value, so it is a separate argument |
+| `enum(E, v)` | the type name is not a value, so it is a separate argument. Null stays null; a value outside the members is a **400** naming them, not a 500 from Postgres |
 | `env(name)` | the variable, or **null** when it is unset |
 
 `env` answering null rather than `""` is what makes the standard shape

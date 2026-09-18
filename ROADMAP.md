@@ -193,7 +193,7 @@ topilgunga qadar ochiq qoladi.
   - keyset pagination: `... page after @cursor size N max M` (#11, #40)
   - `was "old_name"` rename markeri (#26, #27)
   - `middleware RequireOrgMember(@org_id: bigint) requires RequireOrgMember` (#13, #37)
-  - service signaturalari: `function invoices(org_id: bigint, status: InvoiceStatus?) -> InvoiceDetail` (#31)
+  - service signaturalari: `function invoices(org_id: bigint, status: InvoiceStatus?): InvoiceDetail` (#31)
   - `raises (...)` faqat paket eksport chegarasida (E12)
   - `server { }` config bloki (#39)
   - lambda **yo'q** — `line => ...` grammatikadan olib tashlanadi (#22)

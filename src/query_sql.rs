@@ -17,6 +17,7 @@ use crate::model::{ColumnObj, SchemaModel, TableObj};
 use crate::naming::{self, quote_ident};
 use crate::query::{Node, Plan};
 use crate::sql::{Bind, PagePlan, Param, Shape};
+use crate::token::Span;
 use crate::views::ViewObj;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -1509,11 +1510,16 @@ fn field_names(p: &ObjectShape) -> Vec<String> {
 
 // ------------------------------------------------------------ sites
 
-/// One `select` in the source, with a label that names where it is.
+/// One statement in the source, with a label that names where it is.
 ///
 /// Enumerating every query a program issues is wanted in three places —
 /// the golden test, `jwc explain` (25.e), and lint — and walking the AST
 /// separately in each is three chances to miss one.
+///
+/// A site used to be a `select` only, so `explain` could not list a
+/// write at all: e-school's 98 statements printed as 67, and the
+/// `WHERE` clause rc.6's lost-write fix was entirely about was the one
+/// thing the command whose job is to show SQL could not show.
 pub struct Site<'a> {
     pub label: String,
     /// The declaration the site belongs to, without the `#n` disambiguator:
@@ -1521,10 +1527,48 @@ pub struct Site<'a> {
     /// `jwc explain --function` and `--route` select on this
     /// (tooling.md §1.2).
     pub owner: String,
-    pub select: &'a SelectExpr,
+    pub stmt: Statement<'a>,
 }
 
-/// Every `select` in declaration order. Sub-selects inside a query's own
+/// The four statements a site can be.
+#[derive(Clone, Copy)]
+pub enum Statement<'a> {
+    Select(&'a SelectExpr),
+    Insert(&'a InsertExpr),
+    Update(&'a UpdateExpr),
+    Delete(&'a DeleteExpr),
+}
+
+impl<'a> Site<'a> {
+    /// The `select`, for the callers that read only those — the SQL
+    /// golden, the page lint, and the view expansion.
+    pub fn select(&self) -> Option<&'a SelectExpr> {
+        match self.stmt {
+            Statement::Select(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self.stmt {
+            Statement::Select(s) => s.span,
+            Statement::Insert(i) => i.span,
+            Statement::Update(u) => u.span,
+            Statement::Delete(d) => d.span,
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self.stmt {
+            Statement::Select(_) => "select",
+            Statement::Insert(_) => "insert",
+            Statement::Update(_) => "update",
+            Statement::Delete(_) => "delete",
+        }
+    }
+}
+
+/// Every statement in declaration order. Sub-selects inside a query's own
 /// clauses are **not** separate sites: they compile as part of their
 /// enclosing statement, so listing them would double-count one query.
 pub fn sites(program: &Program) -> Vec<Site<'_>> {
@@ -1534,7 +1578,7 @@ pub fn sites(program: &Program) -> Vec<Site<'_>> {
             Decl::View(v) => out.push(Site {
                 label: format!("view {}", v.name.name),
                 owner: format!("view {}", v.name.name),
-                select: &v.body,
+                stmt: Statement::Select(&v.body),
             }),
             Decl::Service(s) => {
                 for f in &s.functions {
@@ -1579,6 +1623,192 @@ pub fn sites(program: &Program) -> Vec<Site<'_>> {
         }
     }
     out
+}
+
+/// The SQL a write lowers to, read from the source alone.
+///
+/// The interpreter shapes a write from the values it has in hand — a
+/// spread contributes the fields its record carries, `=?` skips an absent
+/// assignment — so what is printed here is the statement for the fields
+/// the source names, and a spread or an optional assignment is named
+/// beside it rather than guessed at. The `WHERE` clause, the lock and the
+/// `RETURNING` list are exactly the runtime's: one builder produces both.
+///
+/// A spread's fields are read from the declared class of the parameter it
+/// names — `owner` is the function the site is in, and its parameters are
+/// typed (types.md §10.1) — so `set ...@req` prints the columns `req`'s
+/// class can carry, with a note that only the present ones are sent.
+pub fn write_sql(
+    model: &SchemaModel,
+    sym: &crate::symbols::Symbols,
+    owner: &str,
+    stmt: Statement<'_>,
+) -> Result<(String, Vec<String>), String> {
+    let mut b = crate::sql::Builder::new(model);
+    let mut notes = Vec::new();
+    let spread_fields = |source: &Ident, except: &[Ident], span: Span| -> Vec<(String, Expr)> {
+        let fields = spread_class_fields(sym, owner, &source.name);
+        let mut out = Vec::new();
+        for f in &fields {
+            if except.iter().any(|x| x.name == *f) {
+                continue;
+            }
+            out.push((f.clone(), Expr::new(ExprKind::Null, span)));
+        }
+        out
+    };
+    let built = match stmt {
+        Statement::Select(_) => return Err("not a write".into()),
+        Statement::Insert(i) => {
+            let mut fields: Vec<(String, Expr)> = Vec::new();
+            for e in &i.values {
+                match e {
+                    ObjEntry::Field { key, value, .. } => {
+                        fields.push((key.name.clone(), value.clone()))
+                    }
+                    ObjEntry::Spread {
+                        source,
+                        except,
+                        span,
+                        ..
+                    } => {
+                        let from = spread_fields(source, except, *span);
+                        notes.push(spread_note(source, except, &from));
+                        fields.extend(from);
+                    }
+                }
+            }
+            b.insert(i, &fields)
+        }
+        Statement::Update(u) => {
+            let mut sets: Vec<(String, crate::sql::SetValue)> = Vec::new();
+            for it in &u.sets {
+                match it {
+                    SetItem::Set {
+                        column,
+                        value,
+                        optional,
+                        ..
+                    } => {
+                        if *optional {
+                            notes.push(format!(
+                                "`{} =?` is skipped when its value is null",
+                                column.name
+                            ));
+                        }
+                        let v = if reads_a_column(model, &u.table, value) {
+                            crate::sql::SetValue::Sql(value.clone())
+                        } else {
+                            crate::sql::SetValue::Bound(Expr::new(ExprKind::Null, value.span))
+                        };
+                        sets.push((column.name.clone(), v));
+                    }
+                    SetItem::Spread {
+                        source,
+                        except,
+                        span,
+                        ..
+                    } => {
+                        let from = spread_fields(source, except, *span);
+                        notes.push(spread_note(source, except, &from));
+                        sets.extend(
+                            from.into_iter()
+                                .map(|(k, e)| (k, crate::sql::SetValue::Bound(e))),
+                        );
+                    }
+                }
+            }
+            if sets.is_empty() {
+                // types.md §9.5 — an all-absent spread reads the row.
+                notes.push("with every field absent, the row is read instead".into());
+            }
+            b.update(u, &sets)
+        }
+        Statement::Delete(d) => b.delete(d),
+    };
+    match built {
+        Some(built) => Ok((built.sql, notes)),
+        None => Err("this write is not expressible yet".into()),
+    }
+}
+
+fn spread_note(source: &Ident, except: &[Ident], fields: &[(String, Expr)]) -> String {
+    let except = if except.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " except {}",
+            except
+                .iter()
+                .map(|i| i.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    if fields.is_empty() {
+        format!(
+            "plus the fields `...@{}{except}` carries at run time",
+            source.name
+        )
+    } else {
+        format!(
+            "`...@{}{except}` sends {} — only the fields present in the request",
+            source.name,
+            fields
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+/// The non-transient fields of the class a spread source is declared as,
+/// found through the owning function's typed parameters. Empty when the
+/// source is not a parameter with a class type — a local, say — in which
+/// case the note says the fields are the value's.
+fn spread_class_fields(sym: &crate::symbols::Symbols, owner: &str, source: &str) -> Vec<String> {
+    let key = owner.strip_prefix("function ").unwrap_or(owner);
+    let Some(f) = sym.functions.get(key) else {
+        return Vec::new();
+    };
+    let Some((_, crate::types::Ty::Class(class))) = f.params.iter().find(|(n, _)| n == source)
+    else {
+        return Vec::new();
+    };
+    match sym.classes.get(class) {
+        Some(c) => c
+            .fields
+            .iter()
+            .filter(|f| !f.transient)
+            .map(|f| f.name.clone())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// `set value = value + 1` reads the row it is writing — the same test
+/// the interpreter makes when it decides which side computes the value.
+fn reads_a_column(model: &SchemaModel, table: &QualifiedTable, e: &Expr) -> bool {
+    let Some(t) = model
+        .tables
+        .iter()
+        .find(|t| t.schema == table.schema.name && t.declared == table.object.name)
+    else {
+        return false;
+    };
+    fn go(t: &TableObj, e: &Expr) -> bool {
+        match &*e.kind {
+            ExprKind::Name(n) => t.column(&n.name).is_some(),
+            ExprKind::Field { base, field } => {
+                matches!(&*base.kind, ExprKind::Name(_)) && t.column(&field.name).is_some()
+            }
+            ExprKind::Binary { lhs, rhs, .. } => go(t, lhs) || go(t, rhs),
+            ExprKind::Unary { rhs, .. } => go(t, rhs),
+            _ => false,
+        }
+    }
+    go(t, e)
 }
 
 fn collect_block<'a>(block: &'a Block, label: &str, out: &mut Vec<Site<'a>>) {
@@ -1668,7 +1898,22 @@ fn collect_expr<'a>(e: &'a Expr, label: &str, out: &mut Vec<Site<'a>>) {
         ExprKind::Select(s) => out.push(Site {
             label: label.to_string(),
             owner: label.to_string(),
-            select: s,
+            stmt: Statement::Select(s),
+        }),
+        ExprKind::Insert(i) => out.push(Site {
+            label: label.to_string(),
+            owner: label.to_string(),
+            stmt: Statement::Insert(i),
+        }),
+        ExprKind::Update(u) => out.push(Site {
+            label: label.to_string(),
+            owner: label.to_string(),
+            stmt: Statement::Update(u),
+        }),
+        ExprKind::Delete(d) => out.push(Site {
+            label: label.to_string(),
+            owner: label.to_string(),
+            stmt: Statement::Delete(d),
         }),
         ExprKind::Field { base, .. } | ExprKind::Cast { value: base, .. } => {
             collect_expr(base, label, out)
@@ -1721,7 +1966,6 @@ fn collect_expr<'a>(e: &'a Expr, label: &str, out: &mut Vec<Site<'a>>) {
                 collect_expr(i, label, out);
             }
         }
-        ExprKind::Insert(_) | ExprKind::Update(_) | ExprKind::Delete(_) => {}
         ExprKind::OrThrow { value, args, .. } => {
             collect_expr(value, label, out);
             for a in args {

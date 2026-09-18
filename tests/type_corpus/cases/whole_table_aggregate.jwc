@@ -8,7 +8,7 @@ service Counts {
     /// No `group by`, no non-aggregate field, one binding: legal, and
     /// `first` needs no `orderby` because the answer is one row for any
     /// table, empty included.
-    function total() -> int {
+    function total(): int {
         let n = select O from App.s.Orgs
             as { total: count(O.id) }
             first;
@@ -18,7 +18,7 @@ service Counts {
     /// And the result is not optional: `count` of an empty table is 0, not
     /// no row, so there is no null branch to guard. This function reading
     /// `.total` with no `or throw` is the assertion.
-    function several() -> int {
+    function several(): int {
         let n = select M from App.s.Members
             as {
                 rows:   count(M.account_id),

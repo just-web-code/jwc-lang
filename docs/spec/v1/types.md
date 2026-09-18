@@ -24,7 +24,7 @@ Type  ::= Scalar                       -- §2
 A `Record` type is written inline where a signature needs one:
 
 ```jwc no-compile
-function record_payment(req: WebhookPayment) -> { status: text } { … }
+function record_payment(req: WebhookPayment): { status: text } { … }
 ```
 
 A `class` may not be used as a return annotation and a `view` may not be
@@ -469,7 +469,8 @@ is what makes cross-file checking possible at all (#31).
 
 ### 10.2 Returns
 
-A return annotation (`-> T`) is optional and inferred from the function's
+A return annotation (`: T`, after the parameter list — the same mark a
+parameter's type carries) is optional and inferred from the function's
 `return` statements when omitted, **unless**:
 
 - two `return` statements produce incompatible shapes — then the annotation
@@ -478,6 +479,9 @@ A return annotation (`-> T`) is optional and inferred from the function's
   compatible; returning a `Record{id, …}` on one path and `{status}` on
   another is not.
 - the function is exported by a package (`E0352`).
+
+`-> T`, the rc.6 spelling, is `E0906` naming `: T`; the annotation is still
+read so the body is checked against it.
 
 ### 10.3 Assignability
 
@@ -642,6 +646,7 @@ how you test nullity and is always allowed.
 | `E0343` | empty spread leaves a `NOT NULL` column unset |
 | `E0351` | incompatible return shapes without an annotation |
 | `E0352` | package-exported function without a return annotation |
+| `E0906` | `-> T` — the return annotation is `: T` |
 | `E0353` | wrong number of arguments to a declared function |
 | `E0354` | argument is not assignable to the declared parameter type |
 | `E0360` | `minLength` on an array |

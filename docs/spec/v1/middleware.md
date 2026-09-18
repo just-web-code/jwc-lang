@@ -120,6 +120,17 @@ does not.
 
 ## 5. `after` (#14, G5, N7)
 
+`after` runs **after the handler chain and before the response is
+written** — it is the unwind half of the middleware onion, not a hook
+that fires once the client has its bytes. Everything in it sits in front
+of the response: a million-turn loop there is five seconds added to the
+answer, and under `request_timeout` it is a 504 that discards the 200 the
+handler built. That position is what lets it set headers (§5.4) and read
+`response.status()` (§5.1), and it is why an ordinary write there costs
+every request a round trip, which `buffered` exists to take off that path
+(writes §7.3). Work that should not charge the client belongs in a `job`
+(jobs §1).
+
 ```jwc
 middleware Audit {
     after {

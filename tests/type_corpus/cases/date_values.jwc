@@ -18,7 +18,7 @@ service Dates {
     // `date + interval` is a `timestamptz` (types.md §12.1), so the
     // comparison has to be made on the wider side — `date.today()` against
     // it is E0376.
-    function past_the_grace_window(id: bigint) -> boolean {
+    function past_the_grace_window(id: bigint): boolean {
         let t = select T from App.s.Terms
             where T.id == @id
             as { T.id, T.ends_on }
@@ -30,7 +30,7 @@ service Dates {
         return @now > @deadline;
     }
 
-    function a_date_and_a_timestamp_do_not_order(id: bigint) -> boolean {
+    function a_date_and_a_timestamp_do_not_order(id: bigint): boolean {
         let t = select T from App.s.Terms
             where T.id == @id
             as { T.id, T.ends_on }

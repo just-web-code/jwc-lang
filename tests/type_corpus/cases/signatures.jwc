@@ -2,7 +2,7 @@ namespace signatures;
 
 // Typed service boundaries (types.md §10).
 service Sigs {
-    function takes_two(a: bigint, b: text) -> text {
+    function takes_two(a: bigint, b: text): text {
         return @b;
     }
 
@@ -28,7 +28,7 @@ service Sigs {
         return { status: "ok" };
     }
 
-    function annotated_disagrees() -> text {
+    function annotated_disagrees(): text {
         return 1;                               // expect: E0351
     }
 

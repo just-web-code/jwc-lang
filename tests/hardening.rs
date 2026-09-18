@@ -674,8 +674,7 @@ async fn the_port_is_declared_and_the_environment_wins_over_it() {
 /// through `check`, `fmt` and `serve` without trouble.
 #[tokio::test]
 async fn a_long_concatenation_is_not_nesting() {
-    let mut src =
-        String::from("namespace h;\nfunction page() -> text {\n    return \"line 0\\n\"\n");
+    let mut src = String::from("namespace h;\nfunction page(): text {\n    return \"line 0\\n\"\n");
     for i in 1..=300 {
         src.push_str(&format!("        + \"line {i}\\n\"\n"));
     }
@@ -2786,14 +2785,15 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     assert!(printed.contains("// why this function exists"));
     assert!(jwc::fmt::comments_lost(kept, &printed).is_empty());
 
-    // A comment inside a record literal: the printer drops it, and the
-    // check is what turns that into a refusal instead of a deletion.
+    // A comment inside an array literal: an item carries no comment
+    // (a record entry does, since rc.7), so the printer drops it, and
+    // the check is what turns that into a refusal instead of a deletion.
     let lossy = "namespace n;\n\
                  function f() {\n\
-                 \x20   return {\n\
+                 \x20   return [\n\
                  \x20       // the reason for the next line\n\
-                 \x20       a: 1\n\
-                 \x20   };\n\
+                 \x20       1\n\
+                 \x20   ];\n\
                  }\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), lossy);
     assert!(!parsed.has_errors(), "the sample must parse");
@@ -2817,12 +2817,12 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     // comment lost.
     let twice = "namespace n;\n\
                  function f() {\n\
-                 \x20   return {\n\
+                 \x20   return [\n\
                  \x20       // same text\n\
-                 \x20       a: 1,\n\
+                 \x20       1,\n\
                  \x20       // same text\n\
-                 \x20       b: 2\n\
-                 \x20   };\n\
+                 \x20       2\n\
+                 \x20   ];\n\
                  }\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), twice);
     let printed = jwc::fmt::format_program(&parsed.program);
@@ -2869,7 +2869,7 @@ fn a_recursion_that_never_ends_is_an_error_not_a_crash() {
     std::fs::write(
         dir.path().join("app.jwc"),
         "namespace deep;\n\
-         function down(n: int) -> int {\n\
+         function down(n: int): int {\n\
          \x20   let a = string.of(@n) + \"-\" + string.of(@n);\n\
          \x20   let b = [@a, @a, @a, @a];\n\
          \x20   let c = { one: @a, two: @b, three: @n };\n\
@@ -2965,7 +2965,7 @@ fn a_recursive_function_compiles_natively() {
 
     let direct = emit(
         "namespace n;\n\
-         function down(k: int) -> int { if (k <= 0) { return 0; } return down(@k - 1); }\n\
+         function down(k: int): int { if (k <= 0) { return 0; } return down(@k - 1); }\n\
          function main() { console.writeln(string.of(down(3))); }\n",
     );
     assert!(
@@ -2980,8 +2980,8 @@ fn a_recursive_function_compiles_natively() {
     // Mutual recursion is the same cycle by a longer path.
     let mutual = emit(
         "namespace n;\n\
-         function ping(k: int) -> int { if (k <= 0) { return 0; } return pong(@k - 1); }\n\
-         function pong(k: int) -> int { return ping(@k - 1); }\n\
+         function ping(k: int): int { if (k <= 0) { return 0; } return pong(@k - 1); }\n\
+         function pong(k: int): int { return ping(@k - 1); }\n\
          function main() { console.writeln(string.of(ping(3))); }\n",
     );
     assert!(mutual.contains("Box::pin(jwc_fn_ping("));
@@ -2990,7 +2990,7 @@ fn a_recursive_function_compiles_natively() {
     // A program with no cycle keeps the direct call and pays nothing.
     let plain = emit(
         "namespace n;\n\
-         function twice(k: int) -> int { return @k + @k; }\n\
+         function twice(k: int): int { return @k + @k; }\n\
          function main() { console.writeln(string.of(twice(3))); }\n",
     );
     assert!(plain.contains("jwc_fn_twice("));

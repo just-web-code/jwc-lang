@@ -3,6 +3,117 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.7] — freeze candidate — 2026-09-18
+
+### middleware.md §5 says where `after` runs
+
+`after` is the unwind half of the middleware onion — after the handler
+chain, before the socket write — and the section that defines it never
+said so. Measured: a block that spins a million turns adds 5.8 s to the
+response, and under `request_timeout = "2s"` turns the handler's 200 into
+a 504. The section now opens with the position, why it has to be there
+(headers, `response.status()`), and what belongs elsewhere (`buffered`
+for a write, `job` for work that should not charge the client). The
+`E0811` help says the same.
+
+### `jwc explain` lists the writes
+
+A site was a `select`, so `explain` could not list an `insert`, `update`
+or `delete` at all: e-school's 98 statements printed as 67, and the
+`WHERE … FOR UPDATE LIMIT 1` clause rc.6's lost-write fix was entirely
+about was the one thing the command whose job is to show SQL could not
+show. A site now carries any of the four statements. A write prints from
+the same builder the runtime uses; a spread lists the fields its
+parameter's class can carry, and what the source cannot decide is noted
+beside the SQL. Hover in the editor answers over a write too, as
+tooling.md §6.2 always said it did.
+
+### `jwc fmt` keeps a comment inside `server { }`, a record literal and an `insert`
+
+The AST carried a comment on a declaration or a statement and nowhere
+else, so a `///` beside `cursor_secret` or a `//` above one field of a
+`json({ … })` made `fmt` refuse the file — correctly, rather than lose
+it, but with no way out except moving the comment somewhere less useful,
+and CI's `fmt --check` failing on the file forever. Each entry of a
+record literal, an `insert` value list and a `server { }` body now
+carries its comment, and a literal whose entries carry one is printed one
+entry per line however short it is. The refusal that remains, for a
+position the printer still cannot hold, says it is a gap being tracked
+rather than a rule the author broke.
+
+### `jwc fix` — the migrations the compiler already knows how to do
+
+Of the 358 edits MyWallet took to reach rc.6, 351 were ones the compiler
+had already specified in a `help:` line; the shortener's 218 held 215.
+`jwc fix` re-runs the check, applies every diagnostic that carries a
+literal replacement, and repeats until none is left. `Diagnostic` gains a
+`fix` field for that replacement, set only where the compiler has made
+the whole decision — `E0901`, `E0902`, `E0903`, `E0904` (one candidate),
+`E0906`, `E0907` — and never read from the `help:` prose, which may be an
+example. `--dry-run` reports and writes nothing.
+
+### An absent `jwc` field meant "any version"
+
+rc.4 added the manifest's `jwc` field for the project compiled by the
+wrong release. A project that predates the field is exactly that project,
+and it is the one that cannot have it: MyWallet, written for 0.9.901,
+answered 290 errors under rc.6 and not one mentioned a version. When the
+manifest names no version and the source raises the diagnostics only an
+older dialect produces (`E0900`–`E0903`, `E0906`–`E0907`), `jwc check`
+now says so once, before the list, naming the codes it saw and the field
+to add.
+
+### rc.3's write binder shipped without a migration diagnostic
+
+`$name` → `@name` got `E0903` naming the fix. `insert into T` →
+`insert T into T` got `expected `;`, found `into``, and three or four
+more as the parser resynchronised — same release, same reader. The three
+rc.2 write forms are now `E0907`, naming the form with a binder, and the
+statement is read under that binder so the rest of it is checked as
+written. `grammar.ebnf` had never been updated for the binder either; it
+has now.
+
+### One `--` comment produced one diagnostic per character on the line
+
+`E0901` named `//` and then the lexer read the rest of the line as source,
+so every apostrophe, em dash, backtick and `§` in the prose was its own
+`E0100`: 89 of MyWallet's 290 first-check errors and 207 of the
+shortener's 312 restated one fact. A line that opens with `--` is now one
+`E0901`, and the lexer skips to the newline.
+
+### `boolean(x)` answered `false` for everything it did not recognise
+
+`boolean("bogus")`, `boolean("yes")`, `boolean(null)` — all `false`,
+silently. With `where T.done ==? @done` the absent case was the damaging
+one: a `?done=` the client never sent became `done = false`, and every
+finished row vanished from an unfiltered list, with a 200 on it. The same
+type as a route parameter accepted `true` and `false` and refused the
+rest. Now `boolean(x)` does too: `true`, `false`, or `BadRequest` — the
+shape `int(x)` and `date(x)` already had, null included.
+
+### `enum(E, x)` never read `E`
+
+The type name was dropped and whatever the client sent went to Postgres
+as text, so `?status=bogus` was a 500 — on the specification's own
+sample too. `builtins.md §2` promised a 400 in two places. Now a
+non-member raises `BadRequest` naming the value and the members, in both
+the interpreter and the native backend.
+
+### BREAKING: a return annotation is `: T`, not `-> T`
+
+A parameter is typed with `:`; the function's result was typed with `->`.
+Two marks for the one idea, and the second was the only place in the
+language it appeared. Now both are `:`, and the signature reads as one
+line of the same thing:
+
+```jwc
+function login(req: Login): { token: text, expires_in: int } raises (Unauthorized) {
+```
+
+`-> T` is `E0906`, naming `: T`. The annotation is still read after the
+diagnostic, so the body is checked against it and the rest of the file
+reports nothing it would not have reported anyway. `jwc fmt` prints `:`.
+
 ## [1.0.0-rc.6] — freeze candidate — 2026-09-17
 
 ### `update … first` and `delete … first` lost writes under concurrency

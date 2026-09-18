@@ -386,11 +386,11 @@ fn a_value_that_would_run_past_the_margin_is_broken() {
 fn a_long_chain_breaks_at_its_operator_and_a_ternary_does_not() {
     let src = concat!(
         "service S {\n",
-        "    function a(x: text) -> text {\n",
+        "    function a(x: text): text {\n",
         "        return \"<img src='https://barcodeapi.org/api/qr/\" + @x",
         " + \"?format=svg' alt='QR Code'/>\";\n",
         "    }\n",
-        "    function b(x: int) -> text {\n",
+        "    function b(x: int): text {\n",
         "        return @x > 100000 ? \"a rather long branch here for width\" :",
         " \"another rather long branch\";\n",
         "    }\n",
@@ -557,4 +557,72 @@ fn a_block_comment_mid_expression_is_refused_rather_than_dropped() {
         jwc::fmt::comments_lost(src, &printed),
         vec!["/* why */".to_string()]
     );
+}
+
+/// A comment inside `server { }`, a record literal and an `insert` value
+/// list is where anyone would put it — `cursor_secret`'s doc beside
+/// `cursor_secret` — and `fmt` used to refuse the file rather than lose
+/// it, with no way out but moving the comment. Now the entry carries it.
+#[test]
+fn comments_inside_server_record_and_insert_survive_formatting() {
+    let src = "namespace n;\n\n\
+               database App : Postgres;\n\n\
+               schema s of App;\n\n\
+               table Todos of App.s {\n\
+               \x20   id    bigint primary key identity;\n\
+               \x20   title text;\n\
+               }\n\n\
+               server {\n\
+               \x20   port          = 8080;\n\
+               \x20   /// Required by any `page` query: the cursor is signed.\n\
+               \x20   cursor_secret = \"x\";\n\n\
+               \x20   pool {\n\
+               \x20       // ten is plenty here\n\
+               \x20       size = 10;\n\
+               \x20   }\n\
+               }\n\n\
+               function f() {\n\
+               \x20   let row = insert T into App.s.Todos {\n\
+               \x20       // the title the client sent, narrowed above\n\
+               \x20       title: \"a\"\n\
+               \x20   } as { T.id };\n\
+               \x20   return json({\n\
+               \x20       // the reason for the next line\n\
+               \x20       a: 1,\n\
+               \x20       b: { c: 2 }\n\
+               \x20   });\n\
+               }\n";
+    let printed = fmt("comments.jwc", src);
+    assert!(
+        jwc::fmt::comments_lost(src, &printed).is_empty(),
+        "every comment must survive:\n{printed}"
+    );
+    // Each one stays where it was written, not hoisted above the statement.
+    for (before, after) in [
+        ("port          = 8080;", "/// Required by any `page` query"),
+        ("/// Required by any `page` query", "cursor_secret = \"x\";"),
+        ("pool {", "// ten is plenty here"),
+        (
+            "insert T into App.s.Todos {",
+            "// the title the client sent",
+        ),
+        ("return json({", "// the reason for the next line"),
+        ("// the reason for the next line", "a: 1,"),
+    ] {
+        let b = printed
+            .find(before)
+            .unwrap_or_else(|| panic!("`{before}` in:\n{printed}"));
+        let a = printed
+            .find(after)
+            .unwrap_or_else(|| panic!("`{after}` in:\n{printed}"));
+        assert!(b < a, "`{before}` must precede `{after}`:\n{printed}");
+    }
+    // Already canonical: the printer's own output round-trips.
+    assert_eq!(printed, src, "the input was written in canonical form");
+    assert_eq!(fmt("again.jwc", &printed), printed);
+
+    // A short literal with a comment breaks, because a comment has no
+    // inline form — and one without stays on its line.
+    let short = "namespace n;\n\nfunction f() {\n    return json({ a: 1 });\n}\n";
+    assert_eq!(fmt("short.jwc", short), short);
 }

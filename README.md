@@ -140,6 +140,7 @@ cargo build --release --features redis
 | `jwc check [path]` | parse, resolve names, type-check, and check the wiring |
 | `jwc build [path] [--release]` | the native AOT backend: one binary that answers what `jwc serve` answers |
 | `jwc fmt [path] [--check]` | rewrite in canonical form; `--check` is the CI shape |
+| `jwc fix [path] [--dry-run]` | apply the migrations the compiler already knows how to do |
 | `jwc gen-sql [path] [--explain]` | the schema as Postgres DDL, deterministic and offline |
 | `jwc explain [path]` | every query the program issues, with its SQL |
 | `jwc login --token jwc_…` | store a registry key in `~/.jwc/credentials.json` |

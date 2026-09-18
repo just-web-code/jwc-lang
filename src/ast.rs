@@ -17,6 +17,13 @@ pub struct Attached {
     pub blank_before: bool,
 }
 
+impl Attached {
+    /// Carries a comment of any kind — what the printer has to keep.
+    pub fn has_comments(&self) -> bool {
+        !self.docs.is_empty() || !self.comments.is_empty() || !self.blocks.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Ident {
     pub name: String,
@@ -154,6 +161,10 @@ pub struct DatabaseDecl {
 
 #[derive(Clone, Debug)]
 pub struct Assignment {
+    /// The comment above a `server { }` entry documents that setting —
+    /// `cursor_secret` beside `cursor_secret` — and the printer keeps it
+    /// there.
+    pub at: Attached,
     pub key: Ident,
     pub value: Expr,
     pub span: Span,
@@ -934,6 +945,8 @@ impl BinOp {
 pub enum ObjEntry {
     /// `k: v` (projection / JSON) or `k = v` (write target).
     Field {
+        /// The comment above the entry, inside the braces.
+        at: Attached,
         key: Ident,
         value: Expr,
         /// `=` rather than `:`.
@@ -942,10 +955,19 @@ pub enum ObjEntry {
     },
     /// `...$x except a, b`
     Spread {
+        at: Attached,
         source: Ident,
         except: Vec<Ident>,
         span: Span,
     },
+}
+
+impl ObjEntry {
+    pub fn attached(&self) -> &Attached {
+        match self {
+            ObjEntry::Field { at, .. } | ObjEntry::Spread { at, .. } => at,
+        }
+    }
 }
 
 // ---------------------------------------------------------------- queries

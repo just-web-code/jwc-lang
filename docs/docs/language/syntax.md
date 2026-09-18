@@ -32,7 +32,7 @@ not fail where you wrote it, it fails somewhere else.
 line.** There is no multi-line string. Build long text by concatenating:
 
 ```jwc no-compile
-function page() -> text {
+function page(): text {
     return "<!doctype html>\n"
         + "<title>hello</title>\n"
         + "<h1>hello</h1>\n";

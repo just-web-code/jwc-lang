@@ -96,6 +96,20 @@ enum Command {
         #[arg(long)]
         deny_warnings: bool,
     },
+    /// Apply the migrations the compiler already knows how to do.
+    ///
+    /// Re-runs the check and applies every diagnostic that carries a
+    /// literal replacement — `--` comments, `$name` sigils, unqualified
+    /// columns, `-> T` annotations, writes without a binder — until none
+    /// is left. What remains is `jwc check`'s to report.
+    Fix {
+        /// File or directory. Defaults to the current directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Report what would change; write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Rewrite sources in canonical form.
     Fmt {
         /// Files or directories. Defaults to the current directory.
@@ -536,6 +550,7 @@ fn project_dir(c: &Command) -> Option<&std::path::Path> {
         // be, and formatting reads no configuration anyway.
         Fmt { paths, .. } => paths.first().map(|p| p.as_path()),
         Check { path, .. }
+        | Fix { path, .. }
         | GenSql { path, .. }
         | Explain { path, .. }
         | Publish { path, .. }
@@ -611,6 +626,7 @@ fn run() -> Result<()> {
             parse_only,
             deny_warnings,
         } => cmd::check(path, quiet, parse_only, deny_warnings),
+        Command::Fix { path, dry_run } => cmd::fix(path, dry_run),
         Command::Fmt {
             paths,
             check,

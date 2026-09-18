@@ -8,7 +8,7 @@ import dto.auth;
 /// against it when the address is unknown, so a miss costs the same as a
 /// hit. A constant rather than an `env`, because a deployment that forgot
 /// to set one would lose the defence silently.
-function decoy_password_hash() -> text {
+function decoy_password_hash(): text {
     return "$argon2id$v=19$m=19456,t=2,p=1$2w2b+Ihc9+eswxNKyuQUfQ$td4KgFPi6UJPiI5wMj2T2NJIHxv14N7qWP5zn5X6Do4";
 }
 
@@ -36,7 +36,7 @@ service AuthService {
     /// returned before hashing would answer in microseconds where a known
     /// one takes an Argon2id verification, and the clock would say what
     /// the sentence refuses to. So both branches verify.
-    function login(req: Login) -> { token: text, expires_in: int } {
+    function login(req: Login): { token: text, expires_in: int } {
         let found = select A from App.auth.Accounts
             where A.email == @req.email
             as { A.id, A.password_hash }

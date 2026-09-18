@@ -11,7 +11,7 @@ service Dump {
         return debug.dump(@rows);                  // expect: W1301
     }
 
-    function a_record_passes_through_too(org_id: bigint) -> text {
+    function a_record_passes_through_too(org_id: bigint): text {
         let row = select O from App.s.Orgs where O.id == @org_id as { O.id, O.slug } first
             or throw NotFound("yo'q");
         let seen = debug.dump(@row);               // expect: W1301

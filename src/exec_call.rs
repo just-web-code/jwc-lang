@@ -56,14 +56,37 @@ impl<'a> Vm<'a> {
         }
 
         // `enum(E, x)` takes a type name, so its first argument is not a
-        // value (builtins.md §2).
+        // value (builtins.md §2). The checker proved `E` names an enum, so
+        // its members are in the table; a value outside them is the
+        // client's mistake, raised here as a sentence rather than left
+        // for Postgres to reject as a fault.
         if path == "enum" {
             let v = self.eval(&args[1]).await?;
-            return Ok(if v.is_null() {
-                Value::Null
-            } else {
-                Value::Text(text(&v))
-            });
+            if v.is_null() {
+                return Ok(Value::Null);
+            }
+            let raw = text(&v);
+            let members = match &*args[0].kind {
+                ExprKind::Name(n) => self
+                    .program
+                    .symbols
+                    .enums
+                    .get(&n.name)
+                    .map(|e| (n.name.as_str(), e.members.as_slice())),
+                _ => None,
+            };
+            if let Some((name, members)) = members {
+                if !members.iter().any(|m| m == &raw) {
+                    return Err(Abort::Thrown(Thrown {
+                        error: "BadRequest".into(),
+                        args: vec![Value::Text(format!(
+                            "`{raw}` is not a {name} — expected one of: {}",
+                            members.join(", ")
+                        ))],
+                    }));
+                }
+            }
+            return Ok(Value::Text(raw));
         }
 
         let mut vals = Vec::new();
@@ -645,7 +668,22 @@ impl<'a> Vm<'a> {
                 }
             }
             "numeric" => Value::Numeric(s(0)),
-            "boolean" => Value::Bool(matches!(s(0).as_str(), "true" | "1")),
+            // `true` and `false`, the two strings a `{x: boolean}` path
+            // segment accepts (serve.rs), and nothing else: `boolean("bogus")`
+            // used to answer `false` and turn `?done=bogus` into a filter
+            // the client never asked for.
+            "boolean" => match s(0).as_str() {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                raw => {
+                    return Err(Abort::Thrown(Thrown {
+                        error: "BadRequest".into(),
+                        args: vec![Value::Text(format!(
+                            "`{raw}` is not a boolean — expected `true` or `false`"
+                        ))],
+                    }))
+                }
+            },
             "uuid" | "timestamptz" => Value::Text(s(0)),
             // Validated, unlike `uuid` and `timestamptz` above: a `date`
             // this rejects is one Postgres would have rejected later, with

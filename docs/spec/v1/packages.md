@@ -13,7 +13,7 @@ A project is described by `jwcproj.json` at its root:
   "name": "redis",
   "version": "0.1.0",
   "type": "pkg",
-  "jwc": "1.0.0-rc.6",
+  "jwc": "1.0.0-rc.7",
   "dependencies": { "redis": "^0.1.0" }
 }
 ```
@@ -25,14 +25,18 @@ package is imported.
 compiler that does not satisfy it refuses the project — `check`, `fmt`,
 `run`, `serve`, `build`, `test` and the rest alike — naming both versions
 and the manifest that holds the field. The field is optional; a project
-that does not say is not asked.
+that does not say is not asked — unless its source answers for it. When
+the field is absent and the source raises the diagnostics only an older
+dialect produces (`E0900`–`E0903`, `E0906`–`E0907`), `check` says so once,
+before the list: the manifest names no version, these diagnostics are what
+an older release's source looks like, and here is the field to add.
 
 A bare version means **exactly** that version, as it does for a
 dependency (§1.3): `rc.N` and `rc.N+1` carry whatever review turned up
 and promise nothing to each other, so "close enough" is not a useful
 default for the one field whose job is to catch the gap. A range says so
 out loud, and — by the ordinary semver rule — a range that names no
-pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.6`
+pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.7`
 while `^1.0.0-rc.1` does. `"*"` is any version.
 
 `jwc new` records the release it scaffolded from.

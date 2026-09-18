@@ -117,6 +117,9 @@ pub fn check(path: PathBuf, quiet: bool, parse_only: bool, deny_warnings: bool) 
 
     let mut errors = 0usize;
     let mut warnings = 0usize;
+    if let Some(note) = crate::workspace::undated_migration_note(&ws) {
+        eprintln!("{note}");
+    }
     for f in &ws.files {
         for d in &f.diags {
             match d.severity {
@@ -193,9 +196,10 @@ fn report_lost_comments(file: &Path, lost: &[String]) {
     }
     eprintln!(
         "  the printer re-emits from the AST, which carries a comment on a \
-         declaration or a statement but not inside a record literal, a \
-         `server {{ }}` body or an `insert` value list. Move it above the \
-         statement and the file formats."
+         declaration, a statement, a `server {{ }}` entry and an entry of a \
+         record literal — but not yet on this position. That is a gap in \
+         the printer, not a rule about where comments go; until it is \
+         closed, the comment formats from above the statement."
     );
 }
 
@@ -306,7 +310,11 @@ pub fn fmt(paths: Vec<PathBuf>, check_only: bool, to_stdout: bool) -> Result<()>
 
     if check_only {
         if changed.is_empty() {
-            println!("ok — {} file{} formatted", files.len(), plural(files.len()));
+            println!(
+                "ok — {} file{} already formatted",
+                files.len(),
+                plural(files.len())
+            );
             return Ok(());
         }
         for c in &changed {
@@ -323,11 +331,7 @@ pub fn fmt(paths: Vec<PathBuf>, check_only: bool, to_stdout: bool) -> Result<()>
         println!("formatted {}", display_relative(c));
     }
     if changed.is_empty() {
-        println!(
-            "ok — {} file{} already formatted",
-            files.len(),
-            plural(files.len())
-        );
+        println!("ok — {} file{} formatted", files.len(), plural(files.len()));
     }
     Ok(())
 }
@@ -450,13 +454,33 @@ pub fn explain(
                 continue;
             }
             queries += 1;
-            let (line, _) = file.source.line_col(site.select.span.start);
+            let (line, _) = file.source.line_col(site.span().start);
             println!(
-                "\x1b[1m{}:{line}\x1b[0m  {}",
+                "\x1b[1m{}:{line}\x1b[0m  {}  ({})",
                 file.source.path.display(),
-                site.label
+                site.label,
+                site.kind()
             );
-            let plan = crate::query::plan(site.select, &sym);
+            let Some(select) = site.select() else {
+                match crate::query_sql::write_sql(&built.model, &sym, &site.owner, site.stmt) {
+                    Ok((sql, notes)) => {
+                        for line in sql.lines() {
+                            println!("  {line}");
+                        }
+                        for n in notes {
+                            println!("  -- {n}");
+                        }
+                        statements.push(sql);
+                    }
+                    Err(why) => {
+                        println!("  not compilable: {why}");
+                        gaps += 1;
+                    }
+                }
+                println!();
+                continue;
+            };
+            let plan = crate::query::plan(select, &sym);
             if let Some(d) = plan.diags.iter().find(|d| d.severity == Severity::Error) {
                 println!("  rejected: {} {}", d.code, d.message);
                 gaps += 1;
@@ -465,11 +489,11 @@ pub fn explain(
             if !sql_only {
                 println!(
                     "  {}",
-                    crate::query_sql::raw_state(&built.model, site.select, &plan)
+                    crate::query_sql::raw_state(&built.model, select, &plan)
                 );
             }
             let mut c = crate::query_sql::Compiler::new(&built.model);
-            match c.compile(site.select, &plan) {
+            match c.compile(select, &plan) {
                 Some(compiled) => {
                     for line in compiled.sql.lines() {
                         println!("  {line}");
@@ -489,7 +513,7 @@ pub fn explain(
         analyze_statements(&statements)?;
     }
 
-    println!("{queries} quer{}", if queries == 1 { "y" } else { "ies" });
+    println!("{queries} statement{}", plural(queries));
     if gaps > 0 {
         println!("{gaps} not compiled");
     }
@@ -519,7 +543,10 @@ fn expand_views(
                 if !wanted.contains(&owner_key(&site.owner)) {
                     continue;
                 }
-                let plan = crate::query::plan(site.select, sym);
+                let Some(select) = site.select() else {
+                    continue;
+                };
+                let plan = crate::query::plan(select, sym);
                 let mut objects = Vec::new();
                 plan.root.walk(&mut objects);
                 let names: Vec<String> = objects
@@ -1951,5 +1978,148 @@ pub fn build(path: PathBuf, release: bool, emit_rust: bool, target: Option<Strin
 
     let report = crate::native::compile(&ws, &path, &app, release, target.as_deref())?;
     println!("{}", report.binary_path.display());
+    Ok(())
+}
+
+/// `jwc fix <path>` — the migrations the compiler already knows how to do.
+///
+/// Re-runs the check, applies every diagnostic that carries a literal
+/// replacement (`Diagnostic::fix`), and repeats until the count stops
+/// falling — a fix can uncover the next one, as `--` comments hide the
+/// `$name` sigils behind them. Prints what it changed. The rest is
+/// `jwc check`'s to report.
+///
+/// Only `fix` is applied, never `note`: the note is prose for a person and
+/// may be an example or two alternatives (tooling.md §5).
+pub fn fix(path: PathBuf, dry_run: bool) -> Result<()> {
+    use crate::diag::Severity;
+    use std::collections::BTreeMap;
+
+    // A fix can uncover the next one, but not forever: an edit that
+    // reproduces its own diagnostic would loop, and this is the bound.
+    const ROUNDS: usize = 16;
+
+    let mut applied_total = 0usize;
+    let mut touched: BTreeMap<PathBuf, usize> = BTreeMap::new();
+
+    let mut manifest = None;
+    for _ in 0..ROUNDS {
+        let ws = crate::workspace::Workspace::load_for_migration(&path)?;
+        if ws.files.is_empty() {
+            bail!("no .jwc files under {}", path.display());
+        }
+        manifest = ws.manifest.clone();
+
+        // Every fix this round, per file: the front-end's first, and the
+        // checker's only once the front-end is clean, because the checker
+        // runs on the tree the parser produced.
+        let mut fixes: BTreeMap<usize, Vec<(crate::token::Span, String)>> = BTreeMap::new();
+        let mut parse_errors = 0usize;
+        for (i, f) in ws.files.iter().enumerate() {
+            for d in &f.diags {
+                if d.severity == Severity::Error {
+                    parse_errors += 1;
+                }
+                if let Some(fix) = &d.fix {
+                    fixes.entry(i).or_default().push((d.span, fix.clone()));
+                }
+            }
+        }
+        if fixes.is_empty() && parse_errors == 0 {
+            let built = crate::model::build(&ws);
+            let symbols = crate::symbols::build(&ws, &built.model);
+            let checked = crate::check::check(&ws, &symbols, &built.model);
+            for (loc, d) in built
+                .diags
+                .iter()
+                .chain(&symbols.diags)
+                .chain(&checked.diags)
+            {
+                if let Some(fix) = &d.fix {
+                    fixes
+                        .entry(loc.file)
+                        .or_default()
+                        .push((loc.span, fix.clone()));
+                }
+            }
+        }
+        if fixes.is_empty() {
+            break;
+        }
+
+        let mut applied_round = 0usize;
+        for (i, mut edits) in fixes {
+            let f = &ws.files[i];
+            // Back to front, so an earlier edit does not move a later
+            // span. Two fixes on overlapping text: the first is applied
+            // and the other waits for the next round, where it is
+            // recomputed against the text as it then is.
+            edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+            let mut text = f.source.text.clone();
+            let mut floor = usize::MAX;
+            let mut n = 0usize;
+            for (span, replacement) in edits {
+                let (start, end) = (span.start as usize, span.end as usize);
+                if end > floor || end > text.len() || start > end {
+                    continue;
+                }
+                text.replace_range(start..end, &replacement);
+                floor = start;
+                n += 1;
+            }
+            if n == 0 {
+                continue;
+            }
+            if !dry_run {
+                std::fs::write(&f.source.path, &text)?;
+            }
+            *touched.entry(f.source.path.clone()).or_default() += n;
+            applied_round += n;
+        }
+        if applied_round == 0 {
+            break;
+        }
+        applied_total += applied_round;
+        if dry_run {
+            // Nothing was written, so the next round would find the same
+            // fixes: one pass is the whole answer.
+            break;
+        }
+    }
+
+    for (p, n) in &touched {
+        println!(
+            "{} {}: {n} fix{}",
+            if dry_run { "would fix" } else { "fixed" },
+            display_relative(p),
+            if *n == 1 { "" } else { "es" }
+        );
+    }
+    if applied_total == 0 {
+        println!("nothing to fix");
+    } else {
+        println!(
+            "{applied_total} fix{} in {} file{}{} — run `jwc check` for what is left",
+            if applied_total == 1 { "" } else { "es" },
+            touched.len(),
+            plural(touched.len()),
+            if dry_run { " (nothing written)" } else { "" }
+        );
+    }
+    // The manifest still names the release the source was written for,
+    // and every other command will refuse the project until it names
+    // this one. Say so here, where the reader is, rather than there.
+    if let Some(m) = manifest.as_ref() {
+        if let Some(req) = m.language.as_deref() {
+            if crate::workspace::language_mismatch_of(m).is_some() {
+                println!(
+                    "{}: `jwc` is `{req}` — once the source checks clean under this \
+                     release, set it to `{}`",
+                    display_relative(&m.path),
+                    env!("CARGO_PKG_VERSION")
+                );
+            }
+        }
+    }
     Ok(())
 }

@@ -778,9 +778,10 @@ impl<'a> Wiring<'a> {
                             m.name.name,
                             raises.iter().cloned().collect::<Vec<_>>().join(", ")
                         ),
-                        "an `after` block runs once the response is decided, so there \
-                         is no handler left. Wrap the fallible statement in a postfix \
-                         `catch` that returns"
+                        "an `after` block runs once the response is decided and before \
+                         it is written, so there is no handler left and the client is \
+                         still waiting. Wrap the fallible statement in a postfix `catch` \
+                         that returns"
                             .into(),
                         "middleware.md §5.5",
                     ));
@@ -1235,10 +1236,13 @@ impl Wiring<'_> {
             }
             if paging.is_none() {
                 for site in crate::query_sql::sites(&file.program) {
-                    if site.select.page.is_some() {
+                    let Some(select) = site.select() else {
+                        continue;
+                    };
+                    if select.page.is_some() {
                         paging = Some(Loc {
                             file: fi,
-                            span: site.select.span,
+                            span: select.span,
                         });
                         break;
                     }

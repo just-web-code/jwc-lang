@@ -2159,7 +2159,20 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                     Some(a) => emit_expr(a, ctx)?,
                     None => "V::Null".into(),
                 };
-                return Ok(format!("jwc_b_v1_enum({value})"));
+                // The checker proved the first argument names an enum
+                // (`E0301`), so its members are here to be written out.
+                let (enum_name, members) = match args.first().map(|a| &*a.kind) {
+                    Some(ExprKind::Name(n)) => match ctx.symbols.enums.get(&n.name) {
+                        Some(e) => (n.name.clone(), e.members.clone()),
+                        None => bail!("`enum({}, …)`: not an enum", n.name),
+                    },
+                    _ => bail!("`enum(E, x)` needs an enum type as its first argument"),
+                };
+                let members: Vec<String> = members.iter().map(|m| format!("{m:?}")).collect();
+                return Ok(format!(
+                    "jwc_b_v1_enum({value}, {enum_name:?}, &[{}])?",
+                    members.join(", ")
+                ));
             }
             let mut parts = Vec::new();
             for a in args {
@@ -2185,10 +2198,10 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                     parts.first().cloned().unwrap_or_else(|| "V::Null".into())
                 ));
             }
-            // `int(s)`, `bigint(s)` and `date(s)` raise `BadRequest` on a
-            // value of the wrong shape (types.md §7.2), so they return a
-            // `Result` and the call site propagates.
-            if matches!(name.as_str(), "int" | "bigint" | "date") {
+            // `int(s)`, `bigint(s)`, `boolean(s)` and `date(s)` raise
+            // `BadRequest` on a value of the wrong shape (types.md §7.2),
+            // so they return a `Result` and the call site propagates.
+            if matches!(name.as_str(), "int" | "bigint" | "boolean" | "date") {
                 ctx.used.insert(format!("jwc_b_v1_{name}"));
                 return Ok(format!(
                     "jwc_b_v1_{name}({})?",
@@ -2404,6 +2417,7 @@ fn emit_insert(i: &crate::ast::InsertExpr, ctx: &mut Ctx) -> Result<String> {
                 source,
                 except,
                 span,
+                ..
             } => {
                 let Some(class) = ctx.class_of_local(&source.name) else {
                     bail!(
@@ -3109,7 +3123,13 @@ mod tests {
     fn result_builtins_matches_the_prelude() {
         // `int` / `bigint` are fallible too, but they are special-cased
         // ahead of the generic path because they take one fixed argument.
-        const SPECIAL_CASED: &[&str] = &["jwc_b_v1_int", "jwc_b_v1_bigint", "jwc_b_v1_date"];
+        const SPECIAL_CASED: &[&str] = &[
+            "jwc_b_v1_int",
+            "jwc_b_v1_bigint",
+            "jwc_b_v1_boolean",
+            "jwc_b_v1_date",
+            "jwc_b_v1_enum",
+        ];
 
         let mut actual: Vec<String> = Vec::new();
         for src in preludes() {

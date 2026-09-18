@@ -17,8 +17,10 @@ Closes gaps **#2**, **#18**, **#34** (bare identifiers in `where`), **N5**
 1.3 Whitespace separates tokens and is otherwise insignificant.
 
 1.4 A **line comment** starts with `//` and runs to end of line. `--` where a
-declaration, table member or statement belongs is `E0901`, naming `//`. In an
-expression `a -- b` is `a - (-b)` and stays arithmetic.
+declaration, table member or statement belongs is `E0901`, naming `//`. A
+line that opens with `--` is one `E0901` and is skipped to its end: the prose
+behind the marker is not read as source. In an expression `a -- b` is
+`a - (-b)` and stays arithmetic.
 
 1.5 A **doc comment** starts with `///` and runs to end of line. Consecutive
 doc-comment lines form one doc block. A doc block attaches to the immediately

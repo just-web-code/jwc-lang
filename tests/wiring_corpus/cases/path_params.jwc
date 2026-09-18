@@ -8,7 +8,7 @@ import prelude;
 
 // routing.md §3.1 and §5.4 — two ways a route can be quietly wrong.
 service Notes {
-    function by_org(org_id: bigint) -> { id: bigint }[] {
+    function by_org(org_id: bigint): { id: bigint }[] {
         return select N from App.s.Notes
             where N.org_id == @org_id
             as { N.id }
