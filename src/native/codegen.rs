@@ -2417,6 +2417,7 @@ fn emit_insert(i: &crate::ast::InsertExpr, ctx: &mut Ctx) -> Result<String> {
                 source,
                 except,
                 span,
+                ..
             } => {
                 let Some(class) = ctx.class_of_local(&source.name) else {
                     bail!(

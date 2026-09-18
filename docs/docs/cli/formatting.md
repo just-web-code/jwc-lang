@@ -143,23 +143,36 @@ short strings — jwc-shortener's `robots.txt` route — prints as one
 the input is a formatter people stop running.
 
 **A comment written *inside* a record literal, a `server { }` body or an
-`insert` value list.** The AST carries a comment on a declaration or a
-statement — `Attached` — and those three are neither, so there is nowhere
-in the tree for the text to be. A multi-line record printer now exists,
-so there is somewhere to *put* one; what is still missing is the parser
-keeping it.
+`insert` value list** survives too: the entry carries it, and a literal
+whose entries carry comments is printed one entry per line however short
+it is, because a comment has no inline form.
 
-`jwc fmt` will not delete it. It compares the comments in the file against
-the comments in what it would write, and if any would be lost it leaves
-the file alone and says which:
+```jwc no-compile
+server {
+    port          = 8080;
+    /// Required by any `page` query: the cursor is signed.
+    cursor_secret = "x";
+}
+
+return json({
+    // the reason for the next line
+    a: 1
+});
+```
+
+**A comment somewhere the printer cannot put it yet** — inside an
+expression that has no multi-line form, say. `jwc fmt` will not delete
+it. It compares the comments in the file against the comments in what it
+would write, and if any would be lost it leaves the file alone and says
+which:
 
 ```
-./src/app.jwc: not formatted — 4 comments would be lost:
+./src/app.jwc: not formatted — 1 comment would be lost:
     // `request.client_ip()` walks `X-Forwarded-For` right to left and
-    …
 ```
 
-Move the comment above the enclosing statement and the file formats. The
+That is a gap in the printer, not a rule about where comments go. Until
+it is closed, the comment formats from above the enclosing statement. The
 run fails rather than dropping the comment and reporting success.
 
 ## In a pre-commit hook

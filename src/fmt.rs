@@ -758,18 +758,22 @@ impl Writer {
             .unwrap_or(0);
         for e in &n.entries {
             match e {
-                ServerEntry::Set(a) => self.line(&format!(
-                    "{:pad$} = {};",
-                    a.key.name,
-                    expr(&a.value),
-                    pad = pad
-                )),
+                ServerEntry::Set(a) => {
+                    self.attached(&a.at);
+                    self.line(&format!(
+                        "{:pad$} = {};",
+                        a.key.name,
+                        expr(&a.value),
+                        pad = pad
+                    ))
+                }
                 ServerEntry::Group { name, entries, .. } => {
                     self.blank();
                     self.line(&format!("{} {{", name.name));
                     self.depth += 1;
                     let ipad = entries.iter().map(|a| a.key.name.len()).max().unwrap_or(0);
                     for a in entries {
+                        self.attached(&a.at);
                         self.line(&format!(
                             "{:ipad$} = {};",
                             a.key.name,
@@ -984,7 +988,7 @@ impl Writer {
                 let one_line = format!("{prefix}{body}{suffix}");
                 // `or throw` on a non-query value: break at the boundary
                 // rather than run past the margin.
-                if one_line.len() + self.depth * INDENT.len() > MARGIN {
+                if one_line.len() + self.depth * INDENT.len() > MARGIN || carries_comments(e) {
                     if let Some(cut) = suffix.find(" or throw ") {
                         self.line(&format!("{prefix}{body}"));
                         self.depth += 1;
@@ -1029,7 +1033,9 @@ impl Writer {
     /// multi-line record printer to emit. This is the half that had to
     /// exist first — the other half is a parser change.
     fn wide(&mut self, prefix: &str, e: &Expr, suffix: &str) -> bool {
-        if !self.over(prefix, &expr(e), suffix) {
+        // A literal whose entries carry comments is printed one entry per
+        // line however short it is: a comment has no inline form.
+        if !self.over(prefix, &expr(e), suffix) && !carries_comments(e) {
             return false;
         }
         match &*e.kind {
@@ -1189,6 +1195,7 @@ impl Writer {
     /// One entry of a record literal, on its own line, breaking again if
     /// its value is what did not fit.
     fn obj_entry(&mut self, entry: &ObjEntry, comma: &str) {
+        self.attached(entry.attached());
         match entry {
             ObjEntry::Field {
                 key, value, assign, ..
@@ -1237,7 +1244,8 @@ impl Writer {
             &inline,
             &format!(" }}{buffered}{suffix}"),
         );
-        if fits && tail.is_empty() && i.projection.is_none() {
+        let commented = i.values.iter().any(|e| e.attached().has_comments());
+        if fits && !commented && tail.is_empty() && i.projection.is_none() {
             self.line(&format!("{head} {{ {inline} }}{buffered}{suffix}"));
             return;
         }
@@ -1257,6 +1265,7 @@ impl Writer {
             .unwrap_or(0);
         for (n, entry) in i.values.iter().enumerate() {
             let comma = if n + 1 < i.values.len() { "," } else { "" };
+            self.attached(entry.attached());
             self.line(&format!("{}{comma}", obj_entry_text_padded(entry, pad)));
         }
         self.depth -= 1;
@@ -1746,6 +1755,22 @@ fn shape_text(s: &ObjectShape) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+/// Whether a literal, or one nested in it, has an entry with a comment —
+/// the one thing that cannot be printed inline.
+fn carries_comments(e: &Expr) -> bool {
+    match &*e.kind {
+        ExprKind::Object(entries) => entries.iter().any(|en| {
+            en.attached().has_comments()
+                || matches!(en, ObjEntry::Field { value, .. } if carries_comments(value))
+        }),
+        ExprKind::Array(items) => items.iter().any(carries_comments),
+        // `json({ … })`: the literal is the call's argument, and the
+        // call is what gets broken.
+        ExprKind::Call { args, .. } => args.iter().any(carries_comments),
+        _ => false,
+    }
 }
 
 fn obj_entries_text(entries: &[ObjEntry]) -> String {

@@ -196,9 +196,10 @@ fn report_lost_comments(file: &Path, lost: &[String]) {
     }
     eprintln!(
         "  the printer re-emits from the AST, which carries a comment on a \
-         declaration or a statement but not inside a record literal, a \
-         `server {{ }}` body or an `insert` value list. Move it above the \
-         statement and the file formats."
+         declaration, a statement, a `server {{ }}` entry and an entry of a \
+         record literal — but not yet on this position. That is a gap in \
+         the printer, not a rule about where comments go; until it is \
+         closed, the comment formats from above the statement."
     );
 }
 

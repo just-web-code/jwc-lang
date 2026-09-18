@@ -4689,6 +4689,7 @@ impl<'a> Checker<'a> {
                     source,
                     except,
                     span,
+                    ..
                 } => {
                     for name in self.check_spread(object, source, except, *span) {
                         written.insert(name);

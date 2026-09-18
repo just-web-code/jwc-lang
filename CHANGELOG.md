@@ -5,6 +5,19 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `jwc fmt` keeps a comment inside `server { }`, a record literal and an `insert`
+
+The AST carried a comment on a declaration or a statement and nowhere
+else, so a `///` beside `cursor_secret` or a `//` above one field of a
+`json({ … })` made `fmt` refuse the file — correctly, rather than lose
+it, but with no way out except moving the comment somewhere less useful,
+and CI's `fmt --check` failing on the file forever. Each entry of a
+record literal, an `insert` value list and a `server { }` body now
+carries its comment, and a literal whose entries carry one is printed one
+entry per line however short it is. The refusal that remains, for a
+position the printer still cannot hold, says it is a gap being tracked
+rather than a rule the author broke.
+
 ### `jwc fix` — the migrations the compiler already knows how to do
 
 Of the 358 edits MyWallet took to reach rc.6, 351 were ones the compiler

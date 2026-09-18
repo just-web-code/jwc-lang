@@ -499,11 +499,13 @@ impl Parser {
     }
 
     fn parse_assignment(&mut self) -> PResult<Assignment> {
+        let at = self.attached();
         let key = self.expect_ident()?;
         self.expect(Tok::Eq)?;
         let value = self.parse_expr()?;
         let end = self.expect(Tok::Semi)?.span;
         Ok(Assignment {
+            at,
             span: key.span.to(end),
             key,
             value,
@@ -2669,6 +2671,7 @@ impl Parser {
         self.expect(Tok::LBrace)?;
         let mut out = Vec::new();
         while !self.at(&Tok::RBrace) && !self.at_eof() {
+            let at = self.attached();
             let start = self.span();
             if self.at(&Tok::DotDotDot) {
                 self.bump();
@@ -2692,6 +2695,7 @@ impl Parser {
                 let except = self.parse_except_list()?;
                 let span = start.to(except.last().map(|i| i.span).unwrap_or(source.span));
                 out.push(ObjEntry::Spread {
+                    at,
                     source,
                     except,
                     span,
@@ -2715,6 +2719,7 @@ impl Parser {
                 let value = self.parse_expr()?;
                 let span = start.to(value.span);
                 out.push(ObjEntry::Field {
+                    at,
                     key,
                     value,
                     assign,

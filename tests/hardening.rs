@@ -2786,14 +2786,15 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     assert!(printed.contains("// why this function exists"));
     assert!(jwc::fmt::comments_lost(kept, &printed).is_empty());
 
-    // A comment inside a record literal: the printer drops it, and the
-    // check is what turns that into a refusal instead of a deletion.
+    // A comment inside an array literal: an item carries no comment
+    // (a record entry does, since rc.7), so the printer drops it, and
+    // the check is what turns that into a refusal instead of a deletion.
     let lossy = "namespace n;\n\
                  function f() {\n\
-                 \x20   return {\n\
+                 \x20   return [\n\
                  \x20       // the reason for the next line\n\
-                 \x20       a: 1\n\
-                 \x20   };\n\
+                 \x20       1\n\
+                 \x20   ];\n\
                  }\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), lossy);
     assert!(!parsed.has_errors(), "the sample must parse");
@@ -2817,12 +2818,12 @@ fn fmt_refuses_a_file_rather_than_drop_a_comment() {
     // comment lost.
     let twice = "namespace n;\n\
                  function f() {\n\
-                 \x20   return {\n\
+                 \x20   return [\n\
                  \x20       // same text\n\
-                 \x20       a: 1,\n\
+                 \x20       1,\n\
                  \x20       // same text\n\
-                 \x20       b: 2\n\
-                 \x20   };\n\
+                 \x20       2\n\
+                 \x20   ];\n\
                  }\n";
     let parsed = jwc::parse_str(std::path::Path::new("a.jwc"), twice);
     let printed = jwc::fmt::format_program(&parsed.program);

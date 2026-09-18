@@ -1841,6 +1841,7 @@ impl<'a> Vm<'a> {
                     source,
                     except,
                     span,
+                    ..
                 } => {
                     let v = self
                         .lookup(&source.name)
