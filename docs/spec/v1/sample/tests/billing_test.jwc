@@ -8,14 +8,14 @@ import db.org;
 // tests shared one org and the second one failed on the partial unique
 // index the first one had already satisfied (ROADMAP §5 / N9). A shared
 // fixture model is DEFERRED-11.
-function fixture_org(slug: text) -> { id: bigint } {
+function fixture_org(slug: text): { id: bigint } {
     return insert Orgs into App.org.Orgs {
         slug = @slug,
         name = "Test Org"
     } as { Orgs.id };
 }
 
-function fixture_plan(code: text) -> { id: bigint } {
+function fixture_plan(code: text): { id: bigint } {
     return insert Plans into App.billing.Plans {
         code  = @code,
         name  = "Test Plan",

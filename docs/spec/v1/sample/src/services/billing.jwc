@@ -8,7 +8,7 @@ import views.billing;
 /// `update … first` emits FOR UPDATE (writes.md §4), so two concurrent
 /// callers serialise and neither sees the same number. This is what a
 /// sequence would do; sequences are DEFERRED-17.
-function next_invoice_number() -> text {
+function next_invoice_number(): text {
     let counter = update Counters of App.billing.Counters
         set value = Counters.value + 1
         where Counters.name == "invoice"
@@ -173,7 +173,7 @@ service WebhookService {
     /// two concurrent deliveries of the same event both saw nothing, both
     /// inserted, one violated the unique index and answered 4xx — which
     /// Stripe reads as "retry" (writes.md §2.3).
-    function record_payment(req: WebhookPayment) -> { status: text } {
+    function record_payment(req: WebhookPayment): { status: text } {
         transaction {
             let payment = insert Payments into App.billing.Payments {
                 ...@req,

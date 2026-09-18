@@ -562,7 +562,7 @@ fn a_program_without_a_main_still_generates_a_crate_that_compiles() {
 #[test]
 fn the_sigil_changes_nothing_the_native_backend_emits() {
     const BARE: &str = "namespace n;\n\
-         function total(base: int) -> int {\n\
+         function total(base: int): int {\n\
          \x20   let n = base;\n\
          \x20   for (let r in [1, 2, 3]) {\n\
          \x20       n = n + r;\n\
@@ -574,7 +574,7 @@ fn the_sigil_changes_nothing_the_native_backend_emits() {
          \x20   console.writeln(string.of(x));\n\
          }\n";
     const SIGILED: &str = "namespace n;\n\
-         function total(base: int) -> int {\n\
+         function total(base: int): int {\n\
          \x20   let n = @base;\n\
          \x20   for (let r in [1, 2, 3]) {\n\
          \x20       @n = @n + @r;\n\

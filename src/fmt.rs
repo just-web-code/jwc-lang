@@ -499,7 +499,7 @@ impl Writer {
         let ret = n
             .returns
             .as_ref()
-            .map(|t| format!(" -> {}", type_ref(t)))
+            .map(|t| format!(": {}", type_ref(t)))
             .unwrap_or_default();
         let raises = if n.raises.is_empty() {
             String::new()

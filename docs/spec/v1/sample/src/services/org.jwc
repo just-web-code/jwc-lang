@@ -9,7 +9,7 @@ import views.org;
 
 /// The invite email body. A free function needs a declaration site
 /// (names.md §6.4); it is not magic and it is not a builtin.
-function invite_body(token: text) -> text {
+function invite_body(token: text): text {
     let base = env("APP_URL") ?? "https://app.example.com";
     return "Taklifnomani qabul qilish: " + @base + "/invites/" + @token;
 }

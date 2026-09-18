@@ -386,11 +386,11 @@ fn a_value_that_would_run_past_the_margin_is_broken() {
 fn a_long_chain_breaks_at_its_operator_and_a_ternary_does_not() {
     let src = concat!(
         "service S {\n",
-        "    function a(x: text) -> text {\n",
+        "    function a(x: text): text {\n",
         "        return \"<img src='https://barcodeapi.org/api/qr/\" + @x",
         " + \"?format=svg' alt='QR Code'/>\";\n",
         "    }\n",
-        "    function b(x: int) -> text {\n",
+        "    function b(x: int): text {\n",
         "        return @x > 100000 ? \"a rather long branch here for width\" :",
         " \"another rather long branch\";\n",
         "    }\n",

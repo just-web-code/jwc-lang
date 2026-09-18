@@ -119,7 +119,7 @@ error_decl      = { doc_comment } "error" ident [ "(" [ param_list ] ")" ]
 service_decl    = { doc_comment } "service" ident "{" { function_decl } "}" ;
 
 function_decl   = { doc_comment } "function" ident "(" [ param_list ] ")"
-                  [ "->" type_ref ] [ raises_clause ] block ;
+                  [ ":" type_ref ] [ raises_clause ] block ;
 param_list      = param { "," param } ;
 param           = ident ":" type_ref [ "=" expr ] ;
 raises_clause   = "raises" "(" ident { "," ident } ")" ;

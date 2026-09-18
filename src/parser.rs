@@ -1134,7 +1134,20 @@ impl Parser {
         self.bump(); // function
         let name = self.expect_ident()?;
         let params = self.parse_params()?;
-        let returns = if self.eat(&Tok::Arrow) {
+        // A return annotation is `: T`, the same mark a parameter's type
+        // carries (types.md §10.2). `-> T` is the rc.6 spelling; it still
+        // parses so the diagnostic can name the fix and the rest of the
+        // declaration is checked as written.
+        let returns = if self.eat(&Tok::Colon) {
+            Some(self.parse_type()?)
+        } else if self.at(&Tok::Arrow) {
+            let span = self.span();
+            self.diags.push(
+                Diagnostic::error("E0906", span, "`->` — the return annotation is `:`")
+                    .note("write `: T`, the way a parameter is typed")
+                    .clause("types.md §10.2"),
+            );
+            self.bump();
             Some(self.parse_type()?)
         } else {
             None

@@ -499,7 +499,7 @@ impl<'a> Checker<'a> {
                     "E0351",
                     format!("this returns `{ty}` but an earlier return produces `{first}`"),
                     "when returns disagree the signature must say which one wins: \
-                     add `-> <type>`",
+                     add `: <type>` after the parameter list",
                     "types.md §10.2",
                 );
                 break;

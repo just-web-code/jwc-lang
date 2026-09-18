@@ -3,15 +3,15 @@ namespace expressions;
 // The expression core (types.md §12): three `+` overloads, no truthiness,
 // enums compare but do not order.
 service Exprs {
-    function concat() -> text {
+    function concat(): text {
         return "a" + "b";
     }
 
-    function no_implicit_stringify() -> text {
+    function no_implicit_stringify(): text {
         return "a" + 1;                         // expect: E0370
     }
 
-    function time_arithmetic() -> timestamptz {
+    function time_arithmetic(): timestamptz {
         return date.now() + date.days(7);
     }
 
@@ -36,7 +36,7 @@ service Exprs {
         return select M from App.s.Members where M.role == Role.wizard; // expect: E0303
     }
 
-    function bare_now_is_not_a_call() -> timestamptz {
+    function bare_now_is_not_a_call(): timestamptz {
         return now();                           // expect: E0302
     }
 }

@@ -175,3 +175,40 @@ fn a_for_binder_without_let_names_the_let() {
               function f() {\n    for (let x in [1, 2]) {\n        return x;\n    }\n}\n";
     assert!(!jwc::parse_str("<for>", ok).has_errors());
 }
+
+/// `E0906` — a return annotation is `: T`, the mark a parameter already
+/// carries. `-> T` is the rc.6 spelling: one diagnostic naming the fix, and
+/// the annotation is still read so the body is checked against it.
+#[test]
+fn an_arrow_return_annotation_names_the_colon() {
+    let src = "database App : Postgres;\n\
+               function f(x: int) -> int {\n    return @x;\n}\n";
+    let p = jwc::parse_str("<arrow>", src);
+    let arrows: Vec<_> = p.diags.iter().filter(|d| d.code == "E0906").collect();
+    assert_eq!(arrows.len(), 1, "one `->`, one diagnostic:\n{}", p.render_all());
+    assert!(
+        arrows[0].note.as_deref().is_some_and(|n| n.contains("write `: T`")),
+        "the note must show the form: {:?}",
+        arrows[0].note
+    );
+    assert_eq!(
+        p.diags.len(),
+        1,
+        "the declaration after the arrow parses as written:\n{}",
+        p.render_all()
+    );
+    let f = p
+        .program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            jwc::ast::Decl::Function(f) => Some(f),
+            _ => None,
+        })
+        .expect("the function is still declared");
+    assert!(f.returns.is_some(), "the annotation is kept");
+
+    let ok = "database App : Postgres;\n\
+              function f(x: int): int {\n    return @x;\n}\n";
+    assert!(!jwc::parse_str("<arrow>", ok).has_errors());
+}

@@ -233,7 +233,7 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         ("service_decl", "service S { function f() { return 1; } }"),
         (
             "function_decl.full",
-            "function f(a: bigint, b: text = \"x\") -> { n: int } raises (NotFound) { return { n: 1 }; }",
+            "function f(a: bigint, b: text = \"x\"): { n: int } raises (NotFound) { return { n: 1 }; }",
         ),
         ("middleware_decl", "middleware M { let a = 1; }"),
         (
@@ -259,7 +259,7 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
              f text; g boolean; h timestamptz; i date; j time; k interval; l uuid; \
              m jsonb; n inet; o bytea; }",
         ),
-        ("type_ref.record", "function f() -> { a: text, b: int } { return { a: \"\", b: 1 }; }"),
+        ("type_ref.record", "function f(): { a: text, b: int } { return { a: \"\", b: 1 }; }"),
         ("type_ref.array_optional", "class C { a text[]?; }"),
         ("let_stmt", "function f() { let a = 1; }"),
         ("let_stmt.typed", "function f() { let a: bigint = 1; }"),

@@ -13,7 +13,7 @@ service Nulls {
             or throw NotFound("yo'q");
     }
 
-    function coalesce_strips_it(org_id: bigint) -> text {
+    function coalesce_strips_it(org_id: bigint): text {
         let row = select O from App.s.Orgs where O.id == @org_id as { O.region } first
             or throw NotFound("yo'q");
         return @row.region ?? "unknown";

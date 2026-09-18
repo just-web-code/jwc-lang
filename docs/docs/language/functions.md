@@ -9,7 +9,7 @@ description: "Free functions, services as the unit of logic, and the raise set t
 ## Free functions
 
 ```jwc no-compile
-function invite_body(token: text) -> text {
+function invite_body(token: text): text {
     let base = env("APP_URL") ?? "https://app.example.com";
     return "Taklifnomani qabul qilish: " + base + "/invites/" + token;
 }

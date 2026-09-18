@@ -344,7 +344,7 @@ newline is refused by **both** builders — it cannot be a header value.
 ```jwc
 namespace pages;
 
-function landing_page() -> text {
+function landing_page(): text {
     return "<!doctype html><title>1kb.uz</title>";
 }
 

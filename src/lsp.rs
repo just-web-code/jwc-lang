@@ -284,7 +284,7 @@ impl Server {
             f.qualified(),
             params_text.join(", "),
             match &f.returns {
-                Some(t) => format!(" -> {t}"),
+                Some(t) => format!(": {t}"),
                 None => String::new(),
             }
         );
@@ -561,7 +561,7 @@ fn function_summary(f: &crate::symbols::FunctionSym) -> String {
         f.qualified(),
         params.join(", "),
         match &f.returns {
-            Some(t) => format!(" -> {t}"),
+            Some(t) => format!(": {t}"),
             None => String::new(),
         },
         if f.raises.is_empty() {

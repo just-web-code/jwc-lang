@@ -3,6 +3,23 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### BREAKING: a return annotation is `: T`, not `-> T`
+
+A parameter is typed with `:`; the function's result was typed with `->`.
+Two marks for the one idea, and the second was the only place in the
+language it appeared. Now both are `:`, and the signature reads as one
+line of the same thing:
+
+```jwc
+function login(req: Login): { token: text, expires_in: int } raises (Unauthorized) {
+```
+
+`-> T` is `E0906`, naming `: T`. The annotation is still read after the
+diagnostic, so the body is checked against it and the rest of the file
+reports nothing it would not have reported anyway. `jwc fmt` prints `:`.
+
 ## [1.0.0-rc.6] — freeze candidate — 2026-09-17
 
 ### `update … first` and `delete … first` lost writes under concurrency

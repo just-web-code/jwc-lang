@@ -101,7 +101,7 @@ without it:
 namespace intro;
 
 service Greeter {
-    function hello(who: text) -> text {
+    function hello(who: text): text {
         let name = who;
         return "salom, " + @name;
     }

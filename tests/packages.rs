@@ -93,7 +93,7 @@ fn an_exported_function_that_can_raise_says_so() {
     let src = "namespace demo;\n\
                error Nope(message: text) = 418 : \"nope\";\n\
                service Demo {\n\
-               \x20   function boom() -> text {\n\
+               \x20   function boom(): text {\n\
                \x20       throw Nope(\"nope\");\n\
                \x20   }\n\
                }\n";
@@ -104,8 +104,8 @@ fn an_exported_function_that_can_raise_says_so() {
 
     // Declaring it silences the warning.
     let declared = src.replace(
-        "function boom() -> text {",
-        "function boom() -> text raises (Nope) {",
+        "function boom(): text {",
+        "function boom(): text raises (Nope) {",
     );
     let dir = project("pkg", &declared);
     assert!(
@@ -133,7 +133,7 @@ fn a_declared_raise_set_may_widen_but_not_narrow() {
                      error A(message: text) = 418 : \"a\";\n\
                      error B(message: text) = 419 : \"b\";\n\
                      service Demo {\n\
-                     \x20   function both(flag: boolean) -> text raises (A) {\n\
+                     \x20   function both(flag: boolean): text raises (A) {\n\
                      \x20       if (@flag) { throw A(\"a\"); }\n\
                      \x20       throw B(\"b\");\n\
                      \x20   }\n\
