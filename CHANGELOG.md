@@ -5,6 +5,14 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### One `--` comment produced one diagnostic per character on the line
+
+`E0901` named `//` and then the lexer read the rest of the line as source,
+so every apostrophe, em dash, backtick and `§` in the prose was its own
+`E0100`: 89 of MyWallet's 290 first-check errors and 207 of the
+shortener's 312 restated one fact. A line that opens with `--` is now one
+`E0901`, and the lexer skips to the newline.
+
 ### `boolean(x)` answered `false` for everything it did not recognise
 
 `boolean("bogus")`, `boolean("yes")`, `boolean(null)` — all `false`,

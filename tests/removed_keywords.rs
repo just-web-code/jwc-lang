@@ -137,6 +137,36 @@ fn a_dash_comment_names_the_slash_that_replaced_it() {
     }
 }
 
+/// One `--` line is one diagnostic, whatever the prose behind it holds.
+///
+/// The lexer used to read the comment as source, so every apostrophe, em
+/// dash, backtick and `§` in it was its own `E0100` — a third of
+/// MyWallet's first-check errors and two thirds of the shortener's, all
+/// restating one fact. The line is now skipped once `E0901` has named the
+/// fix, and the rest of the file is read as though the line were a comment.
+#[test]
+fn a_dash_comment_line_is_one_diagnostic_not_one_per_character() {
+    let src = "database App : Postgres;\n\
+               -- it's `x` — see §2 (and don't read the rest)\n\
+               \x20   -- indented, with a trailing string \"unclosed\n\
+               function f() {\n    return 1;\n}\n";
+    let p = jwc::parse_str("<prose>", src);
+    let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+    assert_eq!(
+        codes,
+        vec!["E0901", "E0901"],
+        "two comment lines, two diagnostics, nothing else:\n{}",
+        p.render_all()
+    );
+    assert!(
+        p.program
+            .decls
+            .iter()
+            .any(|d| matches!(d, jwc::ast::Decl::Function(_))),
+        "the declaration after the comments is still read"
+    );
+}
+
 /// And the arithmetic it must not claim.
 #[test]
 fn subtracting_a_negative_is_not_a_comment() {

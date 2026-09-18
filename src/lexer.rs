@@ -71,6 +71,16 @@ impl<'a> Lexer<'a> {
         *self.src.get(self.i + n).unwrap_or(&0)
     }
 
+    /// Nothing but blanks between the previous newline (or the start of
+    /// the file) and the cursor.
+    fn at_line_start(&self) -> bool {
+        self.src[..self.i]
+            .iter()
+            .rev()
+            .take_while(|&&b| b != b'\n')
+            .all(|&b| matches!(b, b' ' | b'\t' | b'\r'))
+    }
+
     fn skip_trivia(&mut self) {
         loop {
             let mut newlines = 0usize;
@@ -82,6 +92,29 @@ impl<'a> Lexer<'a> {
             }
             if newlines > 1 {
                 self.pending.push(Trivia::Blank);
+            }
+            // A line that opens with `--` is a comment from before the
+            // syntax moved to `//` (names.md §1.4). Read as source, the
+            // prose behind it produced one `E0100` per apostrophe, em dash
+            // and backtick — 89 of MyWallet's 290 first-check errors, 207
+            // of the shortener's 312 — so the line is skipped here, once
+            // `E0901` has named the fix. Only at line start: `a -- b` is
+            // `a - (-b)` and stays with the parser.
+            if self.peek() == b'-' && self.peek_at(1) == b'-' && self.at_line_start() {
+                let start = self.i;
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0901",
+                        Span::new(start, start + 2),
+                        "`--` does not start a comment",
+                    )
+                    .note("a line comment starts with `//`, a doc comment with `///`")
+                    .clause("names.md §1.4"),
+                );
+                while self.i < self.src.len() && self.peek() != b'\n' {
+                    self.i += 1;
+                }
+                continue;
             }
             if self.peek() == b'/' && self.peek_at(1) == b'/' {
                 let doc = self.peek_at(2) == b'/';
