@@ -582,3 +582,26 @@ fn run_without_a_main_says_what_to_do() {
         "it should name the alternative: {err}"
     );
 }
+
+/// `fmt --check` reads and `fmt` writes, and each used to print the
+/// other's summary on a clean tree: the read-only command said
+/// "formatted", the writing one said "already formatted". Each now says
+/// what it did.
+#[test]
+fn fmt_check_and_fmt_report_their_own_outcome() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace n;\n\nfunction f() {\n    return 1;\n}\n",
+    )
+    .expect("write");
+    let path = dir.path().to_str().expect("utf8");
+
+    let check = jwc(&["fmt", "--check", path]);
+    assert!(check.status.success());
+    assert_eq!(stdout(&check).trim(), "ok — 1 file already formatted");
+
+    let write = jwc(&["fmt", path]);
+    assert!(write.status.success());
+    assert_eq!(stdout(&write).trim(), "ok — 1 file formatted");
+}

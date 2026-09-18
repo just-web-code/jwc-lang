@@ -306,7 +306,11 @@ pub fn fmt(paths: Vec<PathBuf>, check_only: bool, to_stdout: bool) -> Result<()>
 
     if check_only {
         if changed.is_empty() {
-            println!("ok — {} file{} formatted", files.len(), plural(files.len()));
+            println!(
+                "ok — {} file{} already formatted",
+                files.len(),
+                plural(files.len())
+            );
             return Ok(());
         }
         for c in &changed {
@@ -323,11 +327,7 @@ pub fn fmt(paths: Vec<PathBuf>, check_only: bool, to_stdout: bool) -> Result<()>
         println!("formatted {}", display_relative(c));
     }
     if changed.is_empty() {
-        println!(
-            "ok — {} file{} already formatted",
-            files.len(),
-            plural(files.len())
-        );
+        println!("ok — {} file{} formatted", files.len(), plural(files.len()));
     }
     Ok(())
 }
