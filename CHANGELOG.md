@@ -3,7 +3,7 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.7] — freeze candidate — 2026-09-18
 
 ### middleware.md §5 says where `after` runs
 
