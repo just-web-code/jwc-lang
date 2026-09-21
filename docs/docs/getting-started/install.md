@@ -27,7 +27,7 @@ Windows script installs to `%LOCALAPPDATA%\jwc\bin`.
 
 :::note
 
-"Latest" means the latest **stable** release, which `1.0.0` is. The
+"Latest" means the latest **stable** release, which `1.0.1` is. The
 candidates before it were published as pre-releases and a bare install
 never picked them up; pin one, as below, only if you need to reproduce a
 build made against it.
@@ -41,11 +41,11 @@ jwc --version
 ### Pinning a version
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.sh | JWC_VERSION=v1.0.0 bash
+curl -fsSL https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.sh | JWC_VERSION=v1.0.1 bash
 ```
 
 ```powershell
-$env:JWC_VERSION = 'v1.0.0'
+$env:JWC_VERSION = 'v1.0.1'
 iwr -useb https://raw.githubusercontent.com/just-web-code/jwc-lang/main/install.ps1 | iex
 ```
 

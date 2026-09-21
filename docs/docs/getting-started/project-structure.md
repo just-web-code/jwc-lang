@@ -16,7 +16,7 @@ tree is compiled together; there is no build order to declare.
   "name": "shop",
   "type": "app",
   "version": "0.1.0",
-  "jwc": "1.0.0",
+  "jwc": "1.0.1",
   "entry": "src/app.jwc",
   "dependencies": {
     "redis": "^0.2.0"
@@ -40,11 +40,11 @@ leftover `1.0.0-rc.8`; a project still on a candidate names it exactly.
 
 ```console
 $ jwc check
-Error: this is jwc 1.0.0, and ./jwcproj.json says the project is
+Error: this is jwc 1.0.1, and ./jwcproj.json says the project is
 written for `1.0.0-rc.8`.
 
 Install the version it asks for, or — once the source has been moved to
-this one — change `jwc` in that file to `1.0.0`. Diagnostics from
+this one — change `jwc` in that file to `1.0.1`. Diagnostics from
 the wrong compiler read as though they were about the code.
 ```
 

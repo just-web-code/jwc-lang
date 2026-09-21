@@ -3,7 +3,11 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.1] — 2026-09-21
+
+A patch: three changes in the native backend's value and JSON layer, no
+change to what a program means. `/json-large` on the benchmark box, the
+same source and schedule: 9,405 → 84,730 req/s, p99 44.96 → 4.95 ms.
 
 ### `json()` serialised every response twice
 

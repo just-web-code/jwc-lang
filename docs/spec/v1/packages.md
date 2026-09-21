@@ -13,7 +13,7 @@ A project is described by `jwcproj.json` at its root:
   "name": "redis",
   "version": "0.1.0",
   "type": "pkg",
-  "jwc": "1.0.0",
+  "jwc": "1.0.1",
   "dependencies": { "redis": "^0.1.0" }
 }
 ```
