@@ -1915,9 +1915,14 @@ pub async fn wants_serve(program: &Arc<Program>) -> Result<bool> {
 /// it onto, so it says what happened in the log.
 fn db_error_text(e: &crate::db::DbError) -> String {
     match e {
-        crate::db::DbError::Constraint { name, message, .. } => match message {
+        crate::db::DbError::Constraint {
+            name,
+            message,
+            detail,
+            ..
+        } => match message {
             Some(m) => format!("constraint {name}: {m}"),
-            None => format!("constraint {name}"),
+            None => detail.clone(),
         },
         crate::db::DbError::ForeignKey => "foreign key violation".into(),
         crate::db::DbError::Other(e) => format!("{e:#}"),

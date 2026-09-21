@@ -345,8 +345,11 @@ fn jwc_db_error(e: tokio_postgres::Error, sql: &str) -> JwcThrown {
             };
             return JwcThrown { error, status, message: (*msg).to_string(), body: None };
         }
-        panic!("constraint {} violated\nSQL: {}", name, sql);
     }
+    // No declared message, or not an integrity error: the fault is
+    // Postgres's own sentence, which names the table and the column. A
+    // not-null violation has no constraint name, so the fault that named
+    // only the constraint said `constraint  violated` (RC8-PLAN.md §1).
     panic!("{}\nSQL: {}", db.message(), sql);
 }
 

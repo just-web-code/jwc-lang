@@ -240,6 +240,14 @@ A message-less constraint violation is a **fault** → 500 + log. This is
 deliberate: the language cannot invent a client-facing sentence, and a
 generic "constraint violated" leaks schema names to the client.
 
+What the *log* says is Postgres's own sentence — `null value in column
+"hits" of relation "link" violates not-null constraint`, `duplicate key
+value violates unique constraint "uq_link__code"` — because that is the
+one that names the table and the column. A `NOT NULL` violation is not a
+named constraint, so a log line built from the constraint name alone
+said `constraint  violated` and nothing else (RC8-PLAN.md §1). The
+sentence reaches the client only under `JWC_DEBUG_ERRORS`.
+
 `jwc lint --constraints` lists every message-less constraint with its table
 and columns, so the 500-producing set is enumerable rather than discovered in
 production.

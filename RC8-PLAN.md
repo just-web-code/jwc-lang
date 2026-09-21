@@ -16,7 +16,7 @@ stays in 1.1, and so does the thing it was for; this plan does not reopen it.
 
 | # | Found in | What | Class | Status |
 |---|---|---|---|---|
-| 1 | shortener prod | a `NOT NULL` violation reads `constraint  violated` — two spaces, no name, no column | ergonomics | planned |
+| 1 | shortener prod | a `NOT NULL` violation reads `constraint  violated` — two spaces, no name, no column | ergonomics | fixed |
 | 2 | shortener prod | `migrate baseline` adopts a schema whose columns have no defaults, and `verify` calls it fine | soundness | planned |
 | 3 | shortener, e-school | nothing runs a `job` on a clock — expired rows wait for a cron outside the program | gap | planned — `every` |
 | 4 | e-school, redis, task-tracker | three `jwc fix` / `jwc fmt` defects, already on `main` | ergonomics | fixed |

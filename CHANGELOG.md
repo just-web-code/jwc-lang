@@ -5,6 +5,18 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### A `NOT NULL` violation names its column
+
+1kb.uz's `link` table was built by 0.9.x and its `hits` column had no
+`DEFAULT 0`; rc.7's insert omits the column, trusting the declaration,
+and Postgres refused the null. The fault in the log was `constraint
+violated` with two spaces and nothing between them: a not-null violation
+is not a named constraint, and the message was built from the name
+alone. A message-less violation now logs Postgres's own sentence — `null
+value in column "hits" of relation "link" violates not-null constraint`
+— on both backends. A violation with a declared message is unchanged.
+`tests/faults.rs` pins it against a table with its default dropped.
+
 ### `jwc fix` turns `---` into `///`
 
 The 0.9 doc comment was `---`, and `E0901`'s fix replaced the first two
