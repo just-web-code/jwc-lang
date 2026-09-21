@@ -720,6 +720,52 @@ fn fix_applies_every_replacement_the_compiler_carries() {
     assert_eq!(stdout(&again).trim(), "nothing to fix");
 }
 
+/// An unqualified column inside a nested `as one` / `as many` shape is the
+/// third `E0904` site, and it was the one `jwc fix` did not carry: e-school
+/// moved to rc.7 with 101 of them left over after `fix` said "nothing to
+/// fix". The binder is the join's, and the note already named it.
+#[test]
+fn fix_qualifies_a_column_inside_a_nested_shape() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("app.jwc");
+    std::fs::write(
+        &src,
+        "namespace app;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Subjects of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   code text;\n\
+         }\n\
+         table Assignments of App.s {\n\
+         \x20   id bigint primary key identity;\n\
+         \x20   subject_id bigint;\n\
+         \x20   foreign key (subject_id) references App.s.Subjects (id);\n\
+         }\n\
+         function all() {\n\
+         \x20   return select A from App.s.Assignments\n\
+         \x20       left join App.s.Subjects S on S.id == A.subject_id as one subject\n\
+         \x20       as { A.id, subject: { id, code } };\n\
+         }\n",
+    )
+    .expect("write");
+    let path = dir.path().to_str().expect("utf8");
+    let fixed = jwc(&["fix", path]);
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    let after = std::fs::read_to_string(&src).expect("read");
+    assert!(after.contains("subject: { S.id, S.code }"), "{after}");
+    let check = jwc(&["check", path]);
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
 /// A `help:` line that is an example is not a replacement. `E0301`'s
 /// says ``write `enum(InvoiceStatus, request.query("status"))` `` — a
 /// `fix` that read notes would overwrite the author's call with the

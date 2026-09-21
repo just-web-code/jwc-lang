@@ -3779,12 +3779,13 @@ impl<'a> Checker<'a> {
             match f {
                 ProjField::Column { binding, column: i } => {
                     match binding {
-                        None => self.err_note(
+                        None => self.err_fix(
                             i.span,
                             "E0904",
                             format!("`{}` does not name its binding", i.name),
                             format!("write `{binder}.{}`", i.name),
                             "queries.md §6.1",
+                            format!("{binder}.{}", i.name),
                         ),
                         Some(b) if b.name != binder => self.err_note(
                             b.span,

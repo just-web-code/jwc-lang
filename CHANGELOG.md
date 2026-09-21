@@ -3,6 +3,15 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### `jwc fix` qualifies a column inside a nested shape too
+
+`E0904` has three emit sites and `fix` carried two: e-school moved to
+rc.7 with 101 unqualified columns inside `as one` / `as many` shapes
+left over after `jwc fix` said "nothing to fix". The nested-shape site
+now carries the join's binder, which its note already named.
+
 ## [1.0.0-rc.7] — freeze candidate — 2026-09-18
 
 ### middleware.md §5 says where `after` runs
