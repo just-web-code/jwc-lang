@@ -104,8 +104,8 @@ pub async fn ensure_tables() -> Result<(), DbError> {
 ///
 /// One row per scheduled job, held by the partial unique index
 /// `_jwc_jobs_every`. It is never deleted on completion: `succeed` and the
-/// dead-letter half of `fail` reset it — `attempts = 0`, `run_at = now()
-/// + every` — so the same row is claimed again one interval after it
+/// dead-letter half of `fail` reset it — `attempts = 0`, `run_at` one
+/// interval out — so the same row is claimed again one interval after it
 /// last finished. Two ticks therefore cannot overlap, a tick that took
 /// longer than the interval starts the next one late rather than
 /// stacking, and there is nothing to seed between ticks that a boot on
