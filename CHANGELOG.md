@@ -3,7 +3,11 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.8] — freeze candidate — 2026-09-21
+
+What rc.7's first day turned up: five projects moved to it in one
+afternoon, and moving them broke three things in the compiler and one
+production deployment. [`RC8-PLAN.md`](RC8-PLAN.md) has the findings.
 
 ### `every` — a job on a clock
 
@@ -5328,7 +5332,7 @@ wins note on the native-build page, response-phase `after { ... }`
 section on the README + middleware doc, seven-step "shipping a new
 builtin" recipe in CONTRIBUTING.md.
 
-## [Unreleased]
+## [1.0.0-rc.8] — freeze candidate — 2026-09-21
 
 ### Added
 - **W3C `traceparent` propagation.** When an upstream service sends

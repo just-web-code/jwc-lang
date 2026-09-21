@@ -13,7 +13,7 @@ A project is described by `jwcproj.json` at its root:
   "name": "redis",
   "version": "0.1.0",
   "type": "pkg",
-  "jwc": "1.0.0-rc.7",
+  "jwc": "1.0.0-rc.8",
   "dependencies": { "redis": "^0.1.0" }
 }
 ```
@@ -36,7 +36,7 @@ dependency (§1.3): `rc.N` and `rc.N+1` carry whatever review turned up
 and promise nothing to each other, so "close enough" is not a useful
 default for the one field whose job is to catch the gap. A range says so
 out loud, and — by the ordinary semver rule — a range that names no
-pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.7`
+pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.8`
 while `^1.0.0-rc.1` does. `"*"` is any version.
 
 `jwc new` records the release it scaffolded from.
