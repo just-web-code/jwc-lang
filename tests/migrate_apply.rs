@@ -771,7 +771,10 @@ table Links of App.org as "link" {
     write_migration(&dir, &snapshot::Snapshot::default(), &model, "initial");
     apply::up(&client, &dir, None).await.expect("up");
     let problems = apply::verify(&client, &snap).await.expect("verify");
-    assert!(problems.is_empty(), "a database `up` built is quiet: {problems:?}");
+    assert!(
+        problems.is_empty(),
+        "a database `up` built is quiet: {problems:?}"
+    );
 
     // What 0.9.x left behind: the defaults gone, and a column it never
     // said `NOT NULL` about.

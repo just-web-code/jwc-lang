@@ -367,7 +367,10 @@ async fn a_scheduled_job_has_one_row_that_outlives_its_runs() {
     assert_eq!(pending(&client).await, 1, "two boots seeded two rows");
     let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
     assert_eq!(every, 600);
-    assert!(due > 590.0 && due <= 600.0, "first tick is one interval after boot: {due}");
+    assert!(
+        due > 590.0 && due <= 600.0,
+        "first tick is one interval after boot: {due}"
+    );
 
     // Not due yet; then make it due.
     assert!(jobs::claim().await.expect("claim").is_none());
@@ -381,7 +384,11 @@ async fn a_scheduled_job_has_one_row_that_outlives_its_runs() {
 
     // Success keeps the row and reschedules it, attempts back to 0.
     jobs::succeed(claim.id).await.expect("succeed");
-    assert_eq!(pending(&client).await, 1, "the schedule was deleted with the run");
+    assert_eq!(
+        pending(&client).await,
+        1,
+        "the schedule was deleted with the run"
+    );
     let (attempts, _, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
     assert_eq!(attempts, 0);
     assert!(due > 590.0, "the next tick is an interval away: {due}");
@@ -396,7 +403,10 @@ async fn a_scheduled_job_has_one_row_that_outlives_its_runs() {
     assert_eq!(claim.attempts, 3);
     jobs::fail(&claim, 1, "boom").await.expect("fail");
     let dead: i64 = client
-        .query_one("SELECT count(*) FROM public._jwc_jobs_dead WHERE name = 'Cleanup'", &[])
+        .query_one(
+            "SELECT count(*) FROM public._jwc_jobs_dead WHERE name = 'Cleanup'",
+            &[],
+        )
         .await
         .expect("dead")
         .get(0);
@@ -407,20 +417,33 @@ async fn a_scheduled_job_has_one_row_that_outlives_its_runs() {
 
     // A shorter interval on redeploy takes effect now; a longer one after
     // the next tick (`LEAST`).
-    jobs::schedule(&[("Cleanup".to_string(), 3, 60)]).await.expect("reschedule");
+    jobs::schedule(&[("Cleanup".to_string(), 3, 60)])
+        .await
+        .expect("reschedule");
     let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
     assert_eq!(every, 60);
     assert!(due <= 60.0, "{due}");
-    jobs::schedule(&[("Cleanup".to_string(), 3, 600)]).await.expect("reschedule");
+    jobs::schedule(&[("Cleanup".to_string(), 3, 600)])
+        .await
+        .expect("reschedule");
     let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
     assert_eq!(every, 600);
-    assert!(due <= 60.0, "a lengthened interval waits for the next tick: {due}");
+    assert!(
+        due <= 60.0,
+        "a lengthened interval waits for the next tick: {due}"
+    );
 
     // A declaration that is gone takes its row with it at the next boot;
     // an ordinary dispatched row is not touched.
-    jobs::enqueue("Welcome", "{}", 3, 0, 0, 0).await.expect("enqueue").expect("room");
+    jobs::enqueue("Welcome", "{}", 3, 0, 0, 0)
+        .await
+        .expect("enqueue")
+        .expect("room");
     jobs::schedule(&[]).await.expect("schedule nothing");
-    assert!(scheduled_row(&client, "Cleanup").await.is_none(), "the orphan schedule stayed");
+    assert!(
+        scheduled_row(&client, "Cleanup").await.is_none(),
+        "the orphan schedule stayed"
+    );
     assert_eq!(pending(&client).await, 1, "the dispatched row went with it");
 }
 

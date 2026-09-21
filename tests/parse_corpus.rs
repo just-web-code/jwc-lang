@@ -407,7 +407,10 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn a_malformed_job_is_reported_at_parse_time() {
     let cases: &[(&str, &str)] = &[
-        ("E0377", r#"job Report(day: text) every "24h" { let d = @day; }"#),
+        (
+            "E0377",
+            r#"job Report(day: text) every "24h" { let d = @day; }"#,
+        ),
         ("E0379", r#"job TooOften() every "500ms" { let n = 1; }"#),
         ("E0379", r#"job Forever() every "721h" { let n = 1; }"#),
         ("E0379", r#"job NotADuration() backoff "30" { let n = 1; }"#),
@@ -431,7 +434,10 @@ fn a_malformed_job_is_reported_at_parse_time() {
         r#"job Retry() backoff "1h" { let n = 1; }"#,
     ] {
         let rendered = jwc::parse_str("<job>", ok).render_all();
-        assert!(rendered.is_empty(), "`{ok}` must parse cleanly:\n{rendered}");
+        assert!(
+            rendered.is_empty(),
+            "`{ok}` must parse cleanly:\n{rendered}"
+        );
     }
 }
 
