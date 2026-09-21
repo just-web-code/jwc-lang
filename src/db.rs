@@ -23,11 +23,19 @@ pub enum ConstraintKind {
 #[derive(Debug)]
 pub enum DbError {
     Constraint {
+        /// The generated name — empty for a `NOT NULL` violation, which
+        /// Postgres does not treat as a named constraint.
         name: String,
         /// The declared message, when the constraint carried one
         /// (schema.md §4.3, §4.4).
         message: Option<String>,
         kind: ConstraintKind,
+        /// Postgres's own sentence: `null value in column "hits" of
+        /// relation "link" violates not-null constraint`. What the fault
+        /// says when no message was declared — a name alone was
+        /// `constraint  violated` for every not-null violation, two
+        /// spaces and nothing between them (RC8-PLAN.md §1).
+        detail: String,
     },
     ForeignKey,
     Other(anyhow::Error),
@@ -315,6 +323,7 @@ fn classify(e: tokio_postgres::Error) -> DbError {
                 name,
                 message: lookup.0,
                 kind: lookup.1,
+                detail: db.message().to_string(),
             }
         }
         _ => DbError::Other(anyhow!(db.message().to_string())),

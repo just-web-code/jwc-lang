@@ -1915,9 +1915,14 @@ pub async fn wants_serve(program: &Arc<Program>) -> Result<bool> {
 /// it onto, so it says what happened in the log.
 fn db_error_text(e: &crate::db::DbError) -> String {
     match e {
-        crate::db::DbError::Constraint { name, message, .. } => match message {
+        crate::db::DbError::Constraint {
+            name,
+            message,
+            detail,
+            ..
+        } => match message {
             Some(m) => format!("constraint {name}: {m}"),
-            None => format!("constraint {name}"),
+            None => detail.clone(),
         },
         crate::db::DbError::ForeignKey => "foreign key violation".into(),
         crate::db::DbError::Other(e) => format!("{e:#}"),
@@ -2059,6 +2064,18 @@ pub async fn start_job_workers(program: Arc<Program>) {
             "[jobs] could not create the queue tables: {}",
             db_error_text(&e)
         );
+        return;
+    }
+    // The clock (jobs.md §1.4): one row per `every` job, before any
+    // worker can claim it.
+    let scheduled: Vec<(String, i64, i64)> = program
+        .symbols
+        .jobs
+        .values()
+        .filter_map(|j| j.every_secs.map(|e| (j.name.clone(), j.retries, e)))
+        .collect();
+    if let Err(e) = crate::jobs::schedule(&scheduled).await {
+        eprintln!("[jobs] could not schedule: {}", db_error_text(&e));
         return;
     }
     let n = crate::jobs::worker_count();

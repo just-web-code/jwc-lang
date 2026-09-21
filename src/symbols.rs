@@ -157,6 +157,8 @@ pub struct JobSym {
     pub retries: i64,
     /// Seconds to wait after a failed attempt. Default 30.
     pub backoff_secs: i64,
+    /// `every "10m"` in seconds — a job on a clock (jobs.md §1.4).
+    pub every_secs: Option<i64>,
     pub loc: Loc,
 }
 
@@ -378,6 +380,9 @@ pub fn build(ws: &Workspace, model: &SchemaModel) -> Symbols {
                                     crate::serve::parse_duration(d).map(|x| x.as_secs() as i64)
                                 })
                                 .unwrap_or(30),
+                            every_secs: j.every.as_deref().and_then(|d| {
+                                crate::serve::parse_duration(d).map(|x| x.as_secs() as i64)
+                            }),
                             loc,
                         },
                     );

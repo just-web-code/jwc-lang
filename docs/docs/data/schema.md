@@ -142,11 +142,12 @@ response carries — while the physical name is what the database keeps.
 ```bash
 jwc migrate new init       # writes the up/down pair and a snapshot
 jwc migrate up             # applies what is pending
-jwc migrate verify         # every constraint and index, by name
+jwc migrate verify         # every constraint and index by name, every column's default
 ```
 
 `jwc migrate verify` is the one that catches drift: it compares the
 constraint and index names the binary expects against the ones the
-database holds, and names each mismatch.
+database holds, and each column's default and nullability against the
+declaration, and names each mismatch.
 
 See [Migrations](./migrations.md).

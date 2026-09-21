@@ -2055,9 +2055,10 @@ impl<'a> Vm<'a> {
 pub(super) fn map_db_error(e: crate::db::DbError) -> Abort {
     match e {
         crate::db::DbError::Constraint {
-            name,
             message,
             kind,
+            detail,
+            ..
         } => match message {
             Some(m) => Abort::Thrown(Thrown {
                 error: match kind {
@@ -2067,7 +2068,10 @@ pub(super) fn map_db_error(e: crate::db::DbError) -> Abort {
                 .to_string(),
                 args: vec![Value::Text(m)],
             }),
-            None => Abort::Fault(anyhow!("constraint {name} violated")),
+            // Postgres names the table and the column; a fault that
+            // named only the constraint said nothing for a not-null
+            // violation, which has no constraint name.
+            None => Abort::Fault(anyhow!("{detail}")),
         },
         crate::db::DbError::ForeignKey => Abort::Thrown(Thrown {
             error: "BadRequest".into(),

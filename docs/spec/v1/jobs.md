@@ -1,7 +1,7 @@
 # Jobs
 
-Normative. Background work: how it is declared, how it is dispatched, and
-what the runtime guarantees.
+Normative. Background work: how it is declared, how it is dispatched or
+scheduled, and what the runtime guarantees.
 
 ---
 
@@ -40,6 +40,11 @@ its queued rows carry, so two declarations mean two meanings for one row.
 
 `retries 1` means one attempt and no retry.
 
+A duration is the `server { }` grammar (config §3.2) — a number and a
+unit, `"30s"`, `"10m"`, `"1h"` — bounded to `1s..=720h`. Anything else
+is `E0379`: a string that is not a duration used to be read as the
+default silently, so `backoff "30"` meant thirty seconds by accident.
+
 ### 1.3 The body
 
 A job body is a `service` function that answers nothing. It has its
@@ -50,6 +55,49 @@ because by the time it runs the request is long gone: `request.*`,
 A raise ends the attempt. `throw NotFound(…)` in a job is not a 404 —
 there is nobody to send one to — it is a failed attempt, recorded with its
 message.
+
+### 1.4 `every` — a job on a clock
+
+```jwc no-compile
+job CleanupExpired() retries 2 every "10m" {
+    delete L from App.public.Links where L.expires_at < now();
+}
+```
+
+`every` is a modifier in the row `retries` and `backoff` are in, and the
+same duration grammar. A job that carries it runs one interval after
+boot, and then one interval after each time it finishes.
+
+| | |
+|---|---|
+| parameters | **none** — `E0377`. There is no call to receive them from; the body reads what it needs from the database |
+| `dispatch` of it | `E0378`. The clock is its only caller, and a second row of it would be a second schedule |
+| `retries` / `backoff` | what they mean: attempts *within* one tick. The attempt that exhausts them dead-letters **that tick** (§3.4), and the next tick is still scheduled — a report that failed at midnight should try again tomorrow, and the dead row is the record of tonight |
+
+**The row is the schedule.** One row per scheduled job, held by a
+partial unique index on `(name) WHERE every_secs IS NOT NULL`. It is
+never deleted when the job finishes: success and dead-letter both
+*reset* it — `attempts = 0`, `run_at = now() + every` — so the same row
+is claimed again one interval after it last finished. What that buys:
+
+- Two ticks cannot overlap. A tick that took longer than the interval
+  starts the next one late rather than stacking.
+- N replicas seed one row, not N: every boot runs the same `INSERT … ON
+  CONFLICT`, and the conflict updates the interval and the attempt
+  budget rather than adding a row. A **shortened** interval takes effect
+  at that boot (`run_at = LEAST(old, now() + new)`); a **lengthened** one
+  after the next tick.
+- A declaration that is removed takes its row with it at the next boot.
+  If a worker on an older replica reaches the row first, it runs it,
+  which is what that replica still declares.
+
+`every_secs` is a column on `_jwc_jobs`, added at boot with `ADD COLUMN
+IF NOT EXISTS` the way the tables are created; a queue built by rc.7
+gains it on the first rc.8 boot with nothing to migrate.
+
+Not in this: `dispatch` of a scheduled job ("run it now"), a cron
+expression, a time zone, an at-most-once promise. Each is a real
+question and none is what a cleanup job needs.
 
 ---
 
@@ -212,3 +260,6 @@ second lets two requests both see room and both take it.
 | `E0367` | a dispatch argument of the wrong type |
 | `E0368` | a dispatch argument the job does not declare |
 | `E0369` | a non-optional parameter left out |
+| `E0377` | an `every` job that declares parameters |
+| `E0378` | `dispatch` of an `every` job |
+| `E0379` | `backoff` / `every` that is not a duration in `1s..=720h` |

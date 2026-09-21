@@ -1,13 +1,14 @@
 ---
 sidebar_position: 6
 title: Background jobs
-description: "Declaring a job, dispatching one, and what the queue guarantees."
+description: "Declaring a job, dispatching or scheduling one, and what the queue guarantees."
 ---
 
 # Background jobs
 
 Work that should not happen on the request's clock: an email, a webhook, a
-thumbnail, a nightly sweep.
+thumbnail — and work that happens on its own clock: a sweep every ten
+minutes, a report at the end of the day.
 
 ```jwc no-compile
 job SendWelcome(account_id: bigint, email: text) retries 5 backoff "30s" {
@@ -76,6 +77,27 @@ its lease, and the job runs again.
 is the guarantee: at-least-once is the strongest thing a queue on a
 database can honestly promise. Deleting a row that is already gone is
 fine. Charging a card is not — key it on something idempotent.
+
+## A job on a clock
+
+```jwc no-compile
+job CleanupExpired() retries 2 every "10m" {
+    delete L from App.public.Links where L.expires_at < now();
+}
+```
+
+`every` goes where `retries` and `backoff` go, takes the same `"10m"` /
+`"1h"` durations, and runs the job one interval after boot and then one
+interval after each time it finishes. It replaces the cron entry outside
+the program, and brings the job under everything on this page: the
+lease, the retries, the dead-letter table, `/metrics`.
+
+A scheduled job takes no parameters — nothing calls it — and cannot be
+`dispatch`ed. Two ticks never overlap: there is exactly one row of it in
+the queue, and the row is reset for its next tick when the current one
+finishes, on success or after the last retry. Several replicas share
+that one row, so a job that runs "every 10 minutes" runs every ten
+minutes across the deployment, not every ten minutes per replica.
 
 ## Failure and the dead-letter table
 

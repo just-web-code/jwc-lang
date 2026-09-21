@@ -3,7 +3,57 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.8] — freeze candidate — 2026-09-21
+
+What rc.7's first day turned up: five projects moved to it in one
+afternoon, and moving them broke three things in the compiler and one
+production deployment. [`RC8-PLAN.md`](RC8-PLAN.md) has the findings.
+
+### `every` — a job on a clock
+
+`job CleanupExpired() every "10m" { … }`. jobs.md gave a `job` one way
+to run — a `dispatch` from a request — and both deployed projects carry
+a cron entry outside the program for the sweep, the one place the
+queue's guarantees do not reach. `every` is a modifier in the row
+`retries` and `backoff` are in. The row is the schedule: one row per
+scheduled job, held by a partial unique index, reset for its next tick
+when the current one finishes rather than deleted — so ticks never
+overlap, N replicas share one row, and a removed declaration takes its
+row with it at the next boot. `retries` / `backoff` bound the attempts
+within a tick; the attempt that exhausts them dead-letters that tick and
+the next one still runs. A scheduled job takes no parameters (`E0377`)
+and cannot be dispatched (`E0378`). `_jwc_jobs` gains `every_secs` with
+`ADD COLUMN IF NOT EXISTS` at boot. Both backends, measured: five ticks
+in six seconds at `every "1s"`, one row, `attempts` back to 0.
+
+`backoff "30"` used to mean thirty seconds by accident — a string that
+was not a duration was read as the default. Both durations are `E0379`
+outside `1s..=720h` now.
+
+### `migrate verify` reads the columns, not only the names on them
+
+The same adoption, one layer down: `baseline` had reported the missing
+index and the wrong constraint names, `verify` had answered ok, and the
+insert still faulted — the column checks were names only. `verify` now
+compares each declared column's default and nullability against
+`information_schema.columns`: a declared default that is not there, and
+a `not null` column that is nullable, are the two facts a write depends
+on, and both are named with the `ALTER COLUMN` that closes them. The
+default's text is not compared (Postgres normalises it), and a live
+default the declaration lacks is not a finding. `baseline`'s "differences
+remain" list says the same, since it is the same function.
+
+### A `NOT NULL` violation names its column
+
+1kb.uz's `link` table was built by 0.9.x and its `hits` column had no
+`DEFAULT 0`; rc.7's insert omits the column, trusting the declaration,
+and Postgres refused the null. The fault in the log was `constraint
+violated` with two spaces and nothing between them: a not-null violation
+is not a named constraint, and the message was built from the name
+alone. A message-less violation now logs Postgres's own sentence — `null
+value in column "hits" of relation "link" violates not-null constraint`
+— on both backends. A violation with a declared message is unchanged.
+`tests/faults.rs` pins it against a table with its default dropped.
 
 ### `jwc fix` turns `---` into `///`
 
@@ -5282,7 +5332,7 @@ wins note on the native-build page, response-phase `after { ... }`
 section on the README + middleware doc, seven-step "shipping a new
 builtin" recipe in CONTRIBUTING.md.
 
-## [Unreleased]
+## [1.0.0-rc.8] — freeze candidate — 2026-09-21
 
 ### Added
 - **W3C `traceparent` propagation.** When an upstream service sends

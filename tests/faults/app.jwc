@@ -1,0 +1,29 @@
+/// The shape of jwc-shortener's `link` table as 0.9.x built it: the
+/// declaration carries a default, the live column does not. The insert
+/// trusts the declaration and omits `hits`, and Postgres refuses the null.
+/// What the fault then *says* is what `tests/faults.rs` pins.
+namespace faults;
+
+database App : Postgres;
+
+schema f of App;
+
+table Links of App.f as "link" {
+    code varchar(8) primary key;
+    url  varchar(2048);
+    hits int default 0;
+}
+
+server {
+    max_body_bytes = 65536;
+}
+
+routes "/links" {
+    route POST "{code: text}" {
+        insert Links into App.f.Links {
+            code = @code,
+            url  = "https://example.org"
+        };
+        return created(json({ code: @code }));
+    }
+}

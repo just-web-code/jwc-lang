@@ -340,6 +340,113 @@ async fn the_queue_depth_is_bounded() {
 }
 
 /// The whole suite, on one runtime — see the note on `skip_unless_db!`.
+/// One row for a scheduled job, and how the row's `run_at` tells the
+/// worker when.
+async fn scheduled_row(client: &Client, name: &str) -> Option<(i64, i64, f64)> {
+    client
+        .query_opt(
+            "SELECT attempts::bigint, every_secs::bigint, \
+                    extract(epoch FROM run_at - now())::double precision \
+               FROM public._jwc_jobs WHERE name = $1 AND every_secs IS NOT NULL",
+            &[&name],
+        )
+        .await
+        .expect("query")
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+}
+
+/// jobs.md §1.4 — the row is the schedule.
+async fn a_scheduled_job_has_one_row_that_outlives_its_runs() {
+    let url = skip_unless_db!("a_scheduled_job_has_one_row_that_outlives_its_runs");
+    let client = setup(&url).await;
+
+    let decl = [("Cleanup".to_string(), 3i64, 600i64)];
+    jobs::schedule(&decl).await.expect("schedule");
+    // A second replica booting seeds nothing new.
+    jobs::schedule(&decl).await.expect("schedule twice");
+    assert_eq!(pending(&client).await, 1, "two boots seeded two rows");
+    let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
+    assert_eq!(every, 600);
+    assert!(
+        due > 590.0 && due <= 600.0,
+        "first tick is one interval after boot: {due}"
+    );
+
+    // Not due yet; then make it due.
+    assert!(jobs::claim().await.expect("claim").is_none());
+    client
+        .batch_execute("UPDATE public._jwc_jobs SET run_at = now()")
+        .await
+        .expect("make it due");
+    let claim = jobs::claim().await.expect("claim").expect("the tick");
+    assert_eq!(claim.name, "Cleanup");
+    assert_eq!(claim.payload, "{}", "a scheduled job has no payload");
+
+    // Success keeps the row and reschedules it, attempts back to 0.
+    jobs::succeed(claim.id).await.expect("succeed");
+    assert_eq!(
+        pending(&client).await,
+        1,
+        "the schedule was deleted with the run"
+    );
+    let (attempts, _, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
+    assert_eq!(attempts, 0);
+    assert!(due > 590.0, "the next tick is an interval away: {due}");
+
+    // Exhausting the retries dead-letters the tick, and the next tick is
+    // still scheduled.
+    client
+        .batch_execute("UPDATE public._jwc_jobs SET run_at = now(), attempts = 2")
+        .await
+        .expect("last attempt");
+    let claim = jobs::claim().await.expect("claim").expect("the tick");
+    assert_eq!(claim.attempts, 3);
+    jobs::fail(&claim, 1, "boom").await.expect("fail");
+    let dead: i64 = client
+        .query_one(
+            "SELECT count(*) FROM public._jwc_jobs_dead WHERE name = 'Cleanup'",
+            &[],
+        )
+        .await
+        .expect("dead")
+        .get(0);
+    assert_eq!(dead, 1, "the failed tick is the record");
+    let (attempts, _, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
+    assert_eq!(attempts, 0, "the next tick starts with a fresh budget");
+    assert!(due > 590.0, "{due}");
+
+    // A shorter interval on redeploy takes effect now; a longer one after
+    // the next tick (`LEAST`).
+    jobs::schedule(&[("Cleanup".to_string(), 3, 60)])
+        .await
+        .expect("reschedule");
+    let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
+    assert_eq!(every, 60);
+    assert!(due <= 60.0, "{due}");
+    jobs::schedule(&[("Cleanup".to_string(), 3, 600)])
+        .await
+        .expect("reschedule");
+    let (_, every, due) = scheduled_row(&client, "Cleanup").await.expect("the row");
+    assert_eq!(every, 600);
+    assert!(
+        due <= 60.0,
+        "a lengthened interval waits for the next tick: {due}"
+    );
+
+    // A declaration that is gone takes its row with it at the next boot;
+    // an ordinary dispatched row is not touched.
+    jobs::enqueue("Welcome", "{}", 3, 0, 0, 0)
+        .await
+        .expect("enqueue")
+        .expect("room");
+    jobs::schedule(&[]).await.expect("schedule nothing");
+    assert!(
+        scheduled_row(&client, "Cleanup").await.is_none(),
+        "the orphan schedule stayed"
+    );
+    assert_eq!(pending(&client).await, 1, "the dispatched row went with it");
+}
+
 #[tokio::test]
 async fn the_durable_queue() {
     ensure_tables_is_idempotent().await;
@@ -351,4 +458,5 @@ async fn the_durable_queue() {
     depths_report_both_tables().await;
     a_payload_over_the_limit_is_refused().await;
     the_queue_depth_is_bounded().await;
+    a_scheduled_job_has_one_row_that_outlives_its_runs().await;
 }

@@ -1203,6 +1203,20 @@ impl<'a> Checker<'a> {
                     );
                 }
 
+                // jobs.md §1.4 — the clock is a scheduled job's only
+                // caller. A second row of it would be a second schedule.
+                if sym.every_secs.is_some() {
+                    self.err_note(
+                        *span,
+                        "E0378",
+                        format!("`dispatch {}` names a job that runs `every`", job.name),
+                        "a scheduled job runs on its clock and cannot be dispatched; \
+                         split the work into a plain `job` if a request needs to \
+                         start it",
+                        "jobs.md §1.4",
+                    );
+                }
+
                 let mut seen: Vec<&str> = Vec::new();
                 for (name, value) in args {
                     let got = self.expr(value);

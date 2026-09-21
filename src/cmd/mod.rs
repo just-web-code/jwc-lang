@@ -1302,7 +1302,8 @@ pub fn migrate_baseline(path: PathBuf, dir: Option<PathBuf>, to: Option<u32>) ->
              the sources against the snapshot, which already calls these \
              names correct, so it answers \"no schema changes\". Close them \
              with a hand-written migration — `ALTER TABLE … RENAME \
-             CONSTRAINT` for a name, `CREATE INDEX` for an index — and run \
+             CONSTRAINT` for a name, `CREATE INDEX` for an index, `ALTER \
+             COLUMN … SET DEFAULT` / `SET NOT NULL` for a column — and run \
              `jwc migrate verify` until it is quiet."
         );
     }
@@ -1322,7 +1323,10 @@ pub fn migrate_verify(path: PathBuf) -> Result<()> {
         eprintln!("{p}");
     }
     if problems.is_empty() {
-        println!("ok — every constraint, index and view is present under its expected name");
+        println!(
+            "ok — every constraint, index and view is present under its expected \
+             name, and every column has the default and nullability it declares"
+        );
         return Ok(());
     }
     bail!("{} problem{}", problems.len(), plural(problems.len()))

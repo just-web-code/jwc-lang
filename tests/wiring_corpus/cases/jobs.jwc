@@ -13,6 +13,12 @@ job Sweep() {
     let n = 1;
 }
 
+// jobs.md §1.4 — a job on a clock. The clock is its only caller, so it
+// takes no parameters and cannot be dispatched.
+job CleanupExpired() retries 2 every "10m" {
+    let n = 1;
+}
+
 // A payload is stored and replayed, so its parameters are scalars: a class
 // is the request boundary's shape, and re-validating one on the way out of
 // a table is a contract nothing states.
@@ -40,6 +46,7 @@ routes "/api" {
 
     route POST "unknown" {
         dispatch NoSuchJob(a: 1);               // expect: E0364
+        dispatch CleanupExpired();              // expect: E0378
 
         return created(json({}));
     }

@@ -77,12 +77,19 @@ jwc migrate verify
 ```
 
 Compares the constraint and index names the binary expects against the
-ones the database holds, and names each mismatch:
+ones the database holds, and each column's default and nullability
+against what it declares, and names each mismatch:
 
 ```
 public.task: constraint `fk_task__columnId` is missing
 public.task: index `ix_task__projectId_position` is missing
+public.link: column `hits` has no default — declared `0`
+public.link: column `url` is nullable — declared `not null`
 ```
+
+The column lines are the ones a port from 0.9.x turns up: an `insert`
+that omits `hits` trusts the declared default, and a live column without
+one faults on the null.
 
 This is the check that catches a database changed by hand, and the one to
 run in a deploy's readiness gate. It is also how a schema ported from an

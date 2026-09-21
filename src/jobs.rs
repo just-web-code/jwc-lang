@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS public._jwc_jobs (
     leased_until timestamptz
 );
 CREATE INDEX IF NOT EXISTS _jwc_jobs_ready ON public._jwc_jobs (run_at, id);
+ALTER TABLE public._jwc_jobs ADD COLUMN IF NOT EXISTS every_secs int;
+CREATE UNIQUE INDEX IF NOT EXISTS _jwc_jobs_every ON public._jwc_jobs (name) WHERE every_secs IS NOT NULL;
 CREATE TABLE IF NOT EXISTS public._jwc_jobs_dead (
     id         bigserial PRIMARY KEY,
     job_id     bigint NOT NULL,
@@ -94,6 +96,56 @@ pub async fn ensure_tables() -> Result<(), DbError> {
             continue;
         }
         crate::db::run(stmt, &[], Shape::None).await?;
+    }
+    Ok(())
+}
+
+/// A job on a clock (jobs.md §1.4): the row *is* the schedule.
+///
+/// One row per scheduled job, held by the partial unique index
+/// `_jwc_jobs_every`. It is never deleted on completion: `succeed` and the
+/// dead-letter half of `fail` reset it — `attempts = 0`, `run_at` one
+/// interval out — so the same row is claimed again one interval after it
+/// last finished. Two ticks therefore cannot overlap, a tick that took
+/// longer than the interval starts the next one late rather than
+/// stacking, and there is nothing to seed between ticks that a boot on
+/// another replica could double.
+///
+/// Called at boot, before the workers start, with every `every` job the
+/// program declares. `ON CONFLICT` is what makes N replicas seed one row:
+/// the second boot updates the interval and the attempt budget, and keeps
+/// the earlier of the two `run_at`s so a shortened interval takes effect
+/// now and a lengthened one after the next tick. Rows for jobs the
+/// program no longer declares are deleted — a schedule outlives its
+/// declaration only until the next boot, and it dead-letters as "outlived
+/// its declaration" if a worker reaches it first.
+pub async fn schedule(jobs: &[(String, i64, i64)]) -> Result<(), DbError> {
+    // Job names are identifiers, so the array literal needs no quoting.
+    let names: Vec<&str> = jobs.iter().map(|(n, _, _)| n.as_str()).collect();
+    crate::db::run(
+        "DELETE FROM public._jwc_jobs \
+         WHERE every_secs IS NOT NULL AND name <> ALL ($1::text::text[])",
+        &[Some(format!("{{{}}}", names.join(",")))],
+        Shape::None,
+    )
+    .await?;
+    for (name, max_attempts, every_secs) in jobs {
+        crate::db::run(
+            "INSERT INTO public._jwc_jobs (name, payload, max_attempts, run_at, every_secs) \
+             VALUES ($1, '{}'::jsonb, $2::text::int, \
+                     now() + make_interval(secs => $3::text::double precision), $3::text::int) \
+             ON CONFLICT (name) WHERE every_secs IS NOT NULL DO UPDATE SET \
+               max_attempts = EXCLUDED.max_attempts, \
+               every_secs = EXCLUDED.every_secs, \
+               run_at = LEAST(public._jwc_jobs.run_at, EXCLUDED.run_at)",
+            &[
+                Some(name.clone()),
+                Some(max_attempts.to_string()),
+                Some(every_secs.to_string()),
+            ],
+            Shape::None,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -232,11 +284,24 @@ pub async fn claim() -> Result<Option<Claim>, DbError> {
 }
 
 /// The job ran. Nothing is kept: a completed-jobs table grows without
-/// bound and answers a question `/metrics` already answers.
+/// bound and answers a question `/metrics` already answers. A scheduled
+/// job's row is the schedule and is reset instead (`schedule`).
 pub async fn succeed(id: i64) -> Result<(), DbError> {
     PROCESSED.fetch_add(1, Ordering::Relaxed);
+    reset_or_delete(id).await
+}
+
+/// One statement, so a scheduled row is never briefly absent — which is
+/// the gap a boot on another replica could seed into.
+async fn reset_or_delete(id: i64) -> Result<(), DbError> {
     crate::db::run(
-        "DELETE FROM public._jwc_jobs WHERE id = $1::text::bigint",
+        "WITH kept AS ( \
+           UPDATE public._jwc_jobs SET leased_until = NULL, attempts = 0, \
+             run_at = now() + make_interval(secs => every_secs) \
+           WHERE id = $1::text::bigint AND every_secs IS NOT NULL \
+           RETURNING id) \
+         DELETE FROM public._jwc_jobs \
+         WHERE id = $1::text::bigint AND every_secs IS NULL",
         &[Some(id.to_string())],
         Shape::None,
     )
@@ -256,13 +321,9 @@ pub async fn fail(claim: &Claim, backoff_secs: i64, error: &str) -> Result<(), D
             Shape::None,
         )
         .await?;
-        return crate::db::run(
-            "DELETE FROM public._jwc_jobs WHERE id = $1::text::bigint",
-            &[Some(claim.id.to_string())],
-            Shape::None,
-        )
-        .await
-        .map(|_| ());
+        // A scheduled job's row stays and is rescheduled: the dead row is
+        // the record of this tick, and the next tick still runs.
+        return reset_or_delete(claim.id).await;
     }
     crate::db::run(
         "UPDATE public._jwc_jobs SET leased_until = NULL, \
@@ -373,7 +434,11 @@ mod tests {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
-        assert_eq!(stmts.len(), 3, "two tables and an index: {stmts:#?}");
+        assert_eq!(
+            stmts.len(),
+            5,
+            "two tables, two indexes and the `every_secs` column: {stmts:#?}"
+        );
         for s in &stmts {
             assert!(
                 s.contains("IF NOT EXISTS"),
