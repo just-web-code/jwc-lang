@@ -5,6 +5,13 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `jwc fmt` keeps a comment after the last declaration
+
+A file that is a `namespace` and an explanation of why it holds nothing
+else — the `redis` package — lost the explanation on `fmt`, or rather
+`fmt` refused the file forever. The comment is kept where it was; a doc
+comment there stays `E0104`.
+
 ### `jwc fix` qualifies a column inside a nested shape too
 
 `E0904` has three emit sites and `fix` carried two: e-school moved to

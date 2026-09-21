@@ -61,6 +61,11 @@ impl DottedName {
 #[derive(Clone, Debug, Default)]
 pub struct Program {
     pub decls: Vec<Decl>,
+    /// Comments after the last declaration. A doc comment there is
+    /// `E0104`; a line or block comment is kept, and `fmt` prints it
+    /// where it was — a file that is a namespace and an explanation of
+    /// why it holds nothing else is a legitimate file.
+    pub trailing: Attached,
 }
 
 #[derive(Clone, Debug)]

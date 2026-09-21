@@ -123,6 +123,14 @@ pub fn format_program(p: &Program) -> String {
         }
         w.decl(d);
     }
+    if !p.trailing.comments.is_empty() || !p.trailing.blocks.is_empty() {
+        if !p.decls.is_empty() {
+            w.blank();
+        }
+        let mut at = p.trailing.clone();
+        at.docs.clear();
+        w.attached(&at);
+    }
     let mut out = w.out;
     while out.ends_with("\n\n") {
         out.pop();

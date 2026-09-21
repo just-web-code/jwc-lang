@@ -626,3 +626,15 @@ fn comments_inside_server_record_and_insert_survive_formatting() {
     let short = "namespace n;\n\nfunction f() {\n    return json({ a: 1 });\n}\n";
     assert_eq!(fmt("short.jwc", short), short);
 }
+
+/// A comment after the last declaration — a package that is a namespace
+/// and an explanation of why it holds nothing else — used to vanish on
+/// `fmt`. It is kept where it was.
+#[test]
+fn a_trailing_comment_survives_formatting() {
+    let src = "namespace redis;\n\n\
+               // This package carries no code, and that is the design.\n\
+               // `redis.get` and the rest are the compiler's.\n";
+    assert_eq!(fmt("trailing.jwc", src), src);
+    assert!(jwc::fmt::comments_lost(src, &fmt("trailing.jwc", src)).is_empty());
+}

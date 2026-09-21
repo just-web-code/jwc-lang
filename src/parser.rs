@@ -289,7 +289,7 @@ impl Parser {
                     .clause("names.md §3"),
             );
         }
-        Program { decls }
+        Program { decls, trailing }
     }
 
     fn recover_to_decl(&mut self) {
