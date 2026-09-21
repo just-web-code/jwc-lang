@@ -913,6 +913,18 @@ An attempt that raises is retried after `backoff`; the attempt that
 exhausts `retries` moves the job to a dead-letter table with its last
 error.
 
+A job on a clock carries `every` instead of being dispatched:
+
+```jwc no-compile
+job CleanupExpired() retries 2 every "10m" {
+    delete L from App.public.Links where L.expires_at < now();
+}
+```
+
+It takes no parameters, cannot be `dispatch`ed, and runs one interval
+after boot and then one interval after each time it finishes — one row
+in the queue shared by every replica, so ticks never overlap.
+
 ---
 
 ## 15. Tests

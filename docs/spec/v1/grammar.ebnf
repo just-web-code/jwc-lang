@@ -139,7 +139,7 @@ after_block     = "after" "{" { statement } "}" ;
 
 (* ---------- routing ---------- *)
 
-job_decl        = "job" identifier param_list [ "retries" integer ] [ "backoff" string ] block ;
+job_decl        = "job" identifier param_list [ "retries" integer ] [ "backoff" string ] [ "every" string ] block ;
 dispatch_stmt   = "dispatch" identifier "(" [ named_arg { "," named_arg } ] ")" ";" ;
 named_arg       = identifier ":" expression ;
 

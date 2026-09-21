@@ -747,10 +747,11 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
             jobs.push((
                 j.name.name.clone(),
                 format!(
-                    "JwcJobEntry {{ name: {}, max_attempts: {}, backoff_secs: {}, run: {name}_boxed }}",
+                    "JwcJobEntry {{ name: {}, max_attempts: {}, backoff_secs: {}, every_secs: {:?}, run: {name}_boxed }}",
                     rust_str_literal(&j.name.name),
                     sym.retries,
                     sym.backoff_secs,
+                    sym.every_secs,
                 ),
             ));
         }

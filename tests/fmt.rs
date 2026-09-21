@@ -131,6 +131,24 @@ table Orgs of App.org {
     assert_eq!(once, fmt("<docs2>", &once));
 }
 
+/// jobs.md §1.4 — `every` is part of the header, after `retries` and
+/// `backoff`, and a formatter that dropped it would turn a scheduled job
+/// into one nothing ever runs.
+#[test]
+fn a_scheduled_job_keeps_its_clock() {
+    let src = "\
+job CleanupExpired() retries 2 backoff \"1m\" every \"10m\" {
+    let n = 1;
+}
+";
+    let once = fmt("<every>", src);
+    assert!(
+        once.contains("job CleanupExpired() retries 2 backoff \"1m\" every \"10m\" {"),
+        "the clock was lost:\n{once}"
+    );
+    assert_eq!(once, fmt("<every2>", &once));
+}
+
 #[test]
 fn line_comments_survive_a_round_trip() {
     let src = "\

@@ -446,6 +446,9 @@ pub struct JobDecl {
     pub retries: Option<i64>,
     /// `backoff "30s";` — the wait after a failed attempt.
     pub backoff: Option<String>,
+    /// `every "10m"` — a job on a clock (jobs.md §1.4). Takes no
+    /// parameters and cannot be dispatched: the clock is its only caller.
+    pub every: Option<String>,
     pub body: Block,
     pub span: Span,
 }

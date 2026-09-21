@@ -2066,6 +2066,18 @@ pub async fn start_job_workers(program: Arc<Program>) {
         );
         return;
     }
+    // The clock (jobs.md §1.4): one row per `every` job, before any
+    // worker can claim it.
+    let scheduled: Vec<(String, i64, i64)> = program
+        .symbols
+        .jobs
+        .values()
+        .filter_map(|j| j.every_secs.map(|e| (j.name.clone(), j.retries, e)))
+        .collect();
+    if let Err(e) = crate::jobs::schedule(&scheduled).await {
+        eprintln!("[jobs] could not schedule: {}", db_error_text(&e));
+        return;
+    }
     let n = crate::jobs::worker_count();
     if n == 0 {
         // Deliberate: this process serves and does not drain. Said out

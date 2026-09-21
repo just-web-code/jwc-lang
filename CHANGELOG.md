@@ -5,6 +5,27 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `every` — a job on a clock
+
+`job CleanupExpired() every "10m" { … }`. jobs.md gave a `job` one way
+to run — a `dispatch` from a request — and both deployed projects carry
+a cron entry outside the program for the sweep, the one place the
+queue's guarantees do not reach. `every` is a modifier in the row
+`retries` and `backoff` are in. The row is the schedule: one row per
+scheduled job, held by a partial unique index, reset for its next tick
+when the current one finishes rather than deleted — so ticks never
+overlap, N replicas share one row, and a removed declaration takes its
+row with it at the next boot. `retries` / `backoff` bound the attempts
+within a tick; the attempt that exhausts them dead-letters that tick and
+the next one still runs. A scheduled job takes no parameters (`E0377`)
+and cannot be dispatched (`E0378`). `_jwc_jobs` gains `every_secs` with
+`ADD COLUMN IF NOT EXISTS` at boot. Both backends, measured: five ticks
+in six seconds at `every "1s"`, one row, `attempts` back to 0.
+
+`backoff "30"` used to mean thirty seconds by accident — a string that
+was not a duration was read as the default. Both durations are `E0379`
+outside `1s..=720h` now.
+
 ### `migrate verify` reads the columns, not only the names on them
 
 The same adoption, one layer down: `baseline` had reported the missing

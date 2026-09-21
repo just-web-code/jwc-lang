@@ -1229,6 +1229,7 @@ impl Parser {
 
         let mut retries = None;
         let mut backoff = None;
+        let mut every = None;
         loop {
             if self.at_word("retries") && retries.is_none() {
                 self.bump();
@@ -1248,11 +1249,33 @@ impl Parser {
             }
             if self.at_word("backoff") && backoff.is_none() {
                 self.bump();
-                let (d, _) = self.expect_string()?;
+                let (d, span) = self.expect_string()?;
+                self.check_duration("backoff", &d, span);
                 backoff = Some(d);
                 continue;
             }
+            if self.at_word("every") && every.is_none() {
+                self.bump();
+                let (d, span) = self.expect_string()?;
+                self.check_duration("every", &d, span);
+                every = Some(d);
+                continue;
+            }
             break;
+        }
+
+        // jobs.md §1.4 — nothing calls a scheduled job, so nothing could
+        // pass it an argument.
+        if every.is_some() && !params.is_empty() {
+            let span = params[0].span.to(params[params.len() - 1].span);
+            self.err_note(
+                "E0377",
+                span,
+                format!("`job {}` runs `every` and declares parameters", name.name),
+                "a scheduled job has no caller to receive arguments from; read \
+                 what it needs from the database in the body",
+                "jobs.md §1.4",
+            );
         }
 
         let (body, end) = self.parse_block()?;
@@ -1262,9 +1285,28 @@ impl Parser {
             params,
             retries,
             backoff,
+            every,
             body,
             span: start.to(end),
         })
+    }
+
+    /// `backoff "30s"` / `every "10m"` — the `server { }` duration grammar
+    /// (config.md §3.2), bounded to `1s..=720h`. A string that is not a
+    /// duration used to be read as the default silently: `backoff "30"`
+    /// meant thirty seconds by accident, and `every "1d"` would have
+    /// meant nothing at all.
+    fn check_duration(&mut self, word: &str, text: &str, span: Span) {
+        let secs = crate::serve::parse_duration(text).map(|d| d.as_secs());
+        if !matches!(secs, Some(1..=2_592_000)) {
+            self.err_note(
+                "E0379",
+                span,
+                format!("`{word} {text:?}` is not a duration between `\"1s\"` and `\"720h\"`"),
+                "a duration is a number and a unit: `\"30s\"`, `\"10m\"`, `\"1h\"`",
+                "jobs.md §1.2",
+            );
+        }
     }
 
     // ------------------------------------------------------------ middleware

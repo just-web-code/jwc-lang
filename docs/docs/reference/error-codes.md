@@ -132,6 +132,9 @@ the same extraction, so neither can drift from it.
 | `E0374` | the two branches of a conditional produce unrelated shapes | `types.md` |
 | `E0375` | `in` over an array whose element type does not match | `types.md` |
 | `E0376` | operands cannot be compared or ordered | `types.md` |
+| `E0377` | an `every` job that declares parameters | `jobs.md` |
+| `E0378` | `dispatch` of an `every` job | `jobs.md` |
+| `E0379` | `backoff` / `every` that is not a duration in `1s..=720h` | `jobs.md` |
 | `E0401` | `identity` on a non-integer column | `schema.md` |
 | `E0402` | non-constant `default` | `schema.md` |
 | `E0403` | `default now()` on a non-temporal column | `schema.md` |

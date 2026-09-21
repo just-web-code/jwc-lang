@@ -13,6 +13,8 @@ const JWC_JOBS_DDL: &[&str] = &[
         enqueued_at timestamptz NOT NULL DEFAULT now(), \
         run_at timestamptz NOT NULL DEFAULT now(), leased_until timestamptz)",
     "CREATE INDEX IF NOT EXISTS _jwc_jobs_ready ON public._jwc_jobs (run_at, id)",
+    "ALTER TABLE public._jwc_jobs ADD COLUMN IF NOT EXISTS every_secs int",
+    "CREATE UNIQUE INDEX IF NOT EXISTS _jwc_jobs_every ON public._jwc_jobs (name) WHERE every_secs IS NOT NULL",
     "CREATE TABLE IF NOT EXISTS public._jwc_jobs_dead (\
         id bigserial PRIMARY KEY, job_id bigint NOT NULL, name text NOT NULL, \
         payload jsonb NOT NULL, attempts int NOT NULL, last_error text NOT NULL, \
@@ -37,6 +39,8 @@ struct JwcJobEntry {
     name: &'static str,
     max_attempts: i64,
     backoff_secs: i64,
+    /// `every "10m"` in seconds — a job on a clock (jobs.md §1.4).
+    every_secs: Option<i64>,
     /// Takes the payload object; binds its own parameters out of it.
     run: fn(serde_json::Value) -> Pin<Box<dyn Future<Output = JwcResult> + Send>>,
 }
@@ -48,6 +52,62 @@ async fn jwc_jobs_ensure_tables() -> Result<(), String> {
             .map_err(|e| format!("{e}"))?;
     }
     Ok(())
+}
+
+/// `jobs::schedule`, transcribed: one row per `every` job, held by the
+/// partial unique index; rows for jobs this build no longer declares go.
+async fn jwc_jobs_schedule() -> Result<(), String> {
+    let names: Vec<&str> = JWC_JOBS
+        .iter()
+        .filter(|j| j.every_secs.is_some())
+        .map(|j| j.name)
+        .collect();
+    jwc_db_try_exec(
+        "DELETE FROM public._jwc_jobs \
+         WHERE every_secs IS NOT NULL AND name <> ALL ($1::text::text[])",
+        vec![Box::new(Some(format!("{{{}}}", names.join(","))))],
+    )
+    .await
+    .map_err(|e| format!("{e}"))?;
+    for j in JWC_JOBS.iter() {
+        let Some(every) = j.every_secs else { continue };
+        jwc_db_try_exec(
+            "INSERT INTO public._jwc_jobs (name, payload, max_attempts, run_at, every_secs) \
+             VALUES ($1, '{}'::jsonb, $2::text::int, \
+                     now() + make_interval(secs => $3::text::double precision), $3::text::int) \
+             ON CONFLICT (name) WHERE every_secs IS NOT NULL DO UPDATE SET \
+               max_attempts = EXCLUDED.max_attempts, \
+               every_secs = EXCLUDED.every_secs, \
+               run_at = LEAST(public._jwc_jobs.run_at, EXCLUDED.run_at)",
+            vec![
+                Box::new(Some(j.name.to_string())),
+                Box::new(Some(j.max_attempts.to_string())),
+                Box::new(Some(every.to_string())),
+            ],
+        )
+        .await
+        .map_err(|e| format!("{e}"))?;
+    }
+    Ok(())
+}
+
+/// `jobs::reset_or_delete`: a scheduled row is the schedule and is reset
+/// for its next tick; any other row is deleted. One statement, so the
+/// scheduled row is never briefly absent.
+async fn jwc_job_reset_or_delete(id: i64) -> Result<(), String> {
+    jwc_db_try_exec(
+        "WITH kept AS ( \
+           UPDATE public._jwc_jobs SET leased_until = NULL, attempts = 0, \
+             run_at = now() + make_interval(secs => every_secs) \
+           WHERE id = $1::text::bigint AND every_secs IS NOT NULL \
+           RETURNING id) \
+         DELETE FROM public._jwc_jobs \
+         WHERE id = $1::text::bigint AND every_secs IS NULL",
+        vec![Box::new(Some(id.to_string()))],
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| format!("{e}"))
 }
 
 /// The biggest payload one `dispatch` may write. Same precedence as the
@@ -156,13 +216,7 @@ async fn jwc_job_claim() -> Result<Option<JwcClaim>, String> {
 
 async fn jwc_job_succeed(id: i64) -> Result<(), String> {
     JWC_JOBS_PROCESSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    jwc_db_try_exec(
-        "DELETE FROM public._jwc_jobs WHERE id = $1::text::bigint",
-        vec![Box::new(Some(id.to_string()))],
-    )
-    .await
-    .map(|_| ())
-    .map_err(|e| format!("{e}"))
+    jwc_job_reset_or_delete(id).await
 }
 
 async fn jwc_job_fail(claim: &JwcClaim, backoff_secs: i64, error: &str) -> Result<(), String> {
@@ -180,13 +234,9 @@ async fn jwc_job_fail(claim: &JwcClaim, backoff_secs: i64, error: &str) -> Resul
         )
         .await
         .map_err(|e| format!("{e}"))?;
-        return jwc_db_try_exec(
-            "DELETE FROM public._jwc_jobs WHERE id = $1::text::bigint",
-            vec![Box::new(Some(claim.id.to_string()))],
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| format!("{e}"));
+        // A scheduled job's row stays and is rescheduled: the dead row is
+        // the record of this tick, and the next tick still runs.
+        return jwc_job_reset_or_delete(claim.id).await;
     }
     jwc_db_try_exec(
         "UPDATE public._jwc_jobs SET leased_until = NULL, \
@@ -317,6 +367,12 @@ async fn jwc_start_job_workers() {
     }
     if let Err(e) = jwc_jobs_ensure_tables().await {
         eprintln!("[jobs] could not create the queue tables: {e}");
+        return;
+    }
+    // The clock (jobs.md §1.4): one row per `every` job, before any
+    // worker can claim it.
+    if let Err(e) = jwc_jobs_schedule().await {
+        eprintln!("[jobs] could not schedule: {e}");
         return;
     }
     // `0` means none *in this process*: the queue is a Postgres table, so

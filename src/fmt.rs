@@ -600,6 +600,9 @@ impl Writer {
         if let Some(b) = &n.backoff {
             head.push_str(&format!(" backoff {}", quote(b)));
         }
+        if let Some(e) = &n.every {
+            head.push_str(&format!(" every {}", quote(e)));
+        }
         self.line(&format!("{head} {{"));
         self.depth += 1;
         self.block(&n.body);

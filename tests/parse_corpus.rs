@@ -130,7 +130,8 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
         (
             "job_decl",
             "job SendWelcome(account_id: bigint, email: text) retries 3 backoff \"30s\" {\n\
-             \x20   let who = @account_id;\n}",
+             \x20   let who = @account_id;\n}\n\
+             job CleanupExpired() retries 2 every \"10m\" { let n = 1; }",
         ),
         (
             "dispatch_stmt",
@@ -401,6 +402,39 @@ fn corpus() -> Vec<(&'static str, &'static str)> {
 ///
 /// These belong here rather than in the wiring corpus: they are parse
 /// diagnostics, and that corpus requires its cases to parse.
+/// jobs.md §1.4 — a scheduled job takes no parameters, and §1.2's
+/// durations are checked rather than silently read as the default.
+#[test]
+fn a_malformed_job_is_reported_at_parse_time() {
+    let cases: &[(&str, &str)] = &[
+        ("E0377", r#"job Report(day: text) every "24h" { let d = @day; }"#),
+        ("E0379", r#"job TooOften() every "500ms" { let n = 1; }"#),
+        ("E0379", r#"job Forever() every "721h" { let n = 1; }"#),
+        ("E0379", r#"job NotADuration() backoff "30" { let n = 1; }"#),
+    ];
+    for (code, src) in cases {
+        let parsed = jwc::parse_str("<job>", src);
+        let rendered = parsed.render_all();
+        assert!(
+            rendered.contains(code),
+            "expected {code} for `{src}`, got:\n{rendered}"
+        );
+        assert_eq!(
+            rendered.matches("error[").count(),
+            1,
+            "expected exactly one diagnostic for `{src}`:\n{rendered}"
+        );
+    }
+    for ok in [
+        r#"job Sweep() every "1s" { let n = 1; }"#,
+        r#"job Monthly() every "720h" { let n = 1; }"#,
+        r#"job Retry() backoff "1h" { let n = 1; }"#,
+    ] {
+        let rendered = jwc::parse_str("<job>", ok).render_all();
+        assert!(rendered.is_empty(), "`{ok}` must parse cleanly:\n{rendered}");
+    }
+}
+
 #[test]
 fn a_malformed_socket_is_reported_at_parse_time() {
     let cases: &[(&str, &str)] = &[
