@@ -3,6 +3,15 @@
 All notable changes to the **JWC Language** VS Code extension are documented
 here. The extension version tracks the JWC compiler version it ships against.
 
+## 1.0.0-rc.9 — The grammar paints every reserved word
+
+`every`, `const`, `static` and the three socket events (`on open`, `on
+message`, `on close`) were reserved words the grammar did not know, and
+`redirectExternal` was a response builder it did not paint. A test now
+links the grammar to names.md's reserved-word list, so the next word the
+language adds cannot ship without the editor knowing it. A `job-every`
+snippet joins `job`.
+
 ## 0.27.0 — The language server returns
 
 The server is a subcommand of the compiler now — `jwc lsp` — rather than a

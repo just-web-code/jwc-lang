@@ -253,7 +253,18 @@
         },
         {
           "name": "keyword.control.route.jwc",
-          "match": "\\b(routes|route|socket)\\b"
+          "match": "\\b(routes|route|socket|static)\\b"
+        },
+        {
+          "match": "\\b(on)\\s+(open|message|close)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.route.jwc"
+            },
+            "2": {
+              "name": "support.type.socket-event.jwc"
+            }
+          }
         }
       ]
     },
@@ -307,7 +318,7 @@
       "patterns": [
         {
           "name": "support.function.response.jwc",
-          "match": "\\b(json|text|html|created|accepted|noContent|notFound|badRequest|unauthorized|forbidden|conflict|internalError|statusCode|redirect|serve)\\s*(?=\\()"
+          "match": "\\b(json|text|html|created|accepted|noContent|notFound|badRequest|unauthorized|forbidden|conflict|internalError|statusCode|redirect|redirectExternal|serve)\\s*(?=\\()"
         },
         {
           "name": "support.function.builtin.jwc",
@@ -431,7 +442,7 @@
         },
         {
           "name": "keyword.declaration.jwc",
-          "match": "\\b(let|use|with|raises|provides|requires|was|using|retries|backoff)\\b"
+          "match": "\\b(let|const|use|with|raises|provides|requires|was|using|retries|backoff|every)\\b"
         },
         {
           "name": "keyword.operator.logical.jwc",

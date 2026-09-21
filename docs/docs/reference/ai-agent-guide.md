@@ -195,6 +195,7 @@ DDL, `jwc serve` runs it.
 | `routes "/prefix" use M { route … }` | the route table |
 | `errorHandler (e) { catch … }` | one per program, at the app boundary |
 | `job J(a: text) retries 5 backoff "30s" { … }` | background work |
+| `job J() every "10m" { … }` | background work on a clock — no parameters, never dispatched |
 | `server { … }` | limits |
 | `function main() { … }` | the entry point |
 | `test "name" { … }` | a test, rolled back |

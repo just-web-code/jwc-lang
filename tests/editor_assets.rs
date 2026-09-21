@@ -79,6 +79,43 @@ fn no_editor_asset_names_a_removed_keyword() {
     }
 }
 
+/// names.md §2.7 lists every word with grammatical meaning. A word the
+/// grammar does not paint is a word the editor calls an identifier —
+/// which is how `every` shipped in rc.8 with the extension not knowing
+/// it, and `const`, `static` and the three socket events before that.
+#[test]
+fn the_grammar_paints_every_word_the_spec_reserves() {
+    let names = std::fs::read_to_string(repo_root().join("docs/spec/v1/names.md"))
+        .expect("names.md");
+    let block = names
+        .split("The words with grammatical meaning are:")
+        .nth(1)
+        .and_then(|rest| rest.split("```").nth(1))
+        .expect("the reserved-word block in names.md");
+    let reserved: Vec<String> = block
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .collect();
+    assert!(reserved.len() > 80, "the block read short: {reserved:?}");
+
+    let grammar = read_json("vscode-extension/syntaxes/jwc.tmLanguage.json");
+    let mut patterns = Vec::new();
+    collect_matches(&grammar, &mut patterns);
+    let painted: Vec<String> = patterns.iter().flat_map(|p| words(p)).collect();
+
+    // Two-letter glue that reads as prose inside a query — `as`, `by`,
+    // `in`, `of`, `on`, `no`, `do` — is left to the query rule's context;
+    // painting it as a keyword everywhere would paint `on` in a comment.
+    let unpainted: Vec<&String> = reserved
+        .iter()
+        .filter(|w| w.len() > 2 && !painted.contains(w))
+        .collect();
+    assert!(
+        unpainted.is_empty(),
+        "names.md reserves {unpainted:?} and the grammar paints none of them"
+    );
+}
+
 #[test]
 fn the_grammar_highlights_the_comment_the_lexer_reads() {
     // A grammar painting a comment syntax the lexer does not read is worse

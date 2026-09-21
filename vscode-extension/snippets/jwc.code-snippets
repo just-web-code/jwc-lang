@@ -329,6 +329,15 @@
       "}"
     ]
   },
+  "Scheduled job": {
+    "prefix": "job-every",
+    "description": "A job on a clock — no parameters, never dispatched",
+    "body": [
+      "job ${1:CleanupExpired}() retries 2 every \"${2:10m}\" {",
+      "    $0",
+      "}"
+    ]
+  },
   "Main": {
     "prefix": "main",
     "description": "The entry point that starts the server",
