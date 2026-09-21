@@ -85,17 +85,14 @@ fn no_editor_asset_names_a_removed_keyword() {
 /// it, and `const`, `static` and the three socket events before that.
 #[test]
 fn the_grammar_paints_every_word_the_spec_reserves() {
-    let names = std::fs::read_to_string(repo_root().join("docs/spec/v1/names.md"))
-        .expect("names.md");
+    let names =
+        std::fs::read_to_string(repo_root().join("docs/spec/v1/names.md")).expect("names.md");
     let block = names
         .split("The words with grammatical meaning are:")
         .nth(1)
         .and_then(|rest| rest.split("```").nth(1))
         .expect("the reserved-word block in names.md");
-    let reserved: Vec<String> = block
-        .split_whitespace()
-        .map(|w| w.to_lowercase())
-        .collect();
+    let reserved: Vec<String> = block.split_whitespace().map(|w| w.to_lowercase()).collect();
     assert!(reserved.len() > 80, "the block read short: {reserved:?}");
 
     let grammar = read_json("vscode-extension/syntaxes/jwc.tmLanguage.json");
