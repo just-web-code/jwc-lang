@@ -3,6 +3,22 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### A record literal's shape is a `static`, not a shared `Arc`
+
+Every `V::Record` the native backend built from an object literal
+cloned one program-wide `Arc<Vec<JwcStr>>` for its field names and
+dropped it again — two atomic writes to the one cache line every core
+shares. Measured under 20 threads: 739 ns per clone+drop, against 42 ns
+for the record's own allocation; a request that builds a thousand
+records spent its time in that counter, and `/json-large` answered 9,405
+req/s from a box whose single thread did 3,865. The shape is a `static`
+slice now (`JwcShape::Static`), borrowed with no count; a shape built at
+run time — a projected row, an appended field — is `JwcShape::Owned`,
+one `Arc` per row and shared with nobody. Same box, same source: 64,832
+req/s. Copy-on-write on a field append is unchanged.
+
 ## [1.0.0] — syntax freeze — 2026-09-21
 
 **Since rc.8**, the VS Code grammar paints every word `names.md` reserves

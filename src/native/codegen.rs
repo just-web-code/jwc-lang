@@ -1699,10 +1699,13 @@ fn emit_shapes(out: &mut String, ctx: &Ctx) {
     let mut pairs: Vec<(&Vec<String>, &usize)> = ctx.shapes.iter().collect();
     pairs.sort_by_key(|(_, i)| **i);
     for (keys, idx) in pairs {
+        // A `static` slice, not a `OnceLock<Arc<…>>`: a literal's shape is
+        // known at compile time, and a record that borrows it carries no
+        // reference count to contend on (`JwcShape::Static` in the prelude).
         out.push_str(&format!(
-            "#[inline]\nfn jwc_shape_{idx}() -> &'static ::std::sync::Arc<Vec<JwcStr>> {{\n\
-             \x20   static S: ::std::sync::OnceLock<::std::sync::Arc<Vec<JwcStr>>> = ::std::sync::OnceLock::new();\n\
-             \x20   S.get_or_init(|| ::std::sync::Arc::new(vec![",
+            "#[inline]\nfn jwc_shape_{idx}() -> &'static [JwcStr] {{\n\
+             \x20   static S: [JwcStr; {}] = [",
+            keys.len()
         ));
         for (i, k) in keys.iter().enumerate() {
             if i > 0 {
@@ -1713,7 +1716,7 @@ fn emit_shapes(out: &mut String, ctx: &Ctx) {
                 rust_str_literal(k)
             ));
         }
-        out.push_str("]))\n}\n");
+        out.push_str("];\n    &S\n}\n");
     }
 }
 
@@ -2134,7 +2137,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
             }
             let id = ctx.shape_id(keys);
             format!(
-                "v_record(jwc_shape_{id}().clone(), vec![{}])",
+                "v_record(jwc_shape_{id}(), vec![{}])",
                 vals.join(", ")
             )
         }

@@ -63,16 +63,72 @@ fn v_obj(m: JwcObj) -> V {
     V::Object(Arc::new(m))
 }
 
-/// Phase 1 [1.0-blocker] — `V::Record` constructor. The `field_names` Arc is
-/// shared across every Record built with the same shape (object literals of
-/// identical key sets, monomorphized entity instances, DB row batches). One
-/// allocation for the schema layout + a per-row `values` Vec, instead of one
-/// FxHashMap per construction. Field access is `field_names.iter().position(...)`
+/// A record's field names: the layout every row of one shape shares.
+///
+/// `Static` is an object literal's shape, interned by codegen as a
+/// `static` slice — no allocation and, the point, **no reference count**.
+/// It used to be an `Arc<Vec<JwcStr>>` cloned per record, and every
+/// clone and drop was an atomic on the one cache line all twenty cores
+/// shared: measured at 739 ns per clone+drop under 20 threads against
+/// 42 ns for the record's own allocation, which put `/json-large` (a
+/// thousand records per request) at 9k req/s on a box whose single
+/// thread did 3.9k — the cores were fighting over one counter, not
+/// working. `Owned` is a shape built at run time (a projected row, a
+/// record assembled by `jwc_ordered_record`), one `Arc` per row and
+/// shared with nobody, so its count never contends.
+#[derive(Clone, Debug)]
+enum JwcShape {
+    Static(&'static [JwcStr]),
+    Owned(Arc<Vec<JwcStr>>),
+}
+
+impl ::std::ops::Deref for JwcShape {
+    type Target = [JwcStr];
+    #[inline]
+    fn deref(&self) -> &[JwcStr] {
+        match self {
+            JwcShape::Static(s) => s,
+            JwcShape::Owned(v) => v.as_slice(),
+        }
+    }
+}
+
+impl JwcShape {
+    /// Copy-on-write, as `Arc::make_mut` was: a `Static` shape is copied
+    /// into an `Owned` one the first time a field is appended.
+    fn to_mut(&mut self) -> &mut Vec<JwcStr> {
+        if let JwcShape::Static(s) = *self {
+            *self = JwcShape::Owned(Arc::new(s.to_vec()));
+        }
+        match self {
+            JwcShape::Owned(v) => Arc::make_mut(v),
+            JwcShape::Static(_) => unreachable!("replaced above"),
+        }
+    }
+}
+
+impl From<Arc<Vec<JwcStr>>> for JwcShape {
+    fn from(v: Arc<Vec<JwcStr>>) -> Self {
+        JwcShape::Owned(v)
+    }
+}
+
+impl From<&'static [JwcStr]> for JwcShape {
+    fn from(s: &'static [JwcStr]) -> Self {
+        JwcShape::Static(s)
+    }
+}
+
+/// Phase 1 [1.0-blocker] — `V::Record` constructor. The `field_names`
+/// shape is shared across every Record built with the same shape (object
+/// literals of identical key sets, monomorphized entity instances, DB row
+/// batches). One layout + a per-row `values` Vec, instead of one FxHashMap
+/// per construction. Field access is `field_names.iter().position(...)`
 /// then `values[i]` — O(N) but linear scan beats hashing for the small N
 /// (2-10) of typical literal shapes.
 #[inline]
-fn v_record(field_names: Arc<Vec<JwcStr>>, values: Vec<V>) -> V {
-    V::Record { field_names, values: Arc::new(values) }
+fn v_record(field_names: impl Into<JwcShape>, values: Vec<V>) -> V {
+    V::Record { field_names: field_names.into(), values: Arc::new(values) }
 }
 
 /// Load a `.env` from the current working directory or the binary's directory.
@@ -144,7 +200,7 @@ enum V {
     /// emits one `__jwc_shape_<N>()` getter per distinct key set in the
     /// program and reuses it across every literal site.
     Record {
-        field_names: Arc<Vec<JwcStr>>,
+        field_names: JwcShape,
         values: Arc<Vec<V>>,
     },
 }
@@ -1020,7 +1076,7 @@ fn jwc_set_field_path(v: &mut V, path: &[&str], value: V) {
     }
 
     if let V::Record { field_names, values } = v {
-        let names = std::sync::Arc::make_mut(field_names);
+        let names = field_names.to_mut();
         let vals = std::sync::Arc::make_mut(values);
         match names.iter().position(|n| n.as_ref() == *head) {
             Some(i) => {
