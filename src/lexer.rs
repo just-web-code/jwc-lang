@@ -102,15 +102,24 @@ impl<'a> Lexer<'a> {
             // `a - (-b)` and stays with the parser.
             if self.peek() == b'-' && self.peek_at(1) == b'-' && self.at_line_start() {
                 let start = self.i;
+                // `---` was the doc comment, and its replacement is `///`:
+                // a fix that turned only the first two dashes would leave
+                // `//-`, which is a line comment whose text starts with a
+                // dash — and the documentation it carried is lost.
+                let (marker, replacement) = if self.peek_at(2) == b'-' {
+                    ("---", "///")
+                } else {
+                    ("--", "//")
+                };
                 self.diags.push(
                     Diagnostic::error(
                         "E0901",
-                        Span::new(start, start + 2),
-                        "`--` does not start a comment",
+                        Span::new(start, start + marker.len()),
+                        format!("`{marker}` does not start a comment"),
                     )
                     .note("a line comment starts with `//`, a doc comment with `///`")
                     .clause("names.md §1.4")
-                    .fix("//"),
+                    .fix(replacement),
                 );
                 while self.i < self.src.len() && self.peek() != b'\n' {
                     self.i += 1;

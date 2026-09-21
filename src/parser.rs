@@ -283,7 +283,7 @@ impl Parser {
             self.diags.push(
                 Diagnostic::error("E0104", span, "this doc comment documents nothing")
                     .note(
-                        "a `---` comment attaches to the declaration below it; there is \
+                        "a `///` comment attaches to the declaration below it; there is \
                          none here, so the text would be dropped",
                     )
                     .clause("names.md §3"),

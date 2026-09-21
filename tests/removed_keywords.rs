@@ -307,3 +307,27 @@ fn a_write_without_a_binder_names_the_form_with_one() {
     );
     assert!(!jwc::parse_str("<bound>", &ok).has_errors());
 }
+
+/// `---` was the doc comment, and `jwc fix` turns it into `///` — not
+/// `//-`, which is a line comment whose text starts with a dash and
+/// whose documentation the declaration below no longer carries.
+#[test]
+fn a_triple_dash_doc_comment_is_fixed_to_a_triple_slash() {
+    let src = "database App : Postgres;\n--- documents f\n-- a remark\nfunction f() {\n    return 1;\n}\n";
+    let p = jwc::parse_str("<doc>", src);
+    let fixes: Vec<(u32, u32, &str)> = p
+        .diags
+        .iter()
+        .filter(|d| d.code == "E0901")
+        .map(|d| (d.span.start, d.span.end, d.fix.as_deref().unwrap_or("")))
+        .collect();
+    assert_eq!(fixes.len(), 2, "{}", p.render_all());
+    assert_eq!(
+        fixes[0].1 - fixes[0].0,
+        3,
+        "the span covers all three dashes"
+    );
+    assert_eq!(fixes[0].2, "///");
+    assert_eq!(fixes[1].1 - fixes[1].0, 2);
+    assert_eq!(fixes[1].2, "//");
+}

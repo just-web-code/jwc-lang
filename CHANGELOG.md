@@ -5,6 +5,14 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `jwc fix` turns `---` into `///`
+
+The 0.9 doc comment was `---`, and `E0901`'s fix replaced the first two
+dashes only, leaving `//-` — a line comment whose text starts with a
+dash, and a declaration that no longer carries its documentation.
+task-tracker's port had 141 of them. The lexer now reads the third dash
+as part of the marker and the fix writes `///`.
+
 ### `jwc fmt` keeps a comment after the last declaration
 
 A file that is a `namespace` and an explanation of why it holds nothing
