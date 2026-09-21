@@ -2136,10 +2136,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                 }
             }
             let id = ctx.shape_id(keys);
-            format!(
-                "v_record(jwc_shape_{id}(), vec![{}])",
-                vals.join(", ")
-            )
+            format!("v_record(jwc_shape_{id}(), vec![{}])", vals.join(", "))
         }
 
         ExprKind::Array(items) => {
