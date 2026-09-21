@@ -13,7 +13,7 @@ A project is described by `jwcproj.json` at its root:
   "name": "redis",
   "version": "0.1.0",
   "type": "pkg",
-  "jwc": "1.0.0-rc.8",
+  "jwc": "1.0.0",
   "dependencies": { "redis": "^0.1.0" }
 }
 ```
@@ -32,12 +32,13 @@ before the list: the manifest names no version, these diagnostics are what
 an older release's source looks like, and here is the field to add.
 
 A bare version means **exactly** that version, as it does for a
-dependency (§1.3): `rc.N` and `rc.N+1` carry whatever review turned up
-and promise nothing to each other, so "close enough" is not a useful
-default for the one field whose job is to catch the gap. A range says so
-out loud, and — by the ordinary semver rule — a range that names no
-pre-release never matches one, so `^1.0` does not admit `1.0.0-rc.8`
-while `^1.0.0-rc.1` does. `"*"` is any version.
+dependency (§1.3). A range says what it admits out loud — `^1.0.0` is
+every 1.x, which is what SEMVER.md promises will compile — and, by the
+ordinary semver rule, a range that names no pre-release never matches
+one, so `^1.0.0` does not admit `1.0.0-rc.8` while `^1.0.0-rc.1` does.
+During the candidate series a bare version was the useful default,
+because `rc.N` and `rc.N+1` promised nothing to each other. `"*"` is
+any version.
 
 `jwc new` records the release it scaffolded from.
 

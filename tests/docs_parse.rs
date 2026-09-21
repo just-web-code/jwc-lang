@@ -604,6 +604,8 @@ fn json_blocks(text: &str) -> Vec<(usize, String)> {
 /// - `as of 1.0.0-rc.1` — when something became true
 /// - `ROADMAP v1.0.0-rc.1` — a milestone's name, owned by that file
 /// - ``written for `1.0.0-rc.4` `` — the compiler's own wording for a *gap*
+/// - ``leftover `1.0.0-rc.8` `` / ``does not admit `1.0.0-rc.8` `` — the
+///   range rule, explained against the candidate it no longer matches
 ///
 /// A bare `` `rc.N` `` is the `rc.N → rc.N+1` sentence, so it may also name
 /// the release before this one.
@@ -653,8 +655,11 @@ fn every_documented_version_names_this_release() {
 
     // Without a floor, a scanner that stops matching makes this pass by
     // checking nothing.
+    // Twelve at 1.0.0: five manifests, three `JWC_VERSION`, four `jwc
+    // 1.0.0` lines. The candidate series had more, because the prose about
+    // `rc.N → rc.N+1` named the release too.
     assert!(
-        found >= 15,
+        found >= 10,
         "expected the documented version pins, saw {found} — the scanner or \
          the way the docs write a version changed"
     );
@@ -676,8 +681,30 @@ fn this_candidate() -> Option<u32> {
 fn release_tokens(line: &str) -> Vec<(usize, &str)> {
     runs(line)
         .into_iter()
-        .filter(|(_, t)| is_release(t.strip_prefix('v').unwrap_or(t)))
+        .filter(|(col, t)| {
+            let bare = t.strip_prefix('v').unwrap_or(t);
+            is_release(bare) || (is_plain_release(bare) && pins_the_compiler(line, *col, t))
+        })
         .collect()
+}
+
+/// `1.0.0` without a suffix. Plain semver is everywhere — a package's
+/// `"version"`, a Postgres major, `v0.25.0` in a sentence about history —
+/// so a plain token counts only where the words before it say it is the
+/// compiler's: `"jwc": "`, `JWC_VERSION=`, `jwc 1.0.0` as `--version`
+/// prints it.
+fn is_plain_release(t: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let parts: Vec<&str> = t.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| digits(p))
+}
+
+fn pins_the_compiler(line: &str, at: usize, _token: &str) -> bool {
+    let before = &line[..at];
+    before.ends_with("\"jwc\": \"")
+        || before.ends_with("JWC_VERSION=")
+        || before.ends_with("JWC_VERSION = '")
+        || before.ends_with("jwc ")
 }
 
 /// Maximal runs of the characters a version is written with. A sigil like
@@ -719,7 +746,11 @@ fn names_another_release_on_purpose(line: &str, at: usize) -> bool {
         return true;
     }
     let lead = before.trim_end_matches(['`', '\'', '"', '*', ' ']);
-    lead.ends_with("as of") || lead.ends_with("ROADMAP") || lead.ends_with("written for")
+    lead.ends_with("as of")
+        || lead.ends_with("ROADMAP")
+        || lead.ends_with("written for")
+        || lead.ends_with("leftover")
+        || lead.ends_with("does not admit")
 }
 
 /// `` `rc.6` `` — the bare form. Only inside backticks, so prose about an

@@ -62,9 +62,11 @@ schema to the next. `jwc serve` runs it.
 
 ## Status
 
-**Pre-1.0, and the language changed.** v0.25.0 replaced the 0.9.x grammar
-with the one specified in [`docs/spec/v1/`](docs/spec/v1/) and removed the
-old front-end. `entity`, `dbcontext`, `with`, `via`, `validate body`,
+**1.0.0 — the syntax is frozen.** A program that compiles under 1.0.0
+compiles under every 1.x; [`SEMVER.md`](SEMVER.md) is the contract, and
+says plainly which reviews happened before the freeze and which did not.
+v0.25.0 replaced the 0.9.x grammar with the one specified in
+[`docs/spec/v1/`](docs/spec/v1/) and removed the old front-end. `entity`, `dbcontext`, `with`, `via`, `validate body`,
 `new … from`, `patch`, `group`, `mount` and `dome` are gone; the compiler
 names their replacement rather than accepting them.
 
@@ -72,8 +74,7 @@ If you are running a 0.9.x binary, its documentation is archived under
 [`docs/archive-0.9/`](docs/archive-0.9/). It describes a language this
 compiler no longer compiles.
 
-Every release through **v0.29.0** is in. What works today, against a real
-Postgres:
+What works today, against a real Postgres:
 
 | | |
 |---|---|

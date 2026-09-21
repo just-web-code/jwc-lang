@@ -15,7 +15,7 @@ mkdir linkbin && cd linkbin
 ```
 
 ```json title="jwcproj.json"
-{ "name": "linkbin", "version": "0.1.0", "jwc": "1.0.0-rc.8", "entry": "src/app.jwc" }
+{ "name": "linkbin", "version": "0.1.0", "jwc": "1.0.0", "entry": "src/app.jwc" }
 ```
 
 ## The schema

@@ -1038,10 +1038,20 @@ qiladi), biri esa `bind` bilan yopildi.
 
 ---
 
-### v1.0.0 — **Syntax freeze**
+### v1.0.0 — **Syntax freeze** — chiqdi, 2026-09-21
 
 Sintaksis muzlaydi. Buzuvchi o'zgarish faqat 2.0 da. Kechiktirilgan
 feature'lar 1.1+ da, qo'shimcha sifatida.
+
+Nima bo'ldi: rc.1 → rc.8, 9 kunda, 5 ta real loyiha ko'chirildi va
+har biri o'z defektlarini topdi (`RC7-PLAN.md`, `RC8-PLAN.md`).
+rc.1 mezonlaridan bajarilmagani — tashqi audit (DBA, backend muhandis,
+xavfsizlik). Bu `SEMVER.md` da ochiq yozilgan: audit topilmasi 1.x da
+patch/minor, buzuvchisi 2.0.
+
+1.1 nomzodlari: `parallel { }` (RC7-PLAN §11), `T? → X?` propagatsiya
+(DEFERRED-1), `fmt` array-elementdagi komment, `no-compile` doc
+bloklarini parse qiladigan test.
 
 ---
 

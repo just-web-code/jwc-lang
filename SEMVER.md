@@ -1,42 +1,55 @@
 # JWC SemVer Policy
 
 JWC versions follow [Semantic Versioning 2.0.0](https://semver.org).
-Until v1.0 this document is the contract; at v1.0 it becomes binding.
+From 1.0.0 this document is binding.
 
-> **Stable surface as of 1.0.0-rc.1** — the v1 language, specified in
+> **Stable surface as of 1.0.0** — the v1 language, specified in
 > [`docs/spec/v1/`](docs/spec/v1/). The 0.9.x grammar and its front-end
 > were removed at v0.25.0; the surface described here is the one this
 > compiler implements, not the one 0.9.x binaries implement.
 
-## What `1.0.0-rc.8` means
+## What `1.0.0` means
 
-The syntax is **frozen for review, not yet by promise.** Everything in
-`docs/spec/v1/` is what 1.0.0 intends to be, and a change to it between
-here and 1.0.0 is a change this candidate exists to provoke.
+The syntax is **frozen by promise.** Everything in `docs/spec/v1/` is
+the language, and a program that compiles under 1.0.0 compiles under
+every 1.x.
 
-So, concretely, until 1.0.0 final:
+So, concretely:
 
-- A breaking change may still land, and ships with a `BREAKING:` line in
-  `CHANGELOG.md` like any other. After 1.0.0 it takes a major bump.
-- `rc.N → rc.N+1` carries whatever review turned up. There is no promise
-  that an `rc.7` program compiles under `rc.8`; there is a promise that
-  the reason is written down.
+- A breaking change — the list under *What counts as a breaking change*
+  — takes a major bump. It does not land on a minor or a patch with a
+  `BREAKING:` line any more; that was the candidate series.
+- A new keyword, builtin or `server { }` key lands on a minor. A new
+  keyword is chosen so that no program written against 1.0.0 stops
+  parsing — `every` was the last one added before the freeze, and it
+  followed that rule.
 - The deferrals in [`docs/spec/v1/DEFERRED.md`](docs/spec/v1/DEFERRED.md)
-  are decisions, not omissions waiting to be filled before 1.0.0. Each
-  states what 1.0 does instead.
+  are decisions, not omissions. Each states what 1.0 does instead; a
+  1.x may add what was deferred, as an addition.
 
-What is **not** provisional: the wire behaviour of a program that
+What was never provisional: the wire behaviour of a program that
 compiles. `jwc serve` and `jwc build` are held to byte-identical
 responses over the same source, and that is a property, not a goal — the
 suites assert it, and a divergence is a defect at any version number.
 
-### Why a candidate rather than 1.0.0
+### What the candidate series did, and what it did not
 
-Three reviews the release criteria name have not happened: a DBA reading
-the generated DDL, a backend engineer writing against the language cold,
-and a security pass. None of them is code, and none can be done by the
-people who wrote the thing. Publishing a candidate is how they get
-something to review.
+Eight candidates in nine days, each carrying what the last one's use
+turned up: five real applications moved through them, and the last
+three candidates were each shaped by a defect a port found the day the
+previous one shipped (`RC7-PLAN.md`, `RC8-PLAN.md`). The conformance
+corpus blocks in CI; the pilots compile without `raw()`; the docs
+describe this language and no other.
+
+Three reviews the roadmap named did **not** happen before 1.0.0: a DBA
+reading the generated DDL, a backend engineer writing against the
+language cold, and a security pass by someone who did not write it.
+That is stated here rather than implied away. What stands in for them is
+narrower: the DDL goldens and `migrate verify` for the first, five ports
+by the language's own authors for the second, `security.md` and the
+`security.yml` workflow for the third. A finding from any of those
+reviews after 1.0.0 is handled the way this document says — a fix on a
+patch, an addition on a minor, and a breaking change on 2.0.
 
 ---
 
@@ -134,9 +147,7 @@ for at least one full minor, and only then goes.
 ## Pre-release suffixes
 
 - `vX.Y.Z-rc.N` — release candidate; production-supported on a
-  best-effort basis. Per [`ROADMAP.md`](ROADMAP.md), 1.0.0-rc.8 is gated
-  on the conformance corpus blocking in CI, an external review, and a
-  migrated pilot application.
+  best-effort basis. The 1.0.0 series ran rc.1 through rc.8.
 - `vX.Y.Z-alpha.N` / `-beta.N` — feature previews; **no SemVer
   guarantees** between alpha/beta builds.
 

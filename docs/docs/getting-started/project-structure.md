@@ -16,7 +16,7 @@ tree is compiled together; there is no build order to declare.
   "name": "shop",
   "type": "app",
   "version": "0.1.0",
-  "jwc": "1.0.0-rc.8",
+  "jwc": "1.0.0",
   "entry": "src/app.jwc",
   "dependencies": {
     "redis": "^0.2.0"
@@ -32,19 +32,19 @@ tree is compiled together; there is no build order to declare.
   project that leaves it out is not asked.
 - `dependencies` keys are what `import <name>;` can resolve to.
 
-A bare version means exactly that version. While the 1.0 candidates are
-running that is usually what you want — `rc.N` and `rc.N+1` promise
-nothing to each other. A range works too, but by the ordinary semver rule
-a range that names no pre-release never matches one: `^1.0` does not
-admit `1.0.0-rc.8`, while `^1.0.0-rc.1` does.
+A bare version means exactly that version. From 1.0.0 a range is the
+ordinary choice — `^1.0.0` admits every 1.x, which is what the SemVer
+policy promises will compile. By the ordinary semver rule a range that
+names no pre-release never matches one, so `^1.0.0` does not admit a
+leftover `1.0.0-rc.8`; a project still on a candidate names it exactly.
 
 ```console
 $ jwc check
-Error: this is jwc 1.0.0-rc.8, and ./jwcproj.json says the project is
-written for `1.0.0-rc.4`.
+Error: this is jwc 1.0.0, and ./jwcproj.json says the project is
+written for `1.0.0-rc.8`.
 
 Install the version it asks for, or — once the source has been moved to
-this one — change `jwc` in that file to `1.0.0-rc.8`. Diagnostics from
+this one — change `jwc` in that file to `1.0.0`. Diagnostics from
 the wrong compiler read as though they were about the code.
 ```
 

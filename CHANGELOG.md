@@ -3,6 +3,16 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] — syntax freeze — 2026-09-21
+
+**Since rc.8**, the VS Code grammar paints every word `names.md` reserves
+— `every`, `const`, `static`, the three socket events and
+`redirectExternal` were missing — and a test now links the grammar to
+the reserved-word list.
+
+rc.8 shipped the same morning and is folded in below; the candidate
+series is rc.1 through rc.8, each entry kept as written.
+
 ## [1.0.0-rc.8] — freeze candidate — 2026-09-21
 
 What rc.7's first day turned up: five projects moved to it in one
