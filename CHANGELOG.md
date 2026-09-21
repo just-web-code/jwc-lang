@@ -5,6 +5,22 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `json()` serialised every response twice
+
+`jwc_b_json` built the body string, read it only under
+`debug_assertions`, and then called `jwc_respond`, which built it again.
+Every JSON response on the native backend paid its serialisation twice;
+for a 42 KB body that was 45 of 89 µs. The first pass is gone.
+
+### The JSON writer formats numbers in place and copies clean strings whole
+
+`n.to_string()` allocated a String per number on the way into the body;
+`write!` formats into the body directly. A string with nothing to escape
+— every key, most values — was pushed a char at a time; one byte scan
+and one `push_str` now. `"a" + "b"` was a `format!`; it is one sized
+allocation and two copies. `/json-large` after the three: 64,832 →
+85,608 req/s on the benchmark box.
+
 ### A record literal's shape is a `static`, not a shared `Arc`
 
 Every `V::Record` the native backend built from an object literal

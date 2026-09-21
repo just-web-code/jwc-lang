@@ -851,6 +851,13 @@ fn jwc_add(a: V, b: V) -> V {
         (V::Float(x), V::Float(y)) => V::Float(x + y),
         (V::Int(x), V::Float(y)) => V::Float(x as f64 + y),
         (V::Float(x), V::Int(y)) => V::Float(x + y as f64),
+        // Two strings: sized once and copied, not formatted.
+        (V::Str(x), V::Str(y)) => {
+            let mut s = String::with_capacity(x.len() + y.len());
+            s.push_str(&x);
+            s.push_str(&y);
+            v_str(s)
+        }
         (V::Str(x), b) => v_str(format!("{}{}", x, b)),
         (a, V::Str(y)) => v_str(format!("{}{}", a, y)),
         (a, b) => panic!("unsupported `+` between {:?} and {:?}", a, b),
@@ -1278,10 +1285,16 @@ fn jwc_write_json(v: &V, out: &mut String) {
     match v {
         V::Null => out.push_str("null"),
         V::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        V::Int(n) => out.push_str(&n.to_string()),
+        // Formatted straight into `out`: `n.to_string()` allocated a
+        // String per number, on the path that writes a thousand of them.
+        V::Int(n) => {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{n}");
+        }
         V::Float(n) => {
             if n.is_finite() {
-                out.push_str(&n.to_string());
+                use std::fmt::Write as _;
+                let _ = write!(out, "{n}");
             } else {
                 out.push_str("null");
             }
@@ -1336,6 +1349,14 @@ fn jwc_write_json_string(s: &str, out: &mut String) {
     // path this is the exact size and we skip all reallocations; when
     // escapes do appear we've still saved most of them.
     out.reserve(s.len() + 2);
+    // The common case — a key, a name, an id — has nothing to escape, and
+    // one byte scan plus one copy beats pushing it a char at a time.
+    if s.bytes().all(|b| b >= 0x20 && b != b'"' && b != b'\\') {
+        out.push('"');
+        out.push_str(s);
+        out.push('"');
+        return;
+    }
     out.push('"');
     for ch in s.chars() {
         match ch {
@@ -2621,13 +2642,16 @@ fn jwc_b_html(v: V) -> V {
 }
 
 fn jwc_b_json(v: V) -> V {
-    let body = jwc_to_json(&v);
     // Phase 4 [1.0-blocker] — `json(s)` on a `V::Str` validates the string
     // is well-formed JSON in DEBUG builds. Release skips the check (this is
     // the production hot path); callers wanting unconditional skip use
     // `json_unchecked()`. The dev-build interpreter does the unconditional
     // check; this `cfg(debug_assertions)` mirror catches AOT-only regressions
     // during development without ever costing on the production binary.
+    //
+    // No `jwc_to_json` here: `jwc_respond` serialises the value, and a
+    // first pass whose string nothing read was serialising every JSON
+    // response twice — 45 µs of the 89 a 42 KB body cost.
     #[cfg(debug_assertions)]
     if let V::Str(ref s) = v {
         if let Err(e) = serde_json::from_str::<serde_json::Value>(s.as_ref()) {
