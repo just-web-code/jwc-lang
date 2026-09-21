@@ -19,7 +19,7 @@ Most of it does not, and that is the useful fact:
 | `jwc build --release` | no | that the AOT backend can lower every construct |
 | `jwc test` | **yes** | `test` blocks, each in a rolled-back transaction |
 | `jwc migrate up` | **yes** | that the migrations apply |
-| `jwc migrate verify` | **yes** | that the constraint and index names match |
+| `jwc migrate verify` | **yes** | that the constraint and index names match, and the columns' defaults |
 
 The schema is in the source, so the queries are checked against it without
 connecting to anything. That is what puts the first five in a pre-commit
@@ -93,7 +93,8 @@ The order is the whole content of a JWC deploy:
    Postgres advisory lock, so concurrent starts do not double-apply.
 2. Start the new version.
 3. `jwc migrate verify` in the readiness gate — it names any constraint or
-   index the binary expects and the database does not have.
+   index the binary expects and the database does not have, and any
+   column whose default or nullability is not what the binary declares.
 
 Migrations are **forward-only in practice**: `jwc migrate down` exists and
 refuses anything whose `down` carries an `-- irreversible:` marker, which

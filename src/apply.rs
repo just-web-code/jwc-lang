@@ -388,7 +388,7 @@ pub async fn status(client: &Client, dir: &Path) -> Result<Status> {
 }
 
 /// Compare the names the binary expects against the ones Postgres holds
-/// (#28).
+/// (#28), and the two column facts a write depends on (RC8-PLAN.md §2).
 ///
 /// Names are generated, deterministically, from table + columns + canonical
 /// predicate (schema.md §8) — which is exactly what makes this checkable.
@@ -483,6 +483,55 @@ pub async fn verify(client: &Client, snap: &Snapshot) -> Result<Vec<String>> {
                 problems.push(format!(
                     "{}.{}: index `{}` is missing",
                     t.schema, t.name, ix.name
+                ));
+            }
+        }
+    }
+
+    // The columns themselves (RC8-PLAN.md §2). 1kb.uz's `link` table was
+    // built by 0.9.x without its defaults; every name above was present,
+    // `verify` said ok, and the first insert faulted on a null `hits`.
+    //
+    // Presence of a default and nullability — the two facts that make a
+    // write fail — and not the default's text: Postgres normalises the
+    // expression (`'x'` → `'x'::text`) and comparing spellings would
+    // report every adopted database. A live default the declaration
+    // lacks is not reported either: it cannot make a write fail.
+    let rows = client
+        .query(
+            "SELECT table_schema, table_name, column_name,
+                    column_default IS NOT NULL OR is_identity = 'YES',
+                    is_nullable = 'YES'
+               FROM information_schema.columns",
+            &[],
+        )
+        .await?;
+    let live_cols: Vec<(String, String, String, bool, bool)> = rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
+        .collect();
+    for t in &snap.tables {
+        for c in &t.columns {
+            let Some((_, _, _, has_default, nullable)) = live_cols
+                .iter()
+                .find(|(s, r, col, _, _)| s == &t.schema && r == &t.name && col == &c.name)
+            else {
+                // Absent columns are `check_live_schema`'s finding, and
+                // `baseline` refuses on them before it gets here.
+                continue;
+            };
+            if let Some(d) = &c.default {
+                if !has_default {
+                    problems.push(format!(
+                        "{}.{}: column `{}` has no default — declared `{d}`",
+                        t.schema, t.name, c.name
+                    ));
+                }
+            }
+            if *nullable && !c.nullable {
+                problems.push(format!(
+                    "{}.{}: column `{}` is nullable — declared `not null`",
+                    t.schema, t.name, c.name
                 ));
             }
         }

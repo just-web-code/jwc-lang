@@ -736,6 +736,86 @@ async fn adoption_reports_a_wrong_constraint_name_instead_of_refusing() {
     assert!(problems.is_empty(), "{problems:?}");
 }
 
+/// The columns themselves, not only the names on them (RC8-PLAN.md §2).
+///
+/// 1kb.uz's `link` table was built by 0.9.x and its `hits` column had no
+/// `DEFAULT 0`. Every constraint and index was present under its expected
+/// name, `verify` answered ok, and the first insert — which omits the
+/// column, trusting the declaration — faulted on a null. The two column
+/// facts a write depends on are checked now: that a declared default is
+/// there, and that a `not null` column is not nullable.
+#[tokio::test]
+async fn verify_names_a_missing_default_and_a_nullable_not_null_column() {
+    let (url, _guard) = db!("verify_names_a_missing_default_and_a_nullable_not_null_column");
+    let client = connect(&url).await;
+    reset(&client).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("migrations");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    const LINKS: &str = r#"
+namespace m;
+database App : Postgres;
+schema org of App;
+
+table Links of App.org as "link" {
+    code       varchar(8) primary key;
+    url        varchar(2048);
+    hits       int default 0;
+    created_at timestamptz default now();
+}
+"#;
+    let src = tempfile::tempdir().expect("tempdir");
+    let model = model_of(LINKS, src.path());
+    let snap = snapshot::of(&model);
+    write_migration(&dir, &snapshot::Snapshot::default(), &model, "initial");
+    apply::up(&client, &dir, None).await.expect("up");
+    let problems = apply::verify(&client, &snap).await.expect("verify");
+    assert!(problems.is_empty(), "a database `up` built is quiet: {problems:?}");
+
+    // What 0.9.x left behind: the defaults gone, and a column it never
+    // said `NOT NULL` about.
+    client
+        .batch_execute(
+            "ALTER TABLE org.link ALTER COLUMN hits DROP DEFAULT,
+                                  ALTER COLUMN created_at DROP DEFAULT,
+                                  ALTER COLUMN url DROP NOT NULL",
+        )
+        .await
+        .expect("undo the defaults");
+
+    let problems = apply::verify(&client, &snap).await.expect("verify");
+    assert_eq!(
+        problems,
+        vec![
+            "org.link: column `created_at` has no default — declared `now()`".to_string(),
+            "org.link: column `hits` has no default — declared `0`".to_string(),
+            "org.link: column `url` is nullable — declared `not null`".to_string(),
+        ]
+    );
+
+    // The message says what closes it, and it does.
+    client
+        .batch_execute(
+            "ALTER TABLE org.link ALTER COLUMN hits SET DEFAULT 0,
+                                  ALTER COLUMN created_at SET DEFAULT now(),
+                                  ALTER COLUMN url SET NOT NULL",
+        )
+        .await
+        .expect("restore");
+    let problems = apply::verify(&client, &snap).await.expect("verify");
+    assert!(problems.is_empty(), "{problems:?}");
+
+    // A live default the declaration lacks cannot make a write fail, and
+    // is not a finding.
+    client
+        .batch_execute("ALTER TABLE org.link ALTER COLUMN url SET DEFAULT ''")
+        .await
+        .expect("an extra default");
+    let problems = apply::verify(&client, &snap).await.expect("verify");
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
 /// A database that is not there is an error that says how to make one.
 ///
 /// Postgres answers `FATAL: database "X" does not exist` and stops. That

@@ -5,6 +5,19 @@ All notable changes to JWC are documented here. This project adheres to
 
 ## [Unreleased]
 
+### `migrate verify` reads the columns, not only the names on them
+
+The same adoption, one layer down: `baseline` had reported the missing
+index and the wrong constraint names, `verify` had answered ok, and the
+insert still faulted — the column checks were names only. `verify` now
+compares each declared column's default and nullability against
+`information_schema.columns`: a declared default that is not there, and
+a `not null` column that is nullable, are the two facts a write depends
+on, and both are named with the `ALTER COLUMN` that closes them. The
+default's text is not compared (Postgres normalises it), and a live
+default the declaration lacks is not a finding. `baseline`'s "differences
+remain" list says the same, since it is the same function.
+
 ### A `NOT NULL` violation names its column
 
 1kb.uz's `link` table was built by 0.9.x and its `hits` column had no

@@ -337,11 +337,12 @@ Error: this database does not hold the declared tables, so there is
   table public.link does not exist
 ```
 
-### 12.3 Constraint names are not part of that gate
+### 12.3 Constraint names and column defaults are not part of that gate
 
 They are precisely what differs when another tool built the schema:
 Postgres names a bare `PRIMARY KEY (…)` for itself (`link_pkey`), and v1
-names it `pk_link` (schema §8.1). Gating on them would refuse every
+names it `pk_link` (schema §8.1); a 0.9.x table carries no `DEFAULT` on
+a column the declaration gives one. Gating on them would refuse every
 database this command exists for.
 
 They are reported instead, as the work that remains:
@@ -349,11 +350,23 @@ They are reported instead, as the work that remains:
 ```
 2 migrations adopted; the database was not touched
 
-4 differences remain between the database and the declarations:
+7 differences remain between the database and the declarations:
   public.api_call: constraint `pk_api_call` is missing
+  public.api_call: column `ts` has no default — declared `now()`
   public.link: index `ix_link__hits` is missing
+  public.link: column `hits` has no default — declared `0`
   …
 ```
+
+The column lines are `verify`'s newest (RC8-PLAN.md §2): 1kb.uz was
+adopted with every name present and no defaults, `verify` said ok, and
+the first `insert` — which omits `hits`, trusting the declaration —
+faulted on the null. `verify` reads `information_schema.columns` for two
+facts per declared column, that a declared default **is there** and that
+a `not null` column **is not nullable**. The default's *text* is not
+compared: Postgres normalises it (`'x'` → `'x'::text`), and matching
+spellings would report every adopted database. A live default the
+declaration lacks is not reported either — it cannot make a write fail.
 
 ### 12.4 That remainder is drift, and `migrate new` cannot close it
 
@@ -363,7 +376,8 @@ out of step is the database, which the snapshot model does not read.
 
 So the reconciling SQL is hand-written and run once, by the operator, out
 of band: `ALTER TABLE … RENAME CONSTRAINT` for a name, `CREATE INDEX` for
-an index, with `migrate verify` as the checklist. It does **not** belong in
+an index, `ALTER COLUMN … SET DEFAULT` / `SET NOT NULL` for a column,
+with `migrate verify` as the checklist. It does **not** belong in
 `migrations/`: a database built by `migrate up` already has the right
 names, and the rename would fail there.
 
