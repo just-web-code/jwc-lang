@@ -34,6 +34,9 @@ pub struct Input<'a> {
     pub checked: &'a Checked,
     /// Per route, the declared errors it can raise (errors.md §3).
     pub raises: BTreeMap<String, Vec<String>>,
+    /// Middleware that verifies a bearer token, so a route behind one is
+    /// marked `security` and a client knows to send `Authorization`.
+    pub bearer_middleware: BTreeSet<String>,
 }
 
 /// The document, from artifacts a caller already has.
@@ -84,7 +87,33 @@ pub fn document_for(
         }
     }
 
+    // Which middleware authenticates. `jwt.*` is the signal: the only way
+    // a program verifies a token it did not mint itself is to call one of
+    // them, and the chain is already recorded per route. Without this the
+    // document says nothing about `Authorization`, so a generated client
+    // and the reference page both offer a call that cannot succeed.
+    let mut bearer_middleware: BTreeSet<String> = Default::default();
+    for file in &ws.files {
+        for d in &file.program.decls {
+            let crate::ast::Decl::Middleware(m) = d else {
+                continue;
+            };
+            let mut reached = crate::wiring::callees(&m.body);
+            // A middleware that delegates to `AuthService.verify(...)` is
+            // the same middleware; the call graph is what says so.
+            for name in reached.clone() {
+                if let Some(b) = bodies.get(&name) {
+                    reached.extend(crate::wiring::callees(b));
+                }
+            }
+            if reached.iter().any(|c| c.starts_with("jwt.")) {
+                bearer_middleware.insert(m.name.name.clone());
+            }
+        }
+    }
+
     document(&Input {
+        bearer_middleware,
         title: title.unwrap_or_else(|| {
             database
                 .map(str::to_string)
@@ -113,6 +142,8 @@ fn middleware_body<'a>(
 pub fn document(input: &Input) -> Value {
     let mut paths: Map<String, Value> = Map::new();
     let mut used: BTreeSet<String> = BTreeSet::new();
+    let mut secured = false;
+    let mut tags: BTreeSet<String> = BTreeSet::new();
 
     // OpenAPI 3.1 has no way to describe a WebSocket, and emitting the
     // upgrade as a `GET` that answers 200 would be a lie a client
@@ -125,6 +156,9 @@ pub fn document(input: &Input) -> Value {
         let key = format!("{} {}", r.method, r.pattern);
         let mut op: Map<String, Value> = Map::new();
         op.insert("operationId".into(), json!(operation_id(r)));
+        let tag = tag_of(&r.pattern);
+        tags.insert(tag.clone());
+        op.insert("tags".into(), json!([tag]));
 
         if !r.params.is_empty() {
             let params: Vec<Value> = r
@@ -189,6 +223,13 @@ pub fn document(input: &Input) -> Value {
                 "x-jwc-middleware".into(),
                 json!(r.chain.iter().collect::<Vec<_>>()),
             );
+            // The part of it OpenAPI *does* model. An empty `security` on
+            // the operation would mean "no auth" and override a document
+            // default, so it is written only where it is true.
+            if r.chain.iter().any(|m| input.bearer_middleware.contains(m)) {
+                secured = true;
+                op.insert("security".into(), json!([{ "bearerAuth": [] }]));
+            }
         }
 
         let entry = paths.entry(r.pattern.clone()).or_insert_with(|| json!({}));
@@ -221,6 +262,20 @@ pub fn document(input: &Input) -> Value {
     );
     doc.insert("paths".into(), Value::Object(paths));
 
+    // Declared, not left implicit. A reader of the document gets the order
+    // and a renderer gets one section per group; without this every
+    // operation lands under `default` and a service of any size is one
+    // flat list.
+    if !tags.is_empty() {
+        doc.insert(
+            "tags".into(),
+            json!(tags
+                .iter()
+                .map(|t| json!({ "name": t }))
+                .collect::<Vec<_>>()),
+        );
+    }
+
     // Not `paths`: OpenAPI cannot model them, and a reader who cannot see
     // them at all concludes the service has no sockets.
     let sockets: Vec<Value> = input
@@ -239,10 +294,54 @@ pub fn document(input: &Input) -> Value {
         doc.insert("x-jwc-sockets".into(), json!(sockets));
     }
 
+    let mut components: Map<String, Value> = Map::new();
     if !schemas.is_empty() {
-        doc.insert("components".into(), json!({ "schemas": schemas }));
+        components.insert("schemas".into(), Value::Object(schemas));
+    }
+    if secured {
+        components.insert(
+            "securitySchemes".into(),
+            json!({
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT",
+                }
+            }),
+        );
+    }
+    if !components.is_empty() {
+        doc.insert("components".into(), Value::Object(components));
     }
     Value::Object(doc)
+}
+
+/// The group an operation is listed under.
+///
+/// The first literal segment that is not a version marker: `/api/v1/admin/
+/// users` is `admin`, `/api/v1/me` is `me`. JWC has no `tag` keyword and
+/// the `routes` prefix is the only grouping an author actually writes, so
+/// this reads it back rather than inventing a second one.
+///
+/// `api` and `v1` are skipped because every route in a versioned service
+/// carries them, and a tag every operation shares groups nothing.
+fn tag_of(pattern: &str) -> String {
+    for seg in pattern.split('/') {
+        if seg.is_empty() || seg.starts_with('{') {
+            continue;
+        }
+        let lower = seg.to_lowercase();
+        let version = lower.starts_with('v')
+            && lower.len() > 1
+            && lower[1..].chars().all(|c| c.is_ascii_digit());
+        if lower == "api" || version {
+            continue;
+        }
+        return seg.to_string();
+    }
+    // `/{code}` and `/` have nothing to group by, and OpenAPI's own word
+    // for that is `default`.
+    "default".to_string()
 }
 
 /// `getApiV1OrgsOrgIdInvoices` — stable across runs, and unique because the

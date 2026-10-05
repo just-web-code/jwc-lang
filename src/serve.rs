@@ -191,7 +191,7 @@ pub fn load(ws: &Workspace) -> Result<Program> {
             None,
         );
         Arc::new((
-            crate::swagger::render(&doc),
+            crate::swagger::render(&doc, server.swagger.as_deref().unwrap_or("")),
             serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
         ))
     });
@@ -793,6 +793,38 @@ async fn operational(program: &Program, incoming: &Incoming) -> Option<Response>
                 body: page.0.clone(),
                 bytes: None,
             })
+        }
+
+        // Swagger UI itself, beside the page that loads it. Stored
+        // gzipped and sent that way, so this is a slice copy and no
+        // decompression. Immutable: the bytes are compiled in, so a
+        // given binary always answers the same ones.
+        p if program.server.swagger.is_some()
+            && crate::swagger::ASSETS.iter().any(|(name, _, _)| {
+                program
+                    .server
+                    .swagger
+                    .as_ref()
+                    .is_some_and(|s| p == format!("{s}/{name}"))
+            }) =>
+        {
+            let prefix = program.server.swagger.as_deref().unwrap_or("");
+            crate::swagger::ASSETS
+                .iter()
+                .find(|(name, _, _)| p == format!("{prefix}/{name}"))
+                .map(|(_, bytes, mime)| Response {
+                    status: 200,
+                    headers: vec![
+                        ("content-type".into(), (*mime).into()),
+                        ("content-encoding".into(), "gzip".into()),
+                        (
+                            "cache-control".into(),
+                            "public, max-age=31536000, immutable".into(),
+                        ),
+                    ],
+                    body: String::new(),
+                    bytes: Some(bytes.to_vec()),
+                })
         }
 
         // The document the page was rendered from, for a client

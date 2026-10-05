@@ -578,9 +578,10 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
                 &wired,
                 None,
             );
+            let html = crate::swagger::render(&doc, &path);
             (
                 path,
-                crate::swagger::render(&doc),
+                html,
                 serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
             )
         }

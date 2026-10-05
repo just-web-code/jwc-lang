@@ -3,6 +3,58 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### `server { swagger }` serves Swagger UI
+
+The page was one this module rendered itself: readable, and not the thing
+anyone means when they type `jwc swagger`. No tag sections, no Authorize
+dialog, no Try it out, no Models pane.
+
+It is now **swagger-ui-dist 5.33.1**, vendored under `vendor/swagger-ui/`
+and compiled into the binary. The argument against vendoring was 1.5 MB of
+JavaScript in every binary; gzipped at level 9 the three files it needs are
+**524 KB** against a 19.8 MB release binary, and the server sends them
+exactly as stored with `content-encoding: gzip`, so nothing is decompressed
+on the way out. That is a small price for not maintaining a second, worse
+renderer.
+
+The one argument that survived is the CDN. Every asset comes from the same
+origin as the API, so the reference is not blank on an air-gapped box and no
+third-party script enters a developer's browser session. `jwc swagger --out
+api.html` inlines all three plus the document into one 2.0 MB file that
+opens from a filesystem and requests nothing — verified in Chromium, zero
+outbound requests.
+
+The hrefs are absolute under `server { swagger }` rather than relative: the
+page answers at `/docs`, not `/docs/`, and `strict_slash` redirects the
+second to the first, so a relative `swagger-ui.css` resolved to the site
+root and the browser was handed JSON where it asked for a stylesheet.
+
+### The OpenAPI document groups its operations, and says which need a token
+
+Two things the document did not say, both of which the compiler already
+knew.
+
+**Tags.** Every operation landed under `default`, so a service of any size
+was one flat list. The tag is the first literal path segment that is not a
+version marker — `/api/v1/admin/users` is `admin`, `/api/v1/me` is `me` —
+because the `routes` prefix is the only grouping an author actually writes.
+e-school renders as seven sections: admin, announcements, auth, calendar,
+me, student, teacher.
+
+**Security.** `components.securitySchemes` was absent and no operation
+carried `security`, so a generated client, Postman and the reference page
+alike offered calls that could only answer 401, with nowhere to put a
+token. The chain already decided this and the document only said so in
+`x-jwc-middleware`, which nothing reads. A middleware that calls any `jwt.*`
+builtin, directly or through a function it calls, is bearer authentication;
+routes behind one now carry `security: [{bearerAuth: []}]`. On e-school that
+is 60 of 62 operations — the two without are `auth/login` and
+`auth/bootstrap`. An operation with an empty `security` means *no auth* and
+would override a document-level default, so it is written only where it is
+true.
+
 ## [1.0.1] — 2026-09-21
 
 A patch: three changes in the native backend's value and JSON layer, no

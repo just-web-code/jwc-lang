@@ -1533,8 +1533,17 @@ pub fn swagger(
 
     if let Some(p) = out {
         // One file, no assets beside it: `--out` exists so the page can be
-        // committed, mailed or published without a directory around it.
-        std::fs::write(&p, crate::swagger::render(&doc))?;
+        // committed, mailed or published without a directory around it,
+        // so the UI is inlined rather than linked.
+        std::fs::write(
+            &p,
+            crate::swagger::standalone(
+                &doc,
+                doc.pointer("/info/title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("API"),
+            )?,
+        )?;
         println!("{}", display_relative(&p));
         return Ok(());
     }
