@@ -598,6 +598,40 @@ fn match_route<'p>(
 
 /// routing.md §3.2 — parsed **before** any middleware, so malformed input
 /// is a 400 and never reaches Postgres as a 500.
+/// An IPv4 or IPv6 address, with an optional CIDR prefix — what Postgres
+/// `inet` holds (types.md §2.1).
+fn parse_inet(s: &str) -> bool {
+    let (addr, prefix) = match s.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (s, None),
+    };
+    let Ok(ip) = addr.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match prefix {
+        None => true,
+        Some(p) => p
+            .parse::<u8>()
+            .is_ok_and(|n| n <= if ip.is_ipv4() { 32 } else { 128 }),
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), which is the wire form of
+/// a `bytea` (types.md §2.1). The length and the alphabet are checkable
+/// without decoding, and decoding would build a value the route is not
+/// going to be handed.
+fn parse_base64(s: &str) -> bool {
+    if s.is_empty() || !s.len().is_multiple_of(4) {
+        return false;
+    }
+    let body = s.trim_end_matches('=');
+    if s.len() - body.len() > 2 {
+        return false;
+    }
+    body.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
 fn parse_params(
     route: &ResolvedRoute,
     binds: &[(String, String)],
@@ -626,6 +660,30 @@ fn parse_params(
                     None
                 }
             }
+            // The five that used to fall through to the catch-all below.
+            // routing.md §3.2 says a value that does not parse is a 400
+            // naming the parameter, and gives the reason: "malformed
+            // input reached Postgres and became a 500". For these it
+            // still did — `/lessons/2026-02-30` is shaped like a date and
+            // only a calendar rejects it, so Postgres was doing the parse
+            // on the far side of the query.
+            "date" => raw
+                .parse::<chrono::NaiveDate>()
+                .ok()
+                .map(|_| Value::Text(raw.clone())),
+            "timestamptz" => chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .map(|_| Value::Timestamptz(raw.clone())),
+            "time" => raw
+                .parse::<chrono::NaiveTime>()
+                .ok()
+                .map(|_| Value::Text(raw.clone())),
+            "inet" => parse_inet(raw).then(|| Value::Text(raw.clone())),
+            // Base64 of the length Postgres would accept, which is the
+            // only thing checkable without decoding into a value the
+            // route will not use.
+            "bytea" => parse_base64(raw).then(|| Value::Text(raw.clone())),
+            // `text` and `varchar(n)`, which is what this was always for.
             _ => Some(Value::Text(raw.clone())),
         };
         match v {

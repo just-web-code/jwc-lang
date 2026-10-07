@@ -25,6 +25,27 @@ fn fault(msg: impl Into<String>) -> Abort {
     Abort::Fault(anyhow!(msg.into()))
 }
 
+/// `date.format(t, fmt)` — strftime over a `timestamptz`, a `date` or a
+/// `time`, whichever the value turned out to be.
+///
+/// The format is checked at compile time (`E0306`), so a bad one cannot
+/// arrive here. A value that is not a timestamp can: the argument is
+/// typed, but `raw` and `jsonb` reach the runtime unchecked (types §5.1),
+/// and the honest answer there is the text itself rather than a panic.
+fn format_timestamp(value: &str, fmt: &str) -> String {
+    let v = value.trim();
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(v) {
+        return t.with_timezone(&chrono::Utc).format(fmt).to_string();
+    }
+    if let Ok(d) = v.parse::<chrono::NaiveDate>() {
+        return d.format(fmt).to_string();
+    }
+    if let Ok(t) = v.parse::<chrono::NaiveTime>() {
+        return t.format(fmt).to_string();
+    }
+    value.to_string()
+}
+
 fn text(v: &Value) -> String {
     match v {
         Value::Text(s) | Value::Numeric(s) | Value::Timestamptz(s) | Value::Interval(s) => {
@@ -723,8 +744,28 @@ impl<'a> Vm<'a> {
             "date.hours" => Value::Interval(format!("PT{}H", n(0))),
             "date.minutes" => Value::Interval(format!("PT{}M", n(0))),
             "date.seconds" => Value::Interval(format!("PT{}S", n(0))),
-            "date.parse" => Value::Timestamptz(s(0)),
-            "date.format" => Value::Text(s(0)),
+            // `timestamptz?` is the declared type and the `?` is the whole
+            // contract: a string that is not a timestamp comes back null,
+            // so the `or throw BadRequest(...)` the type system makes the
+            // author write actually fires. Returning the input instead
+            // sent it on to Postgres, which answered with a 500 where the
+            // program said 400.
+            //
+            // Normalised to the shape `date.now()` answers, so two
+            // timestamps in one program compare and serialise alike.
+            "date.parse" => match chrono::DateTime::parse_from_rfc3339(s(0).trim()) {
+                Ok(t) => Value::Timestamptz(
+                    t.with_timezone(&chrono::Utc)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+                ),
+                Err(_) => Value::Null,
+            },
+            // The second argument used to be ignored outright, so every
+            // call answered the RFC 3339 form and a report formatted for
+            // a human read as a machine timestamp — with no error to say
+            // so. `E0306` rejects a format the checker cannot parse, so
+            // reaching here means the items are good.
+            "date.format" => Value::Text(format_timestamp(&s(0), &s(1))),
 
             // ---- string (builtins.md §4)
             "string.of" => Value::Text(text(&arg(0))),

@@ -31,6 +31,53 @@ page answers at `/docs`, not `/docs/`, and `strict_slash` redirects the
 second to the first, so a relative `swagger-ui.css` resolved to the site
 root and the browser was handed JSON where it asked for a stylesheet.
 
+### `date.parse` answers null, `date.format` reads its format, and five path parameter types are read
+
+Three builtins and one binder that declared a contract the runtime did not
+keep — the same shape as `boolean(x)` and `enum(E, x)` in rc.7.
+
+**`date.parse(s)`** returned its own input wrapped as a timestamp, so the
+`timestamptz?` it declares was never null. That made the guard the type
+system demands dead code: `timestamptz?` will not go into a `NOT NULL`
+column, so the author writes `date.parse(@raw) or throw BadRequest(…)` —
+and `?t=kecha` was still a 500 from Postgres. It now parses RFC 3339 and
+answers null for anything else, normalised to the form `date.now()` gives.
+
+**`date.format(t, fmt)`** returned `t` and never read `fmt`, so
+`"%Y-%m-%d"` and `"butunlay-buzuq-%Q"` answered the same RFC 3339 string —
+the one silent wrong answer of the four, with no error anywhere. It is now
+strftime over a `timestamptz`, `date` or `time`, and the format is checked
+at compile time as `builtins.md` always said: a specifier strftime does not
+have is **`E0306`**, naming the one that is wrong, and so is a format the
+program assembles at runtime, since nothing can check that one.
+
+**`{x: date}`** and four other scalar types were accepted as a path
+parameter without being read. The binder had arms for `bigint`, `int`,
+`numeric`, `boolean` and `uuid`; `date`, `timestamptz`, `time`, `inet` and
+`bytea` fell to the `text` catch-all, so `/lessons/2026-02-30` reached
+Postgres and came back a 500 where routing.md §3.2 promises
+`400 bad_path_parameter`. That date is the one worth remembering — it is
+shaped right, and only a calendar rejects it.
+
+All three on both backends, with `tests/coercions.rs` covering them through
+the real pipeline and no database: none of this should ever have needed one.
+
+### `NOTICE`
+
+Swagger UI is Apache-2.0 and is now compiled into the binary, so the
+release has to carry its notice — §4 is about what accompanies the
+distribution, not what sits in the source tree. `NOTICE` names what is
+vendored, at which version, under which licence and where the text is, and
+the Rust dependencies by licence family with the `cargo deny list` command
+that produces the per-crate list for a given build. It is staged into every
+release tarball beside `README.md`.
+
+Two guards keep it from rotting: every directory under `vendor/` must be
+named in it, and every licence file it points at must exist.
+
+The project's own licence is still the open decision `Cargo.toml` records;
+`NOTICE` says so rather than implying otherwise.
+
 ### The OpenAPI document groups its operations, and says which need a token
 
 Two things the document did not say, both of which the compiler already
