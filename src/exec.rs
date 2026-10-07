@@ -1547,9 +1547,9 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
     // `date + interval` is `timestamptz` by types.md §12.1. `Interval` is
     // its own variant, so this cannot be mistaken for concatenation.
     if let (Value::Timestamptz(t) | Value::Text(t), Value::Interval(i)) = (a, b) {
-        return Some(Value::Timestamptz(jwc_shift_secs(
+        return Some(Value::Timestamptz(jwc_shift_micros(
             t,
-            jwc_parse_iso_duration(i)?,
+            jwc_duration_micros(i)?,
         )?));
     }
     numeric_op(BinOp::Add, a, b)
@@ -1565,16 +1565,18 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
 /// "the last day", which is the more common direction of the two.
 fn sub(a: &Value, b: &Value) -> Option<Value> {
     if let (Value::Timestamptz(t) | Value::Text(t), Value::Interval(i)) = (a, b) {
-        // Negated in seconds, not in the text: `jwc_parse_iso_duration`
+        // Negated in microseconds, not in the text: `jwc_duration_micros`
         // reads unsigned digits after a leading `P`, so neither `-PT24H`
         // nor `PT-24H` would come back.
-        return Some(Value::Timestamptz(jwc_shift_secs(
+        return Some(Value::Timestamptz(jwc_shift_micros(
             t,
-            -jwc_parse_iso_duration(i)?,
+            -jwc_duration_micros(i)?,
         )?));
     }
     if let (Value::Timestamptz(x), Value::Timestamptz(y)) = (a, b) {
-        return Some(Value::Interval(format!("PT{}S", jwc_ts_diff_secs(x, y)?)));
+        return Some(Value::Interval(jwc_render_duration(jwc_ts_diff_micros(
+            x, y,
+        )?)));
     }
     numeric_op(BinOp::Sub, a, b)
 }
@@ -2137,6 +2139,14 @@ fn last_tuple(keys: &str) -> Option<Vec<Option<String>>> {
 // arithmetic rather than two readings of types.md §12 (one of which was
 // blank).
 include!("interval_core.rs.in");
+
+/// The interval core's reader, for `exec_call`'s `date.total_*`. A wrapper
+/// rather than a visibility change in the core itself: that text is also
+/// pasted into the crate `jwc build` writes, and stays exactly as private
+/// there as it is here.
+pub(crate) fn duration_micros(s: &str) -> Option<i64> {
+    jwc_duration_micros(s)
+}
 
 /// The `opts` record of `cookie(name, value, opts)`, as attributes.
 ///

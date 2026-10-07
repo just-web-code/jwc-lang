@@ -87,6 +87,8 @@ function flag(raw: text?): boolean? {
 | `date.now()` | `timestamptz` — UTC, application clock (types §2.4) |
 | `date.today()` | `date` |
 | `date.days(n)` / `date.hours(n)` / `date.minutes(n)` / `date.seconds(n)` | `interval` |
+| `date.total_seconds(i)` | `numeric` — exact, with the microsecond fraction; null in, null out |
+| `date.total_millis(i)` / `date.total_micros(i)` | `bigint` — truncated toward zero; null in, null out |
 | `date.add(t, i)` | `timestamptz` — same as `t + i` |
 | `date.parse(s)` | `timestamptz?` |
 | `date.format(t, fmt)` | `text` — strftime; `fmt` is a literal, checked at compile time (`E0306`) |
@@ -98,6 +100,19 @@ is what the `?` is for, and what makes `date.parse(@raw) or throw
 BadRequest(…)` at the call site fire rather than pass the string on to
 Postgres. What it does parse it normalises to the form `date.now()`
 answers, so two timestamps in one program compare and serialise alike.
+
+`date.total_seconds/millis/micros(i)` read a number back out of an
+`interval`, which has no fields (`E0312`). They are what makes
+`date.now() - start` usable for anything but printing:
+
+```jwc
+let elapsed = date.now() - @start;
+console.writeln("took " + string.of(date.total_millis(@elapsed)) + " ms");
+```
+
+The difference of two timestamps keeps microseconds — `PT1.248S`, not
+`PT1S` — because both operands carry them on the wire (types §2.1). A
+whole number of seconds still renders `PT10S`.
 
 `date.format(t, fmt)` is strftime: `%Y-%m-%d %H:%M:%S`, not Postgres
 `to_char`'s `YYYY-MM-DD`. The format is a literal so the compiler can

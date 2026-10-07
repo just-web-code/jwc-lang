@@ -247,3 +247,40 @@ async fn every_typed_path_parameter_is_read_before_the_handler_runs() {
         assert!(r.body.contains("bad_path_parameter"), "{}", r.body);
     }
 }
+
+const INTERVALS: &str = "namespace c;\n\
+                         routes \"/i\" {\n\
+                         \x20   route GET \"\" {\n\
+                         \x20       let a = date.parse(\"2026-10-07T06:00:00Z\") ?? date.now();\n\
+                         \x20       let b = date.parse(\"2026-10-07T06:00:01.248Z\") ?? date.now();\n\
+                         \x20       let d = @b - @a;\n\
+                         \x20       return json({\n\
+                         \x20           iso: string.of(@d),\n\
+                         \x20           s: date.total_seconds(@d),\n\
+                         \x20           ms: date.total_millis(@d),\n\
+                         \x20           us: date.total_micros(@d),\n\
+                         \x20           back: string.of(@a + @d) == string.of(@b),\n\
+                         \x20           whole: string.of(date.seconds(10))\n\
+                         \x20       });\n\
+                         \x20   }\n\
+                         }\n";
+
+/// Both operands carry microseconds on the wire. The difference used to
+/// be truncated to whole seconds — 1.248 s came back `PT1S` — and nothing
+/// read a number out of an interval at all, so a program could not time
+/// itself, or divide a count by a duration, or compare one to a budget.
+#[tokio::test]
+async fn a_timestamp_difference_keeps_its_fraction_and_reads_back_as_a_number() {
+    let p = program(INTERVALS);
+    let r = get(p, "/i", &[]).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("\"iso\":\"PT1.248S\""), "{}", r.body);
+    assert!(r.body.contains("\"s\":\"1.248\""), "{}", r.body);
+    // `bigint` is a string on the wire (types.md §2.3).
+    assert!(r.body.contains("\"ms\":\"1248\""), "{}", r.body);
+    assert!(r.body.contains("\"us\":\"1248000\""), "{}", r.body);
+    // and the interval goes back on as the same shift
+    assert!(r.body.contains("\"back\":true"), "{}", r.body);
+    // a whole number of seconds renders the bytes it always did
+    assert!(r.body.contains("\"whole\":\"PT10S\""), "{}", r.body);
+}

@@ -57,7 +57,7 @@ signature. There are no others; a type name not in this table and not an
 | `timestamptz` | `timestamptz` | RFC 3339, UTC, `Z` suffix, microseconds | `2026-08-19T07:21:44.120031Z` |
 | `date` | `date` | `YYYY-MM-DD` | |
 | `time` | `time` | `HH:MM:SS[.ffffff]` | no zone; `timetz` is not offered |
-| `interval` | `interval` | ISO 8601 duration string | `P30D`, `PT10S` |
+| `interval` | `interval` | ISO 8601 duration string; a fraction only on seconds | `P30D`, `PT10S`, `PT1.248S` |
 | `uuid` | `uuid` | canonical lowercase hyphenated | |
 | `jsonb` | `jsonb` | the JSON value itself | §5.6 |
 | `inet` | `inet` | string | `192.0.2.1`, `2001:db8::1/32` |

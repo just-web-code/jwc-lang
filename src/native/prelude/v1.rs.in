@@ -200,6 +200,54 @@ fn jwc_b_v1_date_seconds(v: V) -> V {
     v_str(format!("PT{}S", jwc_to_int(&v).unwrap_or(0)))
 }
 
+/// The inverses of `date.seconds(n)` and friends. Null in, null out; an
+/// interval that is not one can only arrive untyped, and is a fault.
+fn jwc_v1_interval_micros(v: &V, name: &str) -> Result<Option<i64>, JwcThrown> {
+    if matches!(v, V::Null) {
+        return Ok(None);
+    }
+    let iso = jwc_v1_text(v);
+    jwc_duration_micros(&iso).map(Some).ok_or_else(|| {
+        JwcThrown::new(
+            "internal_error",
+            500,
+            v_str(format!("`{name}` was given `{iso}`, which is not an interval")),
+        )
+    })
+}
+
+fn jwc_b_v1_date_total_seconds(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_seconds")? {
+        None => V::Null,
+        Some(us) => {
+            let sign = if us < 0 { "-" } else { "" };
+            let m = us.unsigned_abs();
+            let (whole, frac) = (m / 1_000_000, m % 1_000_000);
+            // `numeric` is a string on the wire, exact, as here.
+            if frac == 0 {
+                v_str(format!("{sign}{whole}"))
+            } else {
+                let digits = format!("{frac:06}");
+                v_str(format!("{sign}{whole}.{}", digits.trim_end_matches('0')))
+            }
+        }
+    })
+}
+
+fn jwc_b_v1_date_total_millis(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_millis")? {
+        None => V::Null,
+        Some(us) => V::Int(us / 1_000),
+    })
+}
+
+fn jwc_b_v1_date_total_micros(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_micros")? {
+        None => V::Null,
+        Some(us) => V::Int(us),
+    })
+}
+
 /// `timestamptz?` — null is what an unparseable string answers, which is
 /// what makes the `or throw BadRequest(...)` at the call site fire.
 /// Normalised to the shape `date.now()` answers.

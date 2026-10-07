@@ -97,6 +97,9 @@ const RESULT_BUILTINS: &[&str] = &[
     "jwc_b_v1_http_json",
     "jwc_b_v1_http_status",
     "jwc_b_v1_json_parse",
+    "jwc_b_v1_date_total_seconds",
+    "jwc_b_v1_date_total_millis",
+    "jwc_b_v1_date_total_micros",
 ];
 
 /// The 1.0 built-in name on the left, the prelude function on the right.
@@ -189,6 +192,9 @@ fn prelude_fn(name: &str) -> Option<&'static str> {
         "date.seconds" => "jwc_b_v1_date_seconds",
         "date.parse" => "jwc_b_v1_date_parse",
         "date.format" => "jwc_b_v1_date_format",
+        "date.total_seconds" => "jwc_b_v1_date_total_seconds",
+        "date.total_millis" => "jwc_b_v1_date_total_millis",
+        "date.total_micros" => "jwc_b_v1_date_total_micros",
 
         // The rest of text — builtins.md §4.
         "string.of" => "jwc_b_v1_string_of",

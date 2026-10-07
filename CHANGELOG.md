@@ -62,6 +62,33 @@ shaped right, and only a calendar rejects it.
 All three on both backends, with `tests/coercions.rs` covering them through
 the real pipeline and no database: none of this should ever have needed one.
 
+### A timestamp difference keeps its fraction, and an interval reads back as a number
+
+`date.now() - start` was truncated to whole seconds although both operands
+carry microseconds on the wire — 1.248 s came back `PT1S` — and nothing read
+a number out of an `interval` at all: it has no fields (`E0312`) and there
+was no builtin. A program could print how long something took and do
+nothing else with it.
+
+The interval core now counts microseconds instead of seconds, and the
+difference renders `PT1.248S`. A whole number of seconds still renders
+`PT10S`, byte for byte, so a program that never subtracted two timestamps
+sees no change. A fraction is accepted on seconds only: `PT1.5H` is legal
+ISO 8601 but nothing in the language writes one, and the native backend
+recognises an interval by shape, so the shape stays exactly what the
+language produces.
+
+Three builtins read it back — the inverses of `date.seconds(n)`:
+
+| | |
+|---|---|
+| `date.total_seconds(i)` | `numeric`, exact, with the fraction |
+| `date.total_millis(i)` | `bigint`, truncated toward zero |
+| `date.total_micros(i)` | `bigint` |
+
+Null in, null out, as the rest of `date.*`. Both backends, verified to
+answer the same values.
+
 ### `NOTICE`
 
 Swagger UI is Apache-2.0 and is now compiled into the binary, so the

@@ -31,6 +31,20 @@ fn fault(msg: impl Into<String>) -> Abort {
 /// The format is checked at compile time (`E0306`), so a bad one cannot
 /// arrive here. A value that is not a timestamp can: the argument is
 /// typed, but `raw` and `jsonb` reach the runtime unchecked (types §5.1),
+/// `1_248_000` → `"1.248"`: exact, as a `numeric` is, with only the digits
+/// the value needs.
+fn micros_as_seconds(us: i64) -> String {
+    let sign = if us < 0 { "-" } else { "" };
+    let m = us.unsigned_abs();
+    let (whole, frac) = (m / 1_000_000, m % 1_000_000);
+    if frac == 0 {
+        format!("{sign}{whole}")
+    } else {
+        let digits = format!("{frac:06}");
+        format!("{sign}{whole}.{}", digits.trim_end_matches('0'))
+    }
+}
+
 /// and the honest answer there is the text itself rather than a panic.
 fn format_timestamp(value: &str, fmt: &str) -> String {
     let v = value.trim();
@@ -744,6 +758,28 @@ impl<'a> Vm<'a> {
             "date.hours" => Value::Interval(format!("PT{}H", n(0))),
             "date.minutes" => Value::Interval(format!("PT{}M", n(0))),
             "date.seconds" => Value::Interval(format!("PT{}S", n(0))),
+            // Null in, null out, the way the rest of `date.*` treats a
+            // missing value; an interval that is not one is a fault,
+            // because the checker typed the argument and something
+            // untyped (`raw`, `jsonb`) is the only way to arrive here.
+            "date.total_seconds" | "date.total_millis" | "date.total_micros" => {
+                let a = arg(0);
+                if a.is_null() {
+                    Value::Null
+                } else {
+                    let iso = text(&a);
+                    let Some(us) = crate::exec::duration_micros(&iso) else {
+                        return Err(fault(format!(
+                            "`{path}` was given `{iso}`, which is not an interval"
+                        )));
+                    };
+                    match path {
+                        "date.total_seconds" => Value::Numeric(micros_as_seconds(us)),
+                        "date.total_millis" => Value::Bigint(us / 1_000),
+                        _ => Value::Bigint(us),
+                    }
+                }
+            }
             // `timestamptz?` is the declared type and the `?` is the whole
             // contract: a string that is not a timestamp comes back null,
             // so the `or throw BadRequest(...)` the type system makes the

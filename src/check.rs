@@ -2927,6 +2927,24 @@ impl<'a> Checker<'a> {
                 arity(self, 1);
                 Ty::interval()
             }
+            // The inverses. `interval` has no fields (`E0312`) and nothing
+            // read a number back out of one, so a program that subtracted
+            // two timestamps could print the difference and do nothing
+            // else with it — not divide a count by it, not compare it to
+            // a budget, not report it in milliseconds.
+            //
+            // Seconds as `numeric` because it is exact and carries the
+            // whole microsecond fraction; the other two as `bigint`,
+            // truncated toward zero, which is what an elapsed-time
+            // counter is.
+            "date.total_seconds" => {
+                arity(self, 1);
+                Ty::numeric()
+            }
+            "date.total_millis" | "date.total_micros" => {
+                arity(self, 1);
+                Ty::bigint()
+            }
             "date.add" => {
                 arity(self, 2);
                 Ty::timestamptz()
