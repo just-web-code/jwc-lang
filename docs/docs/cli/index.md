@@ -88,6 +88,14 @@ having routes.
 dependency on the compiler. It needs a Rust toolchain, because that is
 what it hands the generated crate to.
 
+The dependency tree under the generated crate — tokio, hyper, serde and the
+rest — is compiled into one cargo target directory that every project
+shares, `~/.jwc/cache/target`. It is compiled once per toolchain, not once
+per project, so a new project's first build is mostly its own crate.
+`JWC_BUILD_CACHE` names another directory, or `off` for one under the
+project's `.jwc-build/`; `CARGO_TARGET_DIR` wins over both, as it does for
+cargo.
+
 It runs `jwc check` first and builds nothing if that fails — testing only
 that the source parses would let a program with type errors, one
 `jwc check` exits 1 on, compile to a release binary and run.

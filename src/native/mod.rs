@@ -387,15 +387,66 @@ strip = true
     )
 }
 
+/// Where cargo puts what it builds: one directory for every project.
+///
+/// It used to be `<project>/.jwc-build/target`, and that was most of the
+/// cost of a first build. The generated crate — the program and the whole
+/// prelude — compiles in about two seconds; the rest of a 27 s first debug
+/// build was tokio, hyper, serde and the dependency tree under them,
+/// compiled again for every project because each had a target directory of
+/// its own (V1.1-PLAN entry 6). Shared, they compile once per toolchain and
+/// feature set, and a new project's first build is its own crate.
+///
+/// `CARGO_TARGET_DIR` wins when it is set, as it does for cargo; a relative
+/// value resolves against the generated crate, as cargo resolves it.
+/// `JWC_BUILD_CACHE` names another directory, or `off` for the per-project
+/// one.
+fn target_dir(workspace: &Path) -> PathBuf {
+    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR").filter(|d| !d.is_empty()) {
+        return workspace.join(dir);
+    }
+    match std::env::var("JWC_BUILD_CACHE").ok().as_deref() {
+        Some("off" | "0") => workspace.join("target"),
+        Some(dir) if !dir.is_empty() => workspace.join(dir),
+        _ => match dirs_home() {
+            Some(home) => home.join(".jwc").join("cache").join("target"),
+            None => workspace.join("target"),
+        },
+    }
+}
+
+/// Cargo's output for this build, and the lock that keeps it this build's
+/// until it has been copied out.
+///
+/// Cargo serialises builds into one target directory itself, but releases
+/// its lock when it exits, and the binary is copied after that. Two
+/// projects with the same name would race for `<target>/<profile>/<name>`
+/// in between; holding this until the copy is done closes the gap.
+struct Built {
+    bin: PathBuf,
+    _lock: std::fs::File,
+}
+
 fn invoke_cargo(
     cargo: &Path,
     workspace: &Path,
     app_name: &str,
     release: bool,
     target: Option<&str>,
-) -> Result<PathBuf> {
+) -> Result<Built> {
+    let target_root = target_dir(workspace);
+    std::fs::create_dir_all(&target_root)
+        .with_context(|| format!("Failed to create {}", target_root.display()))?;
+    let lock_path = target_root.join(".jwc-build.lock");
+    let lock = std::fs::File::create(&lock_path)
+        .with_context(|| format!("Failed to open {}", lock_path.display()))?;
+    lock.lock()
+        .with_context(|| format!("Failed to lock {}", lock_path.display()))?;
+
     let mut cmd = Command::new(cargo);
-    cmd.arg("build").current_dir(workspace);
+    cmd.arg("build")
+        .current_dir(workspace)
+        .env("CARGO_TARGET_DIR", &target_root);
     if release {
         cmd.arg("--release");
         // Phase A5 of PERF_PLAN.md: build with `-C target-cpu=native` so
@@ -438,19 +489,11 @@ fn invoke_cargo(
     } else {
         app_name.to_string()
     };
-    // `CARGO_TARGET_DIR` (and its per-project `build.target-dir` twin) moves
-    // cargo's output tree somewhere else entirely. Assuming `<ws>/target`
-    // meant that anyone who exports it globally — a common setup, one shared
-    // target dir across every Rust project — got a full successful compile
-    // followed by "cargo reported success but binary not found", naming a
-    // path that legitimately does not exist. Read the same variable cargo
-    // read. Relative values resolve against the workspace, matching cargo.
-    let target_root = match std::env::var_os("CARGO_TARGET_DIR") {
-        Some(dir) if !dir.is_empty() => workspace.join(dir),
-        _ => workspace.join("target"),
-    };
-    // With --target, cargo emits to <target-dir>/<triple>/<profile>/ instead
-    // of <target-dir>/<profile>/.
+    // Read from the directory cargo was told to use, not assumed to be
+    // `<ws>/target`: that assumption once turned an exported
+    // `CARGO_TARGET_DIR` into a full successful compile followed by
+    // "binary not found". With --target, cargo emits to
+    // <target-dir>/<triple>/<profile>/ instead of <target-dir>/<profile>/.
     let mut bin = target_root;
     if let Some(t) = target {
         bin = bin.join(t);
@@ -462,7 +505,7 @@ fn invoke_cargo(
             bin.display()
         );
     }
-    Ok(bin)
+    Ok(Built { bin, _lock: lock })
 }
 
 fn copy_to_project_bin(
@@ -623,11 +666,13 @@ pub fn compile(
             redis: gen.needs_redis,
             ws: gen.needs_ws,
             regex: gen.needs_regex,
+            decimal: gen.needs_decimal,
         },
         &gen.assets,
     )?;
-    let bin = invoke_cargo(&cargo, &workspace, app_name, release, target)?;
-    let binary_path = copy_to_project_bin(root, &bin, release, target)?;
+    // The lock in `built` is held until the copy is done.
+    let built = invoke_cargo(&cargo, &workspace, app_name, release, target)?;
+    let binary_path = copy_to_project_bin(root, &built.bin, release, target)?;
 
     Ok(CompileReport {
         binary_path,
@@ -651,4 +696,3 @@ pub fn emit_rust_source(
     std::fs::write(&out_path, rust_src).with_context(|| format!("write {}", out_path.display()))?;
     Ok(out_path)
 }
-            decimal: gen.needs_decimal,

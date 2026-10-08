@@ -106,6 +106,7 @@ does not have, or miss one it does.
 | `JWC_OTLP_ENDPOINT` | — | OTLP collector URL; empty disables tracing export. |
 | `JWC_SERVICE_NAME` | `jwc` | `service.name` on exported traces. |
 | `JWC_REGISTRY` | — | Package registry base URL; empty uses the default registry. |
+| `JWC_BUILD_CACHE` | `~/.jwc/cache/target` | `jwc build` only: the cargo target directory every project shares, so the dependency tree compiles once rather than once per project. A path, or `off` for one under the project's `.jwc-build/`. `CARGO_TARGET_DIR` wins when set. |
 | `JWC_REQUEST_BODY` | `null` | Native builds only: what `request.body()` answers outside a request. |
 | `JWC_JOB_MAX_PAYLOAD` | `server { job_max_payload }, else 65536` | Biggest `dispatch` payload, in bytes of JSON. `0` disables the bound. Native builds only — `jwc serve` reads `server { job_max_payload }`. |
 | `JWC_JOB_QUEUE_LIMIT` | `server { job_queue_limit }, else 10000` | How many jobs may be waiting before `dispatch` is refused. `0` disables the bound. Native builds only — `jwc serve` reads `server { job_queue_limit }`. |
