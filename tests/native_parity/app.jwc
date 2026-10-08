@@ -1,0 +1,80 @@
+namespace app;
+
+// Run under `jwc run` and as a `jwc build` binary; CI diffs the two outputs.
+// Every line is a case where the backends once disagreed, or could.
+
+const RATE = 1.5 + 2.25;
+
+function twice(n: bigint): bigint {
+    return n * 2;
+}
+
+function main() {
+    // Integer locals the native backend lowers to `i64`.
+    let a = 7;
+    let b = -3;
+    a = a * b + 10 / 3 - 7 % 4;
+    console.writeln("a = " + string.of(a));
+
+    // A lowered local read where a value is wanted: an argument, a
+    // comparison against a call.
+    let n = 21;
+    console.writeln("twice = " + string.of(twice(n)));
+    console.writeln("cmp = " + string.of(n > twice(5)));
+
+    // Written from a call, so it stays a value.
+    let m: bigint = 1;
+    m = twice(m);
+    console.writeln("m = " + string.of(m));
+
+    // Read inside a nested block.
+    let r = 1;
+    if (r == 1) {
+        let r2 = r + 1;
+        console.writeln("r2 = " + string.of(r2));
+    }
+
+    // A loop with a break and two lowered locals.
+    let total = 0;
+    let k = 0;
+    while (k < 100) {
+        if (k == 50) {
+            break;
+        }
+        total = total + k;
+        k = k + 1;
+    }
+    console.writeln("total = " + string.of(total) + ", k = " + string.of(k));
+
+    // Integer division truncates toward zero.
+    let q = -7 / 2;
+    let rem = -7 % 2;
+    console.writeln("q = " + string.of(q) + ", rem = " + string.of(rem));
+
+    // The largest value is reachable. One past it is refused on both
+    // backends — the CI step that runs this checks that separately.
+    let big = 9223372036854775806;
+    big = big + 1;
+    console.writeln("max = " + string.of(big));
+
+    // Optional locals stay values.
+    let o: int? = null;
+    o = 5;
+    console.writeln("o = " + string.of(o));
+
+    // `numeric` is exact on both backends (types.md §2.2). The native one
+    // used to glue `1.5 + 2.25` into `1.52.25` and panic on `2.5 * 2`; the
+    // interpreter went through an `f64`.
+    console.writeln("sum = " + string.of(1.5 + 2.25));
+    console.writeln("product = " + string.of(2.5 * 2));
+    console.writeln("money = " + string.of(12345678901234.56 + 0.01));
+    console.writeln("tenth = " + string.of(0.1 + 0.2));
+    console.writeln("third = " + string.of(1.0 / 3));
+    let price: numeric = 19.99;
+    let qty = 3;
+    console.writeln("line = " + string.of(price * qty));
+    let x = -2.5;
+    console.writeln("neg = " + string.of(-x));
+    console.writeln("ordered = " + string.of(price > 19.9));
+    console.writeln("const = " + string.of(RATE));
+}

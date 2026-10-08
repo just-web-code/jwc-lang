@@ -363,3 +363,61 @@ fn every_snippet_is_a_program_the_compiler_accepts() {
         failed.join("\n\n")
     );
 }
+
+/// Everything vendored into the binary is named in `NOTICE`.
+///
+/// Swagger UI is Apache-2.0 and the binary carries it, so §4's "include a
+/// copy" is about what accompanies the *distribution* — `NOTICE` is what
+/// the release tarball carries beside the binary. A second vendored thing
+/// added without a row here would ship the same way and nobody would
+/// notice, which is what this is for.
+#[test]
+fn every_vendored_directory_is_named_in_notice() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let notice = std::fs::read_to_string(root.join("NOTICE")).expect("NOTICE");
+
+    let vendor = root.join("vendor");
+    let Ok(entries) = std::fs::read_dir(&vendor) else {
+        panic!("vendor/ is missing; if nothing is vendored any more, this test goes too");
+    };
+
+    let mut seen = 0usize;
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        seen += 1;
+        assert!(
+            notice.contains(&format!("vendor/{name}/")),
+            "`vendor/{name}` is compiled into the binary and NOTICE does not mention it"
+        );
+    }
+    assert!(
+        seen > 0,
+        "no vendored directories found — did vendor/ move?"
+    );
+}
+
+/// The licence text itself, not only a pointer to it. A `NOTICE` row whose
+/// file is gone is worse than no row: it reads as satisfied.
+#[test]
+fn every_licence_notice_points_at_a_file_that_exists() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let notice = std::fs::read_to_string(root.join("NOTICE")).expect("NOTICE");
+
+    let mut checked = 0usize;
+    for line in notice.lines() {
+        for raw in line.split('`') {
+            if !raw.starts_with("vendor/") || raw.ends_with('/') {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                root.join(raw).exists(),
+                "NOTICE points at `{raw}`, which is not in the tree"
+            );
+        }
+    }
+    assert!(checked > 0, "NOTICE names no licence file: {notice}");
+}

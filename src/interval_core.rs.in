@@ -18,10 +18,17 @@
 // timestamptz differently — one has a variant for it, the other has a
 // string and a shape.
 
-/// Seconds in an ISO 8601 duration, or `None` when it is not one.
+/// Microseconds in an ISO 8601 duration, or `None` when it is not one.
 ///
-/// `P30D`, `PT10S`, `PT2H`, `PT5M`, `P1W`. Only the units `date.*`
-/// produces, plus weeks.
+/// `P30D`, `PT10S`, `PT2H`, `PT5M`, `P1W`, and `PT1.248S` — the units
+/// `date.*` produces, plus weeks, plus a fraction on the seconds.
+///
+/// **Microseconds, not seconds.** This used to answer seconds, so
+/// `timestamptz - timestamptz` threw away everything under one: both
+/// operands carry microseconds on the wire and the difference of
+/// 1.248 s came back `PT1S`. A program could not time itself. i64
+/// microseconds reach ±292,000 years, so nothing a timestamp can hold is
+/// out of range.
 ///
 /// **Every digit must be consumed by a unit.** `"P30"` is not a duration
 /// — it is a `P`, and then a number that never said what of. Letting it
@@ -29,7 +36,12 @@
 /// difference between "this is not an interval, concatenate the strings"
 /// and "this is an interval of no time at all", and the second one
 /// quietly drops the operand.
-fn jwc_parse_iso_duration(s: &str) -> Option<i64> {
+///
+/// A fraction is accepted on `S` and nowhere else. `PT1.5H` is legal ISO
+/// 8601, but nothing in the language writes one, and accepting it here
+/// would widen what the native backend reads as "an interval" past what
+/// the language can produce.
+fn jwc_duration_micros(s: &str) -> Option<i64> {
     let s = s.strip_prefix('P')?;
     let (date, time) = match s.split_once('T') {
         Some((d, t)) => (d, t),
@@ -43,21 +55,27 @@ fn jwc_parse_iso_duration(s: &str) -> Option<i64> {
     let mut any = false;
     for (part, is_time) in [(date, false), (time, true)] {
         for c in part.chars() {
-            if c.is_ascii_digit() {
+            if c.is_ascii_digit() || (c == '.' && is_time && !num.contains('.')) {
                 num.push(c);
                 continue;
             }
-            let n: i64 = num.parse().ok()?;
-            num.clear();
-            let mult = match (c, is_time) {
-                ('D', false) => 86_400,
-                ('W', false) => 604_800,
-                ('H', true) => 3_600,
-                ('M', true) => 60,
-                ('S', true) => 1,
-                _ => return None,
+            let micros = match (c, is_time) {
+                ('S', true) => jwc_seconds_to_micros(&num)?,
+                (unit, _) => {
+                    // Only seconds may carry a fraction.
+                    let n: i64 = num.parse().ok()?;
+                    let mult: i64 = match (unit, is_time) {
+                        ('D', false) => 86_400_000_000,
+                        ('W', false) => 604_800_000_000,
+                        ('H', true) => 3_600_000_000,
+                        ('M', true) => 60_000_000,
+                        _ => return None,
+                    };
+                    n.checked_mul(mult)?
+                }
             };
-            total = total.checked_add(n.checked_mul(mult)?)?;
+            num.clear();
+            total = total.checked_add(micros)?;
             any = true;
         }
         // Digits with no unit after them: not a duration.
@@ -66,6 +84,43 @@ fn jwc_parse_iso_duration(s: &str) -> Option<i64> {
         }
     }
     any.then_some(total)
+}
+
+/// `"1.248"` → 1 248 000. Up to six fractional digits, which is what a
+/// `timestamptz` carries; a seventh would be a precision nothing produced.
+fn jwc_seconds_to_micros(s: &str) -> Option<i64> {
+    let (whole, frac) = match s.split_once('.') {
+        Some((w, f)) => (w, f),
+        None => (s, ""),
+    };
+    if whole.is_empty() || frac.len() > 6 || (s.contains('.') && frac.is_empty()) {
+        return None;
+    }
+    let w: i64 = whole.parse().ok()?;
+    let f: i64 = if frac.is_empty() {
+        0
+    } else {
+        format!("{frac:0<6}").parse().ok()?
+    };
+    w.checked_mul(1_000_000)?.checked_add(f)
+}
+
+/// The ISO 8601 form of a duration, in seconds.
+///
+/// A whole number of seconds renders exactly as it always has — `PT10S`,
+/// not `PT10.000000S` — so every program that never subtracted two
+/// timestamps answers the same bytes it did. A fraction keeps only the
+/// digits it needs: `PT1.248S`.
+fn jwc_render_duration(micros: i64) -> String {
+    let sign = if micros < 0 { "-" } else { "" };
+    let m = micros.unsigned_abs();
+    let (whole, frac) = (m / 1_000_000, m % 1_000_000);
+    if frac == 0 {
+        format!("PT{sign}{whole}S")
+    } else {
+        let digits = format!("{frac:06}");
+        format!("PT{sign}{whole}.{}S", digits.trim_end_matches('0'))
+    }
 }
 
 /// A `timestamptz` is RFC 3339 and a `date` is `YYYY-MM-DD`; both reach
@@ -90,22 +145,20 @@ fn jwc_as_timestamp(ts: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     ))
 }
 
-/// A timestamp moved by `secs`, rendered the way `date.now()` renders one
-/// so a shifted timestamp and a fresh one are the same shape.
-fn jwc_shift_secs(ts: &str, secs: i64) -> Option<String> {
+/// A timestamp moved by `micros`, rendered the way `date.now()` renders
+/// one so a shifted timestamp and a fresh one are the same shape.
+fn jwc_shift_micros(ts: &str, micros: i64) -> Option<String> {
     let base = jwc_as_timestamp(ts)?;
-    let out = base.checked_add_signed(chrono::Duration::try_seconds(secs)?)?;
+    let out = base.checked_add_signed(chrono::Duration::microseconds(micros))?;
     Some(out.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
 }
 
-/// `timestamptz - timestamptz`, in seconds.
-///
-/// Seconds because that is the resolution `jwc_parse_iso_duration` reads
-/// back, and the only one the pair can agree on.
-fn jwc_ts_diff_secs(later: &str, earlier: &str) -> Option<i64> {
+/// `timestamptz - timestamptz`, in microseconds — the resolution both
+/// operands carry and `jwc_duration_micros` reads back.
+fn jwc_ts_diff_micros(later: &str, earlier: &str) -> Option<i64> {
     let l = jwc_as_timestamp(later)?;
     let r = jwc_as_timestamp(earlier)?;
-    Some(l.signed_duration_since(r).num_seconds())
+    l.signed_duration_since(r).num_microseconds()
 }
 
 #[cfg(test)]
@@ -114,13 +167,14 @@ mod interval_core_tests {
 
     #[test]
     fn every_unit_date_can_produce_reads_back() {
-        assert_eq!(jwc_parse_iso_duration("P30D"), Some(2_592_000));
-        assert_eq!(jwc_parse_iso_duration("P1W"), Some(604_800));
-        assert_eq!(jwc_parse_iso_duration("PT24H"), Some(86_400));
-        assert_eq!(jwc_parse_iso_duration("PT5M"), Some(300));
-        assert_eq!(jwc_parse_iso_duration("PT10S"), Some(10));
-        assert_eq!(jwc_parse_iso_duration("P1DT2H30M"), Some(95_400));
-        assert_eq!(jwc_parse_iso_duration("PT0S"), Some(0));
+        const S: i64 = 1_000_000;
+        assert_eq!(jwc_duration_micros("P30D"), Some(2_592_000 * S));
+        assert_eq!(jwc_duration_micros("P1W"), Some(604_800 * S));
+        assert_eq!(jwc_duration_micros("PT24H"), Some(86_400 * S));
+        assert_eq!(jwc_duration_micros("PT5M"), Some(300 * S));
+        assert_eq!(jwc_duration_micros("PT10S"), Some(10 * S));
+        assert_eq!(jwc_duration_micros("P1DT2H30M"), Some(95_400 * S));
+        assert_eq!(jwc_duration_micros("PT0S"), Some(0));
     }
 
     /// The native backend decides "is this pair a timestamp and an
@@ -131,9 +185,9 @@ mod interval_core_tests {
     fn a_string_that_is_not_a_duration_is_refused() {
         for s in [
             "", "P", "PT", "P30", "PT24", "hello", "30D", "PT24X", "P1M", "PT1D", "-PT24H",
-            "PT-24H", "P 1 D",
+            "PT-24H", "P 1 D", "PT1.5H", "P1.5D", "PT1.S", "PT.5S", "PT1.2.3S", "PT1.1234567S",
         ] {
-            assert_eq!(jwc_parse_iso_duration(s), None, "{s} is not a duration");
+            assert_eq!(jwc_duration_micros(s), None, "{s} is not a duration");
         }
     }
 
@@ -143,24 +197,51 @@ mod interval_core_tests {
     /// rather than guessed at.
     #[test]
     fn a_month_is_not_a_number_of_seconds() {
-        assert_eq!(jwc_parse_iso_duration("P1M"), None);
-        assert_eq!(jwc_parse_iso_duration("PT1M"), Some(60));
+        assert_eq!(jwc_duration_micros("P1M"), None);
+        assert_eq!(jwc_duration_micros("PT1M"), Some(60_000_000));
     }
 
     #[test]
     fn a_shift_round_trips_and_keeps_the_shape_date_now_uses() {
         let t = "2026-08-28T15:44:14.922709Z";
-        let back = jwc_shift_secs(t, -86_400).expect("shift");
+        let day = 86_400_000_000;
+        let back = jwc_shift_micros(t, -day).expect("shift");
         assert_eq!(back, "2026-08-27T15:44:14.922709Z");
-        assert_eq!(jwc_shift_secs(&back, 86_400).as_deref(), Some(t));
-        assert_eq!(jwc_ts_diff_secs(t, &back), Some(86_400));
-        assert_eq!(jwc_ts_diff_secs(&back, t), Some(-86_400));
+        assert_eq!(jwc_shift_micros(&back, day).as_deref(), Some(t));
+        assert_eq!(jwc_ts_diff_micros(t, &back), Some(day));
+        assert_eq!(jwc_ts_diff_micros(&back, t), Some(-day));
     }
 
     #[test]
     fn something_that_is_not_a_timestamp_shifts_to_nothing() {
-        assert_eq!(jwc_shift_secs("PT24H", 1), None);
-        assert_eq!(jwc_shift_secs("hello", 1), None);
-        assert_eq!(jwc_ts_diff_secs("hello", "2026-08-28T15:44:14Z"), None);
+        assert_eq!(jwc_shift_micros("PT24H", 1), None);
+        assert_eq!(jwc_shift_micros("hello", 1), None);
+        assert_eq!(jwc_ts_diff_micros("hello", "2026-08-28T15:44:14Z"), None);
+    }
+
+    /// What the change is for. Both operands carry microseconds on the
+    /// wire; the difference used to be truncated to whole seconds, so
+    /// 1.248 s came back `PT1S` and a program could not time itself.
+    #[test]
+    fn a_difference_keeps_what_is_under_a_second() {
+        let a = "2026-10-07T06:00:00.000000Z";
+        let b = "2026-10-07T06:00:01.248000Z";
+        let d = jwc_ts_diff_micros(b, a).expect("diff");
+        assert_eq!(d, 1_248_000);
+        assert_eq!(jwc_render_duration(d), "PT1.248S");
+        assert_eq!(jwc_duration_micros("PT1.248S"), Some(1_248_000));
+        // and it goes back on as the same shift
+        assert_eq!(jwc_shift_micros(a, d).as_deref(), Some(b));
+    }
+
+    /// A whole number of seconds renders the bytes it always did, so a
+    /// program that never subtracted two timestamps sees no change.
+    #[test]
+    fn whole_seconds_render_exactly_as_before() {
+        assert_eq!(jwc_render_duration(10_000_000), "PT10S");
+        assert_eq!(jwc_render_duration(0), "PT0S");
+        assert_eq!(jwc_render_duration(-5_000_000), "PT-5S");
+        assert_eq!(jwc_render_duration(500), "PT0.0005S");
+        assert_eq!(jwc_render_duration(-1_250_000), "PT-1.25S");
     }
 }

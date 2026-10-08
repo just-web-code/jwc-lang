@@ -815,11 +815,100 @@ fn jwc_panic_payload_to_string(p: Box<dyn std::any::Any + Send>) -> String {
 
 // --- arithmetic & coercion ---------------------------------------------------
 
-// `jwc_parse_iso_duration`, `jwc_shift_secs` and `jwc_ts_diff_secs` are
+// `jwc_duration_micros`, `jwc_shift_micros` and `jwc_ts_diff_micros` are
 // the same text `src/exec.rs` includes; `codegen` pastes them into this
 // crate as `PRELUDE_INTERVAL_CORE`. Not an `include!` here — this file is
 // pasted, so a path relative to it would not exist in the crate that gets
 // written. See `jwc_ts_shift` for why the pair is matched on shape.
+
+// --- checked integer arithmetic ---------------------------------------------
+//
+// What an `i64` local's arithmetic lowers to, and what the boxed
+// `jwc_add`/`jwc_sub`/… integer arms call too, so the two paths cannot
+// disagree.
+//
+// Checked because the interpreter's is (`exec.rs::numeric_op` uses
+// `checked_*` and faults on `None`). The native arms used to be plain
+// `x + y`, which in a release build *wraps*: `i64::MAX + 1` came back as
+// `i64::MIN` with nothing raised, where `jwc serve` answered a 500. A
+// panic here is what `jwc_div` already did for division by zero; the
+// route wrapper's `catch_unwind` turns it into the same 500 envelope.
+
+#[cold]
+#[inline(never)]
+fn jwc_int_refused(op: &str, a: i64, b: i64) -> ! {
+    if (op == "/" || op == "%") && b == 0 {
+        panic!("division by zero: {a} {op} {b}");
+    }
+    panic!("`{op}` overflowed: {a} {op} {b}");
+}
+
+#[inline(always)]
+fn jwc_i_add(a: i64, b: i64) -> i64 {
+    a.checked_add(b).unwrap_or_else(|| jwc_int_refused("+", a, b))
+}
+
+#[inline(always)]
+fn jwc_i_sub(a: i64, b: i64) -> i64 {
+    a.checked_sub(b).unwrap_or_else(|| jwc_int_refused("-", a, b))
+}
+
+#[inline(always)]
+fn jwc_i_mul(a: i64, b: i64) -> i64 {
+    a.checked_mul(b).unwrap_or_else(|| jwc_int_refused("*", a, b))
+}
+
+/// Truncates toward zero, as `checked_div` and the interpreter both do.
+/// `i64::MIN / -1` is the one division that overflows rather than divides
+/// by zero, and is refused for the same reason.
+#[inline(always)]
+fn jwc_i_div(a: i64, b: i64) -> i64 {
+    a.checked_div(b).unwrap_or_else(|| jwc_int_refused("/", a, b))
+}
+
+#[inline(always)]
+fn jwc_i_rem(a: i64, b: i64) -> i64 {
+    a.checked_rem(b).unwrap_or_else(|| jwc_int_refused("%", a, b))
+}
+
+#[inline(always)]
+fn jwc_i_neg(a: i64) -> i64 {
+    a.checked_neg().unwrap_or_else(|| jwc_int_refused("-", 0, a))
+}
+
+/// An integer operand as the checker typed it. A `bigint` read from a
+/// column is a `V::Str` — its wire form, because JavaScript loses digits
+/// above 2^53 — so `row.id + 1` met `jwc_add`'s string arm and came back
+/// `"51"`. Codegen calls these where the checker marked the operator as
+/// integer arithmetic, so the string is read as the number it is.
+fn jwc_int_of(v: &V) -> Option<i64> {
+    match v {
+        V::Int(n) => Some(*n),
+        V::Str(s) => s.trim().parse().ok(),
+        V::Float(x) if x.fract() == 0.0 => Some(*x as i64),
+        _ => None,
+    }
+}
+
+fn jwc_int_op(op: char, a: V, b: V) -> V {
+    let (Some(x), Some(y)) = (jwc_int_of(&a), jwc_int_of(&b)) else {
+        panic!("`{}` is not defined here: {:?} {} {:?}", op, a, op, b);
+    };
+    V::Int(match op {
+        '+' => jwc_i_add(x, y),
+        '-' => jwc_i_sub(x, y),
+        '*' => jwc_i_mul(x, y),
+        '/' => jwc_i_div(x, y),
+        _ => jwc_i_rem(x, y),
+    })
+}
+
+fn jwc_int_neg(v: V) -> V {
+    match jwc_int_of(&v) {
+        Some(n) => V::Int(jwc_i_neg(n)),
+        None => panic!("unsupported unary `-` on {:?}", v),
+    }
+}
 
 /// `timestamptz ± interval`, when that is what the pair is.
 ///
@@ -827,7 +916,7 @@ fn jwc_panic_payload_to_string(p: Box<dyn std::any::Any + Send>) -> String {
 /// matches on them. `V` has neither: a timestamp and an interval are both
 /// `V::Str`, so the pair is recognised by shape — the left must parse as
 /// RFC 3339 and the right must be a whole ISO 8601 duration. Both are
-/// exact readings, not guesses: `jwc_parse_iso_duration` rejects anything
+/// exact readings, not guesses: `jwc_duration_micros` rejects anything
 /// with a digit no unit claimed, so `ts + "P30"` is still two strings.
 ///
 /// `None` means "not that pair", and the caller falls through to the
@@ -836,18 +925,23 @@ fn jwc_ts_shift(a: &V, b: &V, sign: i64) -> Option<V> {
     let (V::Str(t), V::Str(i)) = (a, b) else {
         return None;
     };
-    let secs = jwc_parse_iso_duration(i)?;
-    Some(v_str(jwc_shift_secs(t, sign * secs)?))
+    let micros = jwc_duration_micros(i)?;
+    Some(v_str(jwc_shift_micros(t, sign * micros)?))
 }
 
 fn jwc_add(a: V, b: V) -> V {
+    // Two integers first: it is by far the commonest pair, and it used to
+    // pay for the timestamp test below on every `i + 1`.
+    if let (V::Int(x), V::Int(y)) = (&a, &b) {
+        return V::Int(jwc_i_add(*x, *y));
+    }
     // Before the string arm, which would otherwise glue `PT720H` onto the
     // end of a timestamp and call it an answer.
     if let Some(v) = jwc_ts_shift(&a, &b, 1) {
         return v;
     }
     match (a, b) {
-        (V::Int(x), V::Int(y)) => V::Int(x + y),
+        (V::Int(x), V::Int(y)) => V::Int(jwc_i_add(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x + y),
         (V::Int(x), V::Float(y)) => V::Float(x as f64 + y),
         (V::Float(x), V::Int(y)) => V::Float(x + y as f64),
@@ -865,18 +959,21 @@ fn jwc_add(a: V, b: V) -> V {
 }
 
 fn jwc_sub(a: V, b: V) -> V {
+    if let (V::Int(x), V::Int(y)) = (&a, &b) {
+        return V::Int(jwc_i_sub(*x, *y));
+    }
     if let Some(v) = jwc_ts_shift(&a, &b, -1) {
         return v;
     }
     // `timestamptz - timestamptz -> interval`. Second, so a pair that is
     // a timestamp and a duration is read as the shift it is.
     if let (V::Str(x), V::Str(y)) = (&a, &b) {
-        if let Some(secs) = jwc_ts_diff_secs(x, y) {
-            return v_str(format!("PT{}S", secs));
+        if let Some(micros) = jwc_ts_diff_micros(x, y) {
+            return v_str(jwc_render_duration(micros));
         }
     }
     match (a, b) {
-        (V::Int(x), V::Int(y)) => V::Int(x - y),
+        (V::Int(x), V::Int(y)) => V::Int(jwc_i_sub(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x - y),
         (V::Int(x), V::Float(y)) => V::Float(x as f64 - y),
         (V::Float(x), V::Int(y)) => V::Float(x - y as f64),
@@ -886,7 +983,7 @@ fn jwc_sub(a: V, b: V) -> V {
 
 fn jwc_mul(a: V, b: V) -> V {
     match (a, b) {
-        (V::Int(x), V::Int(y)) => V::Int(x * y),
+        (V::Int(x), V::Int(y)) => V::Int(jwc_i_mul(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x * y),
         (V::Int(x), V::Float(y)) => V::Float(x as f64 * y),
         (V::Float(x), V::Int(y)) => V::Float(x * y as f64),
@@ -896,10 +993,7 @@ fn jwc_mul(a: V, b: V) -> V {
 
 fn jwc_div(a: V, b: V) -> V {
     match (a, b) {
-        (V::Int(x), V::Int(y)) => {
-            if y == 0 { panic!("division by zero"); }
-            V::Int(x / y)
-        }
+        (V::Int(x), V::Int(y)) => V::Int(jwc_i_div(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x / y),
         (V::Int(x), V::Float(y)) => V::Float(x as f64 / y),
         (V::Float(x), V::Int(y)) => V::Float(x / y as f64),
@@ -909,10 +1003,7 @@ fn jwc_div(a: V, b: V) -> V {
 
 fn jwc_mod(a: V, b: V) -> V {
     match (a, b) {
-        (V::Int(x), V::Int(y)) => {
-            if y == 0 { panic!("mod by zero"); }
-            V::Int(x % y)
-        }
+        (V::Int(x), V::Int(y)) => V::Int(jwc_i_rem(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x % y),
         (a, b) => panic!("unsupported `%` between {:?} and {:?}", a, b),
     }
@@ -920,7 +1011,7 @@ fn jwc_mod(a: V, b: V) -> V {
 
 fn jwc_neg(v: V) -> V {
     match v {
-        V::Int(n) => V::Int(-n),
+        V::Int(n) => V::Int(jwc_i_neg(n)),
         V::Float(n) => V::Float(-n),
         v => panic!("unsupported unary `-` on {:?}", v),
     }
@@ -2115,6 +2206,38 @@ fn jwc_json_string(s: &str) -> String {
 /// `serve.rs::parse_params` — routing.md §3.2. A segment that does not parse
 /// as its declared type is a 400 before any middleware runs, and the body
 /// names the parameter and the type it failed.
+/// An IPv4 or IPv6 address with an optional CIDR prefix — what Postgres
+/// `inet` holds.
+fn jwc_parse_inet(s: &str) -> bool {
+    let (addr, prefix) = match s.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (s, None),
+    };
+    let Ok(ip) = addr.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match prefix {
+        None => true,
+        Some(p) => p
+            .parse::<u8>()
+            .is_ok_and(|n| n <= if ip.is_ipv4() { 32 } else { 128 }),
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), the wire form of a
+/// `bytea`. Checked without decoding: the route is not handed the bytes.
+fn jwc_parse_base64(s: &str) -> bool {
+    if s.is_empty() || !s.len().is_multiple_of(4) {
+        return false;
+    }
+    let body = s.trim_end_matches('=');
+    if s.len() - body.len() > 2 {
+        return false;
+    }
+    body.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
 fn jwc_parse_path_params(
     raw: &BTreeMap<String, String>,
     types: &[(String, String)],
@@ -2145,6 +2268,23 @@ fn jwc_parse_path_params(
                     None
                 }
             }
+            // The five that used to fall through to the catch-all below,
+            // so `/lessons/2026-02-30` reached Postgres and came back a
+            // 500 where routing.md §3.2 promises `bad_path_parameter`.
+            "date" => text
+                .parse::<chrono::NaiveDate>()
+                .ok()
+                .map(|_| v_str(text.clone())),
+            "timestamptz" => chrono::DateTime::parse_from_rfc3339(text)
+                .ok()
+                .map(|_| v_str(text.clone())),
+            "time" => text
+                .parse::<chrono::NaiveTime>()
+                .ok()
+                .map(|_| v_str(text.clone())),
+            "inet" => jwc_parse_inet(text).then(|| v_str(text.clone())),
+            "bytea" => jwc_parse_base64(text).then(|| v_str(text.clone())),
+            // `text` and `varchar(n)`, which is what this was always for.
             _ => Some(v_str(text.clone())),
         };
         match v {

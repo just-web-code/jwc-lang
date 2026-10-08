@@ -87,11 +87,38 @@ function flag(raw: text?): boolean? {
 | `date.now()` | `timestamptz` — UTC, application clock (types §2.4) |
 | `date.today()` | `date` |
 | `date.days(n)` / `date.hours(n)` / `date.minutes(n)` / `date.seconds(n)` | `interval` |
+| `date.total_seconds(i)` | `numeric` — exact, with the microsecond fraction; null in, null out |
+| `date.total_millis(i)` / `date.total_micros(i)` | `bigint` — truncated toward zero; null in, null out |
 | `date.add(t, i)` | `timestamptz` — same as `t + i` |
 | `date.parse(s)` | `timestamptz?` |
-| `date.format(t, fmt)` | `text` — `fmt` is a literal, checked at compile time |
+| `date.format(t, fmt)` | `text` — strftime; `fmt` is a literal, checked at compile time (`E0306`) |
 
 Bare `now()` is `E0302`.
+
+`date.parse(s)` returns **null** for a string that is not RFC 3339 — that
+is what the `?` is for, and what makes `date.parse(@raw) or throw
+BadRequest(…)` at the call site fire rather than pass the string on to
+Postgres. What it does parse it normalises to the form `date.now()`
+answers, so two timestamps in one program compare and serialise alike.
+
+`date.total_seconds/millis/micros(i)` read a number back out of an
+`interval`, which has no fields (`E0312`). They are what makes
+`date.now() - start` usable for anything but printing:
+
+```jwc
+let elapsed = date.now() - @start;
+console.writeln("took " + string.of(date.total_millis(@elapsed)) + " ms");
+```
+
+The difference of two timestamps keeps microseconds — `PT1.248S`, not
+`PT1S` — because both operands carry them on the wire (types §2.1). A
+whole number of seconds still renders `PT10S`.
+
+`date.format(t, fmt)` is strftime: `%Y-%m-%d %H:%M:%S`, not Postgres
+`to_char`'s `YYYY-MM-DD`. The format is a literal so the compiler can
+read it; a specifier strftime does not have is `E0306` at the call site,
+naming the one that is wrong. It formats a `timestamptz`, a `date` or a
+`time`.
 
 ---
 
@@ -549,5 +576,6 @@ section about keeping the documentation honest that was itself wrong.
 |---|---|
 | `E0205` | wrong number of arguments to a builtin |
 | `E0206` | a field name in `json.get`-style access is not a string literal |
+| `E0306` | `date.format`'s format is not a literal, or carries a specifier strftime does not have (§3) |
 | `E0230` | `file.*` / `directory.*` outside a plain `function` (§7e.1) |
 | `W1301` | `debug.dump` in the program (tooling §3.4) |

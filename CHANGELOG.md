@@ -3,6 +3,244 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### `server { swagger }` serves Swagger UI
+
+The page was one this module rendered itself: readable, and not the thing
+anyone means when they type `jwc swagger`. No tag sections, no Authorize
+dialog, no Try it out, no Models pane.
+
+It is now **swagger-ui-dist 5.33.1**, vendored under `vendor/swagger-ui/`
+and compiled into the binary. The argument against vendoring was 1.5 MB of
+JavaScript in every binary; gzipped at level 9 the three files it needs are
+**524 KB** against a 19.8 MB release binary, and the server sends them
+exactly as stored with `content-encoding: gzip`, so nothing is decompressed
+on the way out. That is a small price for not maintaining a second, worse
+renderer.
+
+The one argument that survived is the CDN. Every asset comes from the same
+origin as the API, so the reference is not blank on an air-gapped box and no
+third-party script enters a developer's browser session. `jwc swagger --out
+api.html` inlines all three plus the document into one 2.0 MB file that
+opens from a filesystem and requests nothing — verified in Chromium, zero
+outbound requests.
+
+The hrefs are absolute under `server { swagger }` rather than relative: the
+page answers at `/docs`, not `/docs/`, and `strict_slash` redirects the
+second to the first, so a relative `swagger-ui.css` resolved to the site
+root and the browser was handed JSON where it asked for a stylesheet.
+
+### `date.parse` answers null, `date.format` reads its format, and five path parameter types are read
+
+Three builtins and one binder that declared a contract the runtime did not
+keep — the same shape as `boolean(x)` and `enum(E, x)` in rc.7.
+
+**`date.parse(s)`** returned its own input wrapped as a timestamp, so the
+`timestamptz?` it declares was never null. That made the guard the type
+system demands dead code: `timestamptz?` will not go into a `NOT NULL`
+column, so the author writes `date.parse(@raw) or throw BadRequest(…)` —
+and `?t=kecha` was still a 500 from Postgres. It now parses RFC 3339 and
+answers null for anything else, normalised to the form `date.now()` gives.
+
+**`date.format(t, fmt)`** returned `t` and never read `fmt`, so
+`"%Y-%m-%d"` and `"butunlay-buzuq-%Q"` answered the same RFC 3339 string —
+the one silent wrong answer of the four, with no error anywhere. It is now
+strftime over a `timestamptz`, `date` or `time`, and the format is checked
+at compile time as `builtins.md` always said: a specifier strftime does not
+have is **`E0306`**, naming the one that is wrong, and so is a format the
+program assembles at runtime, since nothing can check that one.
+
+**`{x: date}`** and four other scalar types were accepted as a path
+parameter without being read. The binder had arms for `bigint`, `int`,
+`numeric`, `boolean` and `uuid`; `date`, `timestamptz`, `time`, `inet` and
+`bytea` fell to the `text` catch-all, so `/lessons/2026-02-30` reached
+Postgres and came back a 500 where routing.md §3.2 promises
+`400 bad_path_parameter`. That date is the one worth remembering — it is
+shaped right, and only a calendar rejects it.
+
+All three on both backends, with `tests/coercions.rs` covering them through
+the real pipeline and no database: none of this should ever have needed one.
+
+### A timestamp difference keeps its fraction, and an interval reads back as a number
+
+`date.now() - start` was truncated to whole seconds although both operands
+carry microseconds on the wire — 1.248 s came back `PT1S` — and nothing read
+a number out of an `interval` at all: it has no fields (`E0312`) and there
+was no builtin. A program could print how long something took and do
+nothing else with it.
+
+The interval core now counts microseconds instead of seconds, and the
+difference renders `PT1.248S`. A whole number of seconds still renders
+`PT10S`, byte for byte, so a program that never subtracted two timestamps
+sees no change. A fraction is accepted on seconds only: `PT1.5H` is legal
+ISO 8601 but nothing in the language writes one, and the native backend
+recognises an interval by shape, so the shape stays exactly what the
+language produces.
+
+Three builtins read it back — the inverses of `date.seconds(n)`:
+
+| | |
+|---|---|
+| `date.total_seconds(i)` | `numeric`, exact, with the fraction |
+| `date.total_millis(i)` | `bigint`, truncated toward zero |
+| `date.total_micros(i)` | `bigint` |
+
+Null in, null out, as the rest of `date.*`. Both backends, verified to
+answer the same values.
+
+**If a program parsed the text.** With nothing to read an interval with,
+the way to get a number out was to take `string.of(i)` apart —
+`int(string.replace(string.strip_prefix(string.of(i), "PT"), "S", ""))`.
+That now meets `PT4.024117S`, and `int("4.024117")` is a `400`. Replace it
+with `date.total_seconds(i)`, or `date.total_millis(i)` for an integer.
+
+### `numeric` arithmetic is exact, and a column is the type it declares
+
+types.md §2.2 says a fractional literal "is never a binary float", and
+§12.2 that `/` with a `numeric` operand is exact. Neither backend did it.
+
+**The interpreter** went through an `f64` and kept six places:
+`12345678901234.56 + 0.01` answered `12345678901234.570312`, and
+`1 / 3.0` answered `0.333333`. **The native backend** did no `numeric`
+arithmetic at all. A `numeric` is a string there — its wire form — so
+`1.5 + 2.25` glued the two into `"1.52.25"` and `2.5 * 2` panicked.
+
+Both now share `src/numeric_core.rs.in`, decimal throughout: `+ - *` are
+exact, and `/` is exact when the quotient terminates and carries 28
+significant digits when it does not. Results drop trailing zeros, as they
+always did, so `2.5 * 2` still prints `5`.
+
+**A column read back was not a number to `+`, on either backend.** A
+`bigint` or `numeric` comes back from Postgres in its wire form, a string,
+and the runtime decided by the value. Against a row with `price
+numeric(12,2) = 19.99`, `qty int = 3`, on `1.0.1`:
+
+| | `jwc serve` 1.0.1 | now |
+|---|---|---|
+| `it.price + it.price` | `"19.9919.99"` | `"39.98"` |
+| `string.of(it.id + it.id)` | `"11"` | `"2"` |
+| `it.price * it.qty` | 500 | `"59.97"` |
+| `-it.price` | 500 | `"-19.99"` |
+
+The checker knows the declared types, so it now marks each `+ - * / %` and
+unary `-` with the arithmetic it is (`ast::ArithMark`), and both backends
+read the operands as that. The mark sits on the AST node rather than in a
+side table because the interpreter runs a clone of the tree. `jwc serve`
+runs a second checker pass at load for the marks, so that an operator over
+the result of a function — `Shop.one(@id).price * 2` — is typed too; its
+diagnostics are not reported, and a program `jwc check` accepts still
+starts.
+
+Two smaller things on the way:
+
+- `-x` on a negative `numeric` produced `--2.5`, which nothing could read
+  back; and `-x` on the smallest `bigint` wrapped instead of faulting.
+- `it.id + 1` on a `bigint` column now answers `"2"` where it answered
+  `2`. It is a `bigint`, whose wire form is a string (§2.3) — the same
+  thing `@id + 1` on a `bigint` path parameter always answered.
+
+`tests/native_parity` runs the literal cases under both backends in CI and
+diffs the output.
+
+### `jwc build` keeps integer locals as `i64`
+
+The generated code held every local as a boxed `V`, including the ones the
+checker had already typed `int`. `count = count + 1` was two clones of an
+enum, a call that first asked whether its operands were a timestamp and an
+interval, and a match on the variant, for one `add`. A billion iterations
+took 58.1 s on the machine V1.1-PLAN measured — about CPython's 66 s.
+
+A `let` whose initialiser and every later write are integer arithmetic over
+literals and other such locals is now a Rust `i64`, boxed only where it
+meets something dynamic. A condition comparing two of them is a Rust
+comparison rather than a `V::Bool` built and unwrapped again. Which locals
+qualify is decided once per body, with all of it in view — `total = total
++ k` with `k` declared on the next line qualifies when `k` does — and
+anything else stays exactly as it was.
+
+One billion iterations of `count = count + 1`, `jwc build --release`, the
+same machine and the same hour:
+
+| | |
+|---|---|
+| `1.0.1` | 57.3 s |
+| now | **7.0 s** — 8.2× |
+
+The `% 1024` yield and the turn ceiling are both still there; they are what
+`request_timeout` needs to fire on a compute-bound loop.
+
+The arithmetic is **checked**, and that is a fix as well as a guard: the
+native integer arms used to be plain `x + y`, which in a release binary
+wraps. `i64::MAX + 1` came back as `i64::MIN` with nothing raised, where
+`jwc serve` answered a 500. Overflow and division by zero now panic, and
+the route wrapper turns that into the same 500.
+
+### `jwc build` compiles the dependency tree once, not once per project
+
+Each project built into its own `.jwc-build/target`, so tokio, hyper, serde
+and the tree under them were compiled again for every new project. That was
+most of a first build: the generated crate itself — the program and the
+whole 6,000-line prelude — compiles in about two seconds once its
+dependencies exist. Every project now shares `~/.jwc/cache/target`.
+
+Two fresh projects, built one after the other:
+
+| | first debug build | first release build |
+|---|---|---|
+| the first, cache empty | 22.2 s | 52.2 s |
+| the second, a different project | **5.5 s** | **29.9 s** |
+
+What remains of a release build is fat LTO with one codegen unit over the
+whole tree, a per-binary cost; the profile is tuned for the binary's speed
+on purpose.
+
+`JWC_BUILD_CACHE` names another directory, or `off` for the old
+per-project one; `CARGO_TARGET_DIR` wins over both, as it does for cargo.
+A lock beside the cache is held from the cargo run until the binary is
+copied out, so two projects with the same name cannot take each other's.
+An existing `.jwc-build/target` is no longer read and can be deleted.
+
+### `NOTICE`
+
+Swagger UI is Apache-2.0 and is now compiled into the binary, so the
+release has to carry its notice — §4 is about what accompanies the
+distribution, not what sits in the source tree. `NOTICE` names what is
+vendored, at which version, under which licence and where the text is, and
+the Rust dependencies by licence family with the `cargo deny list` command
+that produces the per-crate list for a given build. It is staged into every
+release tarball beside `README.md`.
+
+Two guards keep it from rotting: every directory under `vendor/` must be
+named in it, and every licence file it points at must exist.
+
+The project's own licence is still the open decision `Cargo.toml` records;
+`NOTICE` says so rather than implying otherwise.
+
+### The OpenAPI document groups its operations, and says which need a token
+
+Two things the document did not say, both of which the compiler already
+knew.
+
+**Tags.** Every operation landed under `default`, so a service of any size
+was one flat list. The tag is the first literal path segment that is not a
+version marker — `/api/v1/admin/users` is `admin`, `/api/v1/me` is `me` —
+because the `routes` prefix is the only grouping an author actually writes.
+e-school renders as seven sections: admin, announcements, auth, calendar,
+me, student, teacher.
+
+**Security.** `components.securitySchemes` was absent and no operation
+carried `security`, so a generated client, Postman and the reference page
+alike offered calls that could only answer 401, with nowhere to put a
+token. The chain already decided this and the document only said so in
+`x-jwc-middleware`, which nothing reads. A middleware that calls any `jwt.*`
+builtin, directly or through a function it calls, is bearer authentication;
+routes behind one now carry `security: [{bearerAuth: []}]`. On e-school that
+is 60 of 62 operations — the two without are `auth/login` and
+`auth/bootstrap`. An operation with an empty `security` means *no auth* and
+would override a document-level default, so it is written only where it is
+true.
+
 ## [1.0.1] — 2026-09-21
 
 A patch: three changes in the native backend's value and JSON layer, no

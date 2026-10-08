@@ -200,12 +200,85 @@ fn jwc_b_v1_date_seconds(v: V) -> V {
     v_str(format!("PT{}S", jwc_to_int(&v).unwrap_or(0)))
 }
 
-fn jwc_b_v1_date_parse(v: V) -> V {
-    v_str(jwc_v1_text(&v))
+/// The inverses of `date.seconds(n)` and friends. Null in, null out; an
+/// interval that is not one can only arrive untyped, and is a fault.
+fn jwc_v1_interval_micros(v: &V, name: &str) -> Result<Option<i64>, JwcThrown> {
+    if matches!(v, V::Null) {
+        return Ok(None);
+    }
+    let iso = jwc_v1_text(v);
+    jwc_duration_micros(&iso).map(Some).ok_or_else(|| {
+        JwcThrown::new(
+            "internal_error",
+            500,
+            v_str(format!("`{name}` was given `{iso}`, which is not an interval")),
+        )
+    })
 }
 
-fn jwc_b_v1_date_format(v: V, _fmt: V) -> V {
-    v_str(jwc_v1_text(&v))
+fn jwc_b_v1_date_total_seconds(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_seconds")? {
+        None => V::Null,
+        Some(us) => {
+            let sign = if us < 0 { "-" } else { "" };
+            let m = us.unsigned_abs();
+            let (whole, frac) = (m / 1_000_000, m % 1_000_000);
+            // `numeric` is a string on the wire, exact, as here.
+            if frac == 0 {
+                v_str(format!("{sign}{whole}"))
+            } else {
+                let digits = format!("{frac:06}");
+                v_str(format!("{sign}{whole}.{}", digits.trim_end_matches('0')))
+            }
+        }
+    })
+}
+
+fn jwc_b_v1_date_total_millis(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_millis")? {
+        None => V::Null,
+        Some(us) => V::Int(us / 1_000),
+    })
+}
+
+fn jwc_b_v1_date_total_micros(v: V) -> JwcResult {
+    Ok(match jwc_v1_interval_micros(&v, "date.total_micros")? {
+        None => V::Null,
+        Some(us) => V::Int(us),
+    })
+}
+
+/// `timestamptz?` — null is what an unparseable string answers, which is
+/// what makes the `or throw BadRequest(...)` at the call site fire.
+/// Normalised to the shape `date.now()` answers.
+fn jwc_b_v1_date_parse(v: V) -> V {
+    match chrono::DateTime::parse_from_rfc3339(jwc_v1_text(&v).trim()) {
+        Ok(t) => v_str(
+            t.with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        ),
+        Err(_) => V::Null,
+    }
+}
+
+/// strftime over whichever of the three the value turned out to be. The
+/// format is checked at compile time (`E0306`); a value that is not a
+/// timestamp can still arrive through `raw` or `jsonb`, and the honest
+/// answer there is the text itself.
+fn jwc_b_v1_date_format(v: V, fmt: V) -> V {
+    let value = jwc_v1_text(&v);
+    let f = jwc_v1_text(&fmt);
+    let s = value.trim();
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(s) {
+        return v_str(t.with_timezone(&chrono::Utc).format(&f).to_string());
+    }
+    if let Ok(d) = s.parse::<chrono::NaiveDate>() {
+        return v_str(d.format(&f).to_string());
+    }
+    if let Ok(t) = s.parse::<chrono::NaiveTime>() {
+        return v_str(t.format(&f).to_string());
+    }
+    v_str(value)
 }
 
 // ---- text (builtins.md §4) --------------------------------------------------

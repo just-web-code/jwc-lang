@@ -102,6 +102,7 @@ the same extraction, so neither can drift from it.
 | `E0303` | unqualified enum member | `types.md` |
 | `E0304` | ordering comparison on an enum | `types.md` |
 | `E0305` | class field has no matching column | `types.md` |
+| `E0306` | `date.format`'s format is not a literal, or carries a specifier strftime does not have (§3) | `builtins.md` |
 | `E0310` | field read on a raw value | `types.md` |
 | `E0311` | raw value in a non-splice position | `types.md` |
 | `E0312` | field read on a value that has no such field | `types.md` |

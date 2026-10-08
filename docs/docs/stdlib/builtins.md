@@ -40,12 +40,32 @@ serve();
 | `date.now()` | RFC 3339 UTC, microsecond precision |
 | `date.today()` | the date, no time |
 | `date.days(n)`, `date.hours(n)`, `date.minutes(n)`, `date.seconds(n)` | an interval |
-| `date.parse(s)`, `date.format(v, f)` | |
+| `date.total_seconds(i)` | an interval as exact seconds (`numeric`), fraction included |
+| `date.total_millis(i)`, `date.total_micros(i)` | an interval as a whole number (`bigint`) |
+| `date.parse(s)` | a timestamp, or **null** if `s` is not RFC 3339 |
+| `date.format(v, f)` | strftime — `%Y-%m-%d %H:%M`; `f` must be a literal |
 
 Intervals compose with timestamps in a query:
 
 ```jwc no-compile
 where created_at > date.now() - date.hours(24)
+```
+
+The difference of two timestamps is an interval that keeps microseconds,
+and `date.total_*` reads it back:
+
+```jwc no-compile
+let start = date.now();
+// … work …
+let ms = date.total_millis(date.now() - start);
+```
+
+`date.parse` answering null is what makes the usual guard work — the
+null is the client's mistake, and this turns it into a 400 instead of
+letting the string reach Postgres:
+
+```jwc no-compile
+let t = date.parse(request.query("since") ?? "") or throw BadRequest("since is not a timestamp");
 ```
 
 ## Text

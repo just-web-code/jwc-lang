@@ -1,0 +1,46 @@
+
+// ── `numeric` arithmetic (types.md §12.2) ──
+//
+// A `numeric` is a `V::Str` in this backend — its wire form — and a column
+// read can hand one back as a `V::Float`. Nothing at run time tells `"1.5"`
+// from text, so codegen calls these only where the checker typed the
+// operator `numeric` (`ast::ArithMark`). The digits come from
+// `numeric_core.rs.in`, the file the interpreter includes.
+
+fn jwc_numeric_of(v: &V) -> Option<rust_decimal::Decimal> {
+    match v {
+        V::Int(n) => Some(rust_decimal::Decimal::from(*n)),
+        // Shortest round-trip text, so a column's `19.99` stays `19.99`.
+        V::Float(x) => jwc_decimal_parse(&x.to_string()),
+        V::Str(s) => jwc_decimal_parse(s),
+        _ => None,
+    }
+}
+
+fn jwc_numeric_op(op: char, a: V, b: V) -> V {
+    let r = match (jwc_numeric_of(&a), jwc_numeric_of(&b)) {
+        (Some(x), Some(y)) => jwc_decimal_op(op, x, y),
+        _ => None,
+    };
+    match r {
+        Some(s) => v_str(s),
+        None => jwc_numeric_refused(op, &a, &b),
+    }
+}
+
+fn jwc_numeric_neg(v: V) -> V {
+    match jwc_numeric_of(&v).map(|d| jwc_decimal_text(-d)) {
+        Some(s) => v_str(s),
+        None => panic!("cannot negate {:?}", v),
+    }
+}
+
+/// The interpreter faults on these; a panic here is caught at the route
+/// and answered 500 the same way.
+#[cold]
+fn jwc_numeric_refused(op: char, a: &V, b: &V) -> ! {
+    if op == '/' && jwc_numeric_of(b).is_some_and(|d| d.is_zero()) {
+        panic!("division by zero: {:?} / {:?}", a, b)
+    }
+    panic!("`{}` is not defined here: {:?} {} {:?}", op, a, op, b)
+}

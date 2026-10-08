@@ -57,7 +57,7 @@ signature. There are no others; a type name not in this table and not an
 | `timestamptz` | `timestamptz` | RFC 3339, UTC, `Z` suffix, microseconds | `2026-08-19T07:21:44.120031Z` |
 | `date` | `date` | `YYYY-MM-DD` | |
 | `time` | `time` | `HH:MM:SS[.ffffff]` | no zone; `timetz` is not offered |
-| `interval` | `interval` | ISO 8601 duration string | `P30D`, `PT10S` |
+| `interval` | `interval` | ISO 8601 duration string; a fraction only on seconds | `P30D`, `PT10S`, `PT1.248S` |
 | `uuid` | `uuid` | canonical lowercase hyphenated | |
 | `jsonb` | `jsonb` | the JSON value itself | §5.6 |
 | `inet` | `inet` | string | `192.0.2.1`, `2001:db8::1/32` |
@@ -581,6 +581,19 @@ Numeric only, plus `timestamptz - timestamptz → interval` and
 does, so `date - interval` is a `timestamptz` too. `/` on two integers is **integer
 division**; `/` with a `numeric` operand is exact division. `%` is integer
 only. Division by zero is a fault.
+
+`numeric` arithmetic is decimal, never binary floating point: `0.1 + 0.2`
+is `0.3` and `12345678901234.56 + 0.01` is `12345678901234.57`. `+`, `-`
+and `*` are exact. `/` is exact when the quotient terminates and carries 28
+significant digits when it does not — `1 / 3.0` is
+`0.3333333333333333333333333333`. A result drops trailing zeros (`2.5 * 2`
+is `5`), and one past what the representation holds (about 7.9 × 10^28) is
+a fault, as integer overflow is (§12.3).
+
+An operand read from a column is the type the column declares. A `bigint`
+and a `numeric` come back from the database in their wire form, a string
+(§2.3), and are still numbers to `+`: `price + price` is a sum and
+`id + 1` is a `bigint`.
 
 ### 12.3 Integer width and overflow
 

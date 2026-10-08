@@ -402,6 +402,15 @@ pub const REGISTRY: &[EnvVar] = &[
         doc: "Package registry base URL; empty uses the default registry.",
     },
     EnvVar {
+        name: "JWC_BUILD_CACHE",
+        parse_kind: ParseKind::Str,
+        default: "~/.jwc/cache/target",
+        doc: "`jwc build` only: the cargo target directory every project shares, so \
+              the dependency tree compiles once rather than once per project. A \
+              path, or `off` for one under the project's `.jwc-build/`. \
+              `CARGO_TARGET_DIR` wins when set.",
+    },
+    EnvVar {
         name: "JWC_REQUEST_BODY",
         parse_kind: ParseKind::Str,
         default: "null",

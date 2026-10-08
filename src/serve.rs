@@ -91,6 +91,14 @@ pub fn load(ws: &Workspace) -> Result<Program> {
     if !errors.is_empty() {
         bail!("{}", errors.join(""));
     }
+    // A second pass, for its marks alone (`ast::ArithMark`): the first one
+    // cannot know what a function it has not reached returns, so
+    // `Shop.one(@id).price * 2` was untyped there, and an untyped operator
+    // over a column falls back to guessing from the value — a string. Its
+    // diagnostics are not reported: `jwc check` runs one pass, and a
+    // program it accepts has to keep starting. Before the bodies are
+    // cloned below, so the clones carry the marks.
+    let _ = crate::check::check_with(ws, &symbols, &built.model, &checked.function_returns);
 
     crate::db::install_messages(&built.model);
 
@@ -191,7 +199,7 @@ pub fn load(ws: &Workspace) -> Result<Program> {
             None,
         );
         Arc::new((
-            crate::swagger::render(&doc),
+            crate::swagger::render(&doc, server.swagger.as_deref().unwrap_or("")),
             serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
         ))
     });
@@ -598,6 +606,40 @@ fn match_route<'p>(
 
 /// routing.md §3.2 — parsed **before** any middleware, so malformed input
 /// is a 400 and never reaches Postgres as a 500.
+/// An IPv4 or IPv6 address, with an optional CIDR prefix — what Postgres
+/// `inet` holds (types.md §2.1).
+fn parse_inet(s: &str) -> bool {
+    let (addr, prefix) = match s.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (s, None),
+    };
+    let Ok(ip) = addr.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match prefix {
+        None => true,
+        Some(p) => p
+            .parse::<u8>()
+            .is_ok_and(|n| n <= if ip.is_ipv4() { 32 } else { 128 }),
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), which is the wire form of
+/// a `bytea` (types.md §2.1). The length and the alphabet are checkable
+/// without decoding, and decoding would build a value the route is not
+/// going to be handed.
+fn parse_base64(s: &str) -> bool {
+    if s.is_empty() || !s.len().is_multiple_of(4) {
+        return false;
+    }
+    let body = s.trim_end_matches('=');
+    if s.len() - body.len() > 2 {
+        return false;
+    }
+    body.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
 fn parse_params(
     route: &ResolvedRoute,
     binds: &[(String, String)],
@@ -626,6 +668,30 @@ fn parse_params(
                     None
                 }
             }
+            // The five that used to fall through to the catch-all below.
+            // routing.md §3.2 says a value that does not parse is a 400
+            // naming the parameter, and gives the reason: "malformed
+            // input reached Postgres and became a 500". For these it
+            // still did — `/lessons/2026-02-30` is shaped like a date and
+            // only a calendar rejects it, so Postgres was doing the parse
+            // on the far side of the query.
+            "date" => raw
+                .parse::<chrono::NaiveDate>()
+                .ok()
+                .map(|_| Value::Text(raw.clone())),
+            "timestamptz" => chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .map(|_| Value::Timestamptz(raw.clone())),
+            "time" => raw
+                .parse::<chrono::NaiveTime>()
+                .ok()
+                .map(|_| Value::Text(raw.clone())),
+            "inet" => parse_inet(raw).then(|| Value::Text(raw.clone())),
+            // Base64 of the length Postgres would accept, which is the
+            // only thing checkable without decoding into a value the
+            // route will not use.
+            "bytea" => parse_base64(raw).then(|| Value::Text(raw.clone())),
+            // `text` and `varchar(n)`, which is what this was always for.
             _ => Some(Value::Text(raw.clone())),
         };
         match v {
@@ -793,6 +859,38 @@ async fn operational(program: &Program, incoming: &Incoming) -> Option<Response>
                 body: page.0.clone(),
                 bytes: None,
             })
+        }
+
+        // Swagger UI itself, beside the page that loads it. Stored
+        // gzipped and sent that way, so this is a slice copy and no
+        // decompression. Immutable: the bytes are compiled in, so a
+        // given binary always answers the same ones.
+        p if program.server.swagger.is_some()
+            && crate::swagger::ASSETS.iter().any(|(name, _, _)| {
+                program
+                    .server
+                    .swagger
+                    .as_ref()
+                    .is_some_and(|s| p == format!("{s}/{name}"))
+            }) =>
+        {
+            let prefix = program.server.swagger.as_deref().unwrap_or("");
+            crate::swagger::ASSETS
+                .iter()
+                .find(|(name, _, _)| p == format!("{prefix}/{name}"))
+                .map(|(_, bytes, mime)| Response {
+                    status: 200,
+                    headers: vec![
+                        ("content-type".into(), (*mime).into()),
+                        ("content-encoding".into(), "gzip".into()),
+                        (
+                            "cache-control".into(),
+                            "public, max-age=31536000, immutable".into(),
+                        ),
+                    ],
+                    body: String::new(),
+                    bytes: Some(bytes.to_vec()),
+                })
         }
 
         // The document the page was rendered from, for a client
