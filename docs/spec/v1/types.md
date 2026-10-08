@@ -582,6 +582,19 @@ does, so `date - interval` is a `timestamptz` too. `/` on two integers is **inte
 division**; `/` with a `numeric` operand is exact division. `%` is integer
 only. Division by zero is a fault.
 
+`numeric` arithmetic is decimal, never binary floating point: `0.1 + 0.2`
+is `0.3` and `12345678901234.56 + 0.01` is `12345678901234.57`. `+`, `-`
+and `*` are exact. `/` is exact when the quotient terminates and carries 28
+significant digits when it does not — `1 / 3.0` is
+`0.3333333333333333333333333333`. A result drops trailing zeros (`2.5 * 2`
+is `5`), and one past what the representation holds (about 7.9 × 10^28) is
+a fault, as integer overflow is (§12.3).
+
+An operand read from a column is the type the column declares. A `bigint`
+and a `numeric` come back from the database in their wire form, a string
+(§2.3), and are still numbers to `+`: `price + price` is a sum and
+`id + 1` is a `bigint`.
+
 ### 12.3 Integer width and overflow
 
 `int op int → int`. `smallint op smallint → int`. Any `bigint` operand

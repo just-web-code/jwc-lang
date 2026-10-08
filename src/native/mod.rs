@@ -69,6 +69,12 @@ pub const PRELUDE_ACCESS_LOG_CORE: &str = include_str!("../access_log_core.rs.in
 /// what "the last 24 hours" is. Before this the native `+` concatenated
 /// the two strings and `-` panicked (types.md §12).
 pub const PRELUDE_INTERVAL_CORE: &str = include_str!("../interval_core.rs.in");
+/// `numeric` arithmetic — the same text `src/exec.rs` includes, so the two
+/// backends agree on every digit. Pasted only into a crate that does some,
+/// with `PRELUDE_NUMERIC` on top of it, so a program that does none does
+/// not depend on `rust_decimal` for it.
+pub const PRELUDE_NUMERIC_CORE: &str = include_str!("../numeric_core.rs.in");
+pub const PRELUDE_NUMERIC: &str = include_str!("prelude/numeric.rs.in");
 /// `Set-Cookie` and its attributes — the same text `src/exec.rs` includes,
 /// so a cookie's `HttpOnly`, `Secure` and `SameSite` do not depend on which
 /// backend answered. Before 0.9.939 the interpreter dropped the attributes
@@ -131,6 +137,7 @@ pub struct Needs {
     pub redis: bool,
     pub ws: bool,
     pub regex: bool,
+    pub decimal: bool,
 }
 
 fn scaffold_workspace(
@@ -194,6 +201,7 @@ fn render_cargo_toml(app_name: &str, needs: Needs) -> String {
         redis: needs_redis,
         ws: needs_ws,
         regex: needs_regex,
+        decimal: needs_decimal,
     } = needs;
     // The queue is two Postgres tables, so a program with jobs needs the
     // database dependencies whether or not any of its own queries do.
@@ -292,6 +300,11 @@ fn render_cargo_toml(app_name: &str, needs: Needs) -> String {
         deps.push_str(
             "rust_decimal = { version = \"1\", default-features = false, features = [\"db-postgres\"] }\n",
         );
+    } else if needs_decimal {
+        // `numeric` arithmetic without a database. The `db-postgres` line
+        // above already brings the crate in; naming it twice is a manifest
+        // cargo refuses.
+        deps.push_str("rust_decimal = { version = \"1\", default-features = false }\n");
     }
     if needs_crypto {
         deps.push_str("sha2 = \"0.10\"\n");
@@ -638,3 +651,4 @@ pub fn emit_rust_source(
     std::fs::write(&out_path, rust_src).with_context(|| format!("write {}", out_path.display()))?;
     Ok(out_path)
 }
+            decimal: gen.needs_decimal,

@@ -414,10 +414,13 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------ driver
 
     fn run(&mut self) {
-        for fi in 0..self.ws.files.len() {
+        // Walked in place, not cloned: `note_arith` marks the expressions
+        // themselves, and the marks have to land on the AST the backends
+        // run rather than on a copy that is dropped here.
+        let ws = self.ws;
+        for (fi, file) in ws.files.iter().enumerate() {
             self.file = fi;
-            let decls = self.ws.files[fi].program.decls.clone();
-            for d in &decls {
+            for d in &file.program.decls {
                 self.decl(d);
             }
         }
@@ -1399,6 +1402,18 @@ impl<'a> Checker<'a> {
 
     // ------------------------------------------------------------ expressions
 
+    /// Marks what arithmetic `e` is, from the type it produced (see
+    /// `ast::ArithMark`). Text concatenation and date arithmetic are not
+    /// marked: the runtime tells those apart by the values themselves.
+    fn note_arith(&mut self, e: &Expr, t: &Ty) {
+        use crate::ast::Arith;
+        match t.scalar() {
+            Some(Scalar::Numeric) => e.arith.set(Arith::Numeric),
+            Some(Scalar::Smallint | Scalar::Int | Scalar::Bigint) => e.arith.set(Arith::Int),
+            _ => {}
+        }
+    }
+
     fn expr(&mut self, e: &Expr) -> Ty {
         match &*e.kind {
             // types.md §2.2 — `int` if it fits, else `bigint`. Past
@@ -1510,12 +1525,22 @@ impl<'a> Checker<'a> {
                                 "types.md §12.2",
                             );
                         }
+                        self.note_arith(e, &t);
                         t
                     }
                 }
             }
 
-            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.span),
+            ExprKind::Binary { op, lhs, rhs } => {
+                let t = self.binary(*op, lhs, rhs, e.span);
+                if matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                ) {
+                    self.note_arith(e, &t);
+                }
+                t
+            }
 
             ExprKind::Ternary {
                 cond,

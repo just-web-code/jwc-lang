@@ -1056,14 +1056,23 @@ impl<'a> Vm<'a> {
 
             ExprKind::Unary { op, rhs } => {
                 let v = self.eval(rhs).await?;
+                let v = retyped(e.arith.get(), v);
                 match op {
                     UnaryOp::Not => {
                         Value::Bool(!v.truthy().ok_or_else(|| fault("`!` needs a boolean"))?)
                     }
+                    // Checked, like the binary operators: `-n` on the
+                    // smallest `bigint` has no answer (types.md §12.3).
                     UnaryOp::Neg => match v {
-                        Value::Int(n) => Value::Int(-n),
-                        Value::Bigint(n) => Value::Bigint(-n),
-                        Value::Numeric(s) => Value::Numeric(format!("-{s}")),
+                        Value::Int(n) => {
+                            Value::Int(n.checked_neg().ok_or_else(|| fault("`-` overflowed"))?)
+                        }
+                        Value::Bigint(n) => {
+                            Value::Bigint(n.checked_neg().ok_or_else(|| fault("`-` overflowed"))?)
+                        }
+                        Value::Numeric(s) => Value::Numeric(
+                            jwc_decimal_neg(&s).ok_or_else(|| fault("cannot negate this value"))?,
+                        ),
                         _ => return Err(fault("cannot negate this value")),
                     },
                 }
@@ -1080,7 +1089,11 @@ impl<'a> Vm<'a> {
                 lhs,
                 rhs,
             } => {
-                let mut terms = vec![rhs];
+                // Each term with the `+` that adds it: the checker marked
+                // each one separately, and a chain can mix them —
+                // `"total: " + string.of(a + b)` is two concatenations
+                // around a sum.
+                let mut terms = vec![(rhs, e)];
                 let mut node = lhs;
                 while let ExprKind::Binary {
                     op: BinOp::Add,
@@ -1088,20 +1101,21 @@ impl<'a> Vm<'a> {
                     rhs: r,
                 } = &*node.kind
                 {
-                    terms.push(r);
+                    terms.push((r, node));
                     node = l;
                 }
                 let mut acc = self.eval(node).await?;
-                for t in terms.iter().rev() {
+                for (t, plus) in terms.iter().rev() {
                     let b = self.eval(t).await?;
-                    acc = add(&acc, &b).ok_or_else(|| {
-                        fault(format!("`+` is not defined here: {acc:?} + {b:?}"))
-                    })?;
+                    let mark = plus.arith.get();
+                    let (x, y) = (retyped(mark, acc), retyped(mark, b));
+                    acc = add(&x, &y)
+                        .ok_or_else(|| fault(format!("`+` is not defined here: {x:?} + {y:?}")))?;
                 }
                 acc
             }
 
-            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs).await?,
+            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.arith.get()).await?,
 
             ExprKind::Ternary {
                 cond,
@@ -1348,7 +1362,13 @@ impl<'a> Vm<'a> {
         Ok(b.field(&field.name).cloned().unwrap_or(Value::Null))
     }
 
-    async fn binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr) -> Exec<Value> {
+    async fn binary(
+        &mut self,
+        op: BinOp,
+        lhs: &Expr,
+        rhs: &Expr,
+        mark: Option<crate::ast::Arith>,
+    ) -> Exec<Value> {
         // Short-circuit before evaluating the right side.
         if matches!(op, BinOp::And | BinOp::Or) {
             let a = self.eval(lhs).await?;
@@ -1367,6 +1387,7 @@ impl<'a> Vm<'a> {
 
         let a = self.eval(lhs).await?;
         let b = self.eval(rhs).await?;
+        let (a, b) = (retyped(mark, a), retyped(mark, b));
         Ok(match op {
             BinOp::Eq | BinOp::EqOpt => Value::Bool(equal(&a, &b)),
             BinOp::Ne => Value::Bool(!equal(&a, &b)),
@@ -1477,14 +1498,36 @@ fn integral_of(v: &Value) -> Option<i128> {
     }
 }
 
+/// An arithmetic operand read as the checker typed the operator
+/// (`ast::ArithMark`).
+///
+/// A `bigint` or `numeric` read from the database is a `Value::Text` — the
+/// projection hands back its wire form, a string — and nothing in the value
+/// says it is a number. Before 1.1, `price + price` concatenated to
+/// `"19.9919.99"`, `id + id` to `"11"`, and `price * qty` and `-price`
+/// faulted. A mark is only ever `Int` or `Numeric` when both operands are
+/// numeric types, so a `Text` here can only be one of those in its wire
+/// form.
+fn retyped(mark: Option<crate::ast::Arith>, v: Value) -> Value {
+    use crate::ast::Arith;
+    let (Some(m), Value::Text(s)) = (mark, &v) else {
+        return v;
+    };
+    let typed = match m {
+        Arith::Int => s.trim().parse().ok().map(Value::Bigint),
+        Arith::Numeric => jwc_decimal_parse(s).map(|_| Value::Numeric(s.trim().to_string())),
+    };
+    typed.unwrap_or(v)
+}
+
 /// Arithmetic, unlike comparison, keeps the strict rule: a `Text` operand
 /// is not a number here. `text + text` is concatenation and everything
 /// else on two texts is a type error the checker has already refused, so
 /// loosening this would only change what an unreachable case does.
-fn numeric_of(v: &Value) -> Option<f64> {
+fn numeric_of(v: &Value) -> Option<rust_decimal::Decimal> {
     match v {
-        Value::Int(n) | Value::Bigint(n) => Some(*n as f64),
-        Value::Numeric(s) => s.parse().ok(),
+        Value::Int(n) | Value::Bigint(n) => Some(rust_decimal::Decimal::from(*n)),
+        Value::Numeric(s) => jwc_decimal_parse(s),
         _ => None,
     }
 }
@@ -1583,7 +1626,7 @@ fn sub(a: &Value, b: &Value) -> Option<Value> {
 
 fn numeric_op(op: BinOp, a: &Value, b: &Value) -> Option<Value> {
     // Integer arithmetic stays exact; anything with a decimal goes through
-    // an exact decimal string so money never touches a float.
+    // `numeric_core.rs.in`, exact as well, so money never touches a float.
     if let (Some(x), Some(y)) = (a.as_i64(), b.as_i64()) {
         if !matches!(a, Value::Numeric(_)) && !matches!(b, Value::Numeric(_)) {
             let r = match op {
@@ -1603,30 +1646,17 @@ fn numeric_op(op: BinOp, a: &Value, b: &Value) -> Option<Value> {
         }
     }
     let (x, y) = (numeric_of(a)?, numeric_of(b)?);
-    let r = match op {
-        BinOp::Add => x + y,
-        BinOp::Sub => x - y,
-        BinOp::Mul => x * y,
-        BinOp::Div => {
-            if y == 0.0 {
-                return None;
-            }
-            x / y
-        }
+    let op = match op {
+        BinOp::Add => '+',
+        BinOp::Sub => '-',
+        BinOp::Mul => '*',
+        BinOp::Div => '/',
         _ => return None,
     };
-    Some(Value::Numeric(format_decimal(r)))
+    Some(Value::Numeric(jwc_decimal_op(op, x, y)?))
 }
 
-fn format_decimal(v: f64) -> String {
-    let s = format!("{v:.6}");
-    let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
-    if s.is_empty() {
-        "0".to_string()
-    } else {
-        s
-    }
-}
+include!("numeric_core.rs.in");
 
 // ---------------------------------------------------------------- queries
 

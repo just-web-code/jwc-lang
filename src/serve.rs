@@ -91,6 +91,14 @@ pub fn load(ws: &Workspace) -> Result<Program> {
     if !errors.is_empty() {
         bail!("{}", errors.join(""));
     }
+    // A second pass, for its marks alone (`ast::ArithMark`): the first one
+    // cannot know what a function it has not reached returns, so
+    // `Shop.one(@id).price * 2` was untyped there, and an untyped operator
+    // over a column falls back to guessing from the value — a string. Its
+    // diagnostics are not reported: `jwc check` runs one pass, and a
+    // program it accepts has to keep starting. Before the bodies are
+    // cloned below, so the clones carry the marks.
+    let _ = crate::check::check_with(ws, &symbols, &built.model, &checked.function_returns);
 
     crate::db::install_messages(&built.model);
 

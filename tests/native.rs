@@ -865,3 +865,44 @@ fn a_boolean_coercion_propagates_like_int_and_date() {
         "the coercion must reach the prelude and propagate:\n{rust}"
     );
 }
+
+/// V1.1-PLAN entry 5. An integer local the checker typed, and that only
+/// ever receives integer arithmetic, is an `i64` in the binary — not a `V`
+/// cloned and dispatched on every turn of a loop.
+#[test]
+fn an_integer_local_is_a_native_i64() {
+    let rust = generate("tests/native_parity");
+    for decl in [
+        "let mut v_total: i64 = 0i64;",
+        "let mut v_k: i64 = 0i64;",
+        "let mut v_q: i64 = jwc_i_div(jwc_i_neg(7i64), 2i64);",
+    ] {
+        assert!(rust.contains(decl), "missing `{decl}`:\n{rust}");
+    }
+    // Arithmetic stays checked: the interpreter refuses an overflow, and a
+    // bare `+` would wrap in a release binary.
+    assert!(
+        rust.contains("v_total = jwc_i_add(v_total, v_k);"),
+        "{rust}"
+    );
+    // A condition over two of them is a Rust comparison, not a `V::Bool`
+    // built and unwrapped again.
+    assert!(rust.contains("if !(v_k < 100i64) { break; }"), "{rust}");
+    // Boxed once, where it meets something dynamic.
+    assert!(
+        rust.contains("jwc_b_v1_string_of(V::Int(v_total))"),
+        "{rust}"
+    );
+}
+
+/// The other half of the rule: a local is lowered only when every write to
+/// it is integer arithmetic. One written from a call, or declared optional,
+/// stays a value.
+#[test]
+fn a_local_written_from_anything_else_stays_a_value() {
+    let rust = generate("tests/native_parity");
+    assert!(rust.contains("let mut v_m = V::Int(1);"), "{rust}");
+    assert!(rust.contains("let mut v_o = V::Null;"), "{rust}");
+    assert!(!rust.contains("v_m: i64"), "{rust}");
+    assert!(!rust.contains("v_o: i64"), "{rust}");
+}
