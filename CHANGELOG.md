@@ -89,6 +89,118 @@ Three builtins read it back — the inverses of `date.seconds(n)`:
 Null in, null out, as the rest of `date.*`. Both backends, verified to
 answer the same values.
 
+**If a program parsed the text.** With nothing to read an interval with,
+the way to get a number out was to take `string.of(i)` apart —
+`int(string.replace(string.strip_prefix(string.of(i), "PT"), "S", ""))`.
+That now meets `PT4.024117S`, and `int("4.024117")` is a `400`. Replace it
+with `date.total_seconds(i)`, or `date.total_millis(i)` for an integer.
+
+### `numeric` arithmetic is exact, and a column is the type it declares
+
+types.md §2.2 says a fractional literal "is never a binary float", and
+§12.2 that `/` with a `numeric` operand is exact. Neither backend did it.
+
+**The interpreter** went through an `f64` and kept six places:
+`12345678901234.56 + 0.01` answered `12345678901234.570312`, and
+`1 / 3.0` answered `0.333333`. **The native backend** did no `numeric`
+arithmetic at all. A `numeric` is a string there — its wire form — so
+`1.5 + 2.25` glued the two into `"1.52.25"` and `2.5 * 2` panicked.
+
+Both now share `src/numeric_core.rs.in`, decimal throughout: `+ - *` are
+exact, and `/` is exact when the quotient terminates and carries 28
+significant digits when it does not. Results drop trailing zeros, as they
+always did, so `2.5 * 2` still prints `5`.
+
+**A column read back was not a number to `+`, on either backend.** A
+`bigint` or `numeric` comes back from Postgres in its wire form, a string,
+and the runtime decided by the value. Against a row with `price
+numeric(12,2) = 19.99`, `qty int = 3`, on `1.0.1`:
+
+| | `jwc serve` 1.0.1 | now |
+|---|---|---|
+| `it.price + it.price` | `"19.9919.99"` | `"39.98"` |
+| `string.of(it.id + it.id)` | `"11"` | `"2"` |
+| `it.price * it.qty` | 500 | `"59.97"` |
+| `-it.price` | 500 | `"-19.99"` |
+
+The checker knows the declared types, so it now marks each `+ - * / %` and
+unary `-` with the arithmetic it is (`ast::ArithMark`), and both backends
+read the operands as that. The mark sits on the AST node rather than in a
+side table because the interpreter runs a clone of the tree. `jwc serve`
+runs a second checker pass at load for the marks, so that an operator over
+the result of a function — `Shop.one(@id).price * 2` — is typed too; its
+diagnostics are not reported, and a program `jwc check` accepts still
+starts.
+
+Two smaller things on the way:
+
+- `-x` on a negative `numeric` produced `--2.5`, which nothing could read
+  back; and `-x` on the smallest `bigint` wrapped instead of faulting.
+- `it.id + 1` on a `bigint` column now answers `"2"` where it answered
+  `2`. It is a `bigint`, whose wire form is a string (§2.3) — the same
+  thing `@id + 1` on a `bigint` path parameter always answered.
+
+`tests/native_parity` runs the literal cases under both backends in CI and
+diffs the output.
+
+### `jwc build` keeps integer locals as `i64`
+
+The generated code held every local as a boxed `V`, including the ones the
+checker had already typed `int`. `count = count + 1` was two clones of an
+enum, a call that first asked whether its operands were a timestamp and an
+interval, and a match on the variant, for one `add`. A billion iterations
+took 58.1 s on the machine V1.1-PLAN measured — about CPython's 66 s.
+
+A `let` whose initialiser and every later write are integer arithmetic over
+literals and other such locals is now a Rust `i64`, boxed only where it
+meets something dynamic. A condition comparing two of them is a Rust
+comparison rather than a `V::Bool` built and unwrapped again. Which locals
+qualify is decided once per body, with all of it in view — `total = total
++ k` with `k` declared on the next line qualifies when `k` does — and
+anything else stays exactly as it was.
+
+One billion iterations of `count = count + 1`, `jwc build --release`, the
+same machine and the same hour:
+
+| | |
+|---|---|
+| `1.0.1` | 57.3 s |
+| now | **7.0 s** — 8.2× |
+
+The `% 1024` yield and the turn ceiling are both still there; they are what
+`request_timeout` needs to fire on a compute-bound loop.
+
+The arithmetic is **checked**, and that is a fix as well as a guard: the
+native integer arms used to be plain `x + y`, which in a release binary
+wraps. `i64::MAX + 1` came back as `i64::MIN` with nothing raised, where
+`jwc serve` answered a 500. Overflow and division by zero now panic, and
+the route wrapper turns that into the same 500.
+
+### `jwc build` compiles the dependency tree once, not once per project
+
+Each project built into its own `.jwc-build/target`, so tokio, hyper, serde
+and the tree under them were compiled again for every new project. That was
+most of a first build: the generated crate itself — the program and the
+whole 6,000-line prelude — compiles in about two seconds once its
+dependencies exist. Every project now shares `~/.jwc/cache/target`.
+
+Two fresh projects, built one after the other:
+
+| | first debug build | first release build |
+|---|---|---|
+| the first, cache empty | 22.2 s | 52.2 s |
+| the second, a different project | **5.5 s** | **29.9 s** |
+
+What remains of a release build is fat LTO with one codegen unit over the
+whole tree, a per-binary cost; the profile is tuned for the binary's speed
+on purpose.
+
+`JWC_BUILD_CACHE` names another directory, or `off` for the old
+per-project one; `CARGO_TARGET_DIR` wins over both, as it does for cargo.
+A lock beside the cache is held from the cargo run until the binary is
+copied out, so two projects with the same name cannot take each other's.
+An existing `.jwc-build/target` is no longer read and can be deleted.
+
 ### `NOTICE`
 
 Swagger UI is Apache-2.0 and is now compiled into the binary, so the
