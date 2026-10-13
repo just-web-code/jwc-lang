@@ -77,4 +77,17 @@ function main() {
     console.writeln("neg = " + string.of(-x));
     console.writeln("ordered = " + string.of(price > 19.9));
     console.writeln("const = " + string.of(RATE));
+
+    // A `bigint` is a string on the JSON wire on both backends (types.md
+    // §2.3); the native one wrote a number. And two of them order as
+    // numbers, not as the text `"10" < "9"`.
+    let id = bigint("9007199254740993");
+    console.writeln("big json = " + json.stringify({ id: @id, next: @id + 1, small: 7 }));
+    console.writeln("big order = " + string.of(bigint("10") > bigint("9")));
+    console.writeln("millis = " + json.stringify({ ms: date.total_millis(date.seconds(2)) }));
+
+    // Text that is not ASCII survives the native JSON parser, which read
+    // each byte as a character: `–` came back as `â` and two controls.
+    let parsed = json.parse("{\"t\":\"dushanba–juma, Тошкент\",\"e\":\"\\ud83d\\ude00\"}");
+    console.writeln("utf8 = " + json.stringify(@parsed));
 }

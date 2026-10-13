@@ -35,6 +35,32 @@ fn jwc_numeric_neg(v: V) -> V {
     }
 }
 
+/// Comparisons the checker typed as `numeric`, read as decimals; a side
+/// that is not one (a null) falls back to the untyped comparison.
+fn jwc_numeric_ord(a: &V, b: &V) -> Option<std::cmp::Ordering> {
+    Some(jwc_numeric_of(a)?.cmp(&jwc_numeric_of(b)?))
+}
+
+fn jwc_numeric_eq(a: &V, b: &V) -> bool {
+    jwc_numeric_ord(a, b).map_or_else(|| jwc_eq(a, b), |o| o.is_eq())
+}
+
+fn jwc_numeric_lt(a: &V, b: &V) -> bool {
+    jwc_numeric_ord(a, b).map_or_else(|| jwc_lt(a, b), |o| o.is_lt())
+}
+
+fn jwc_numeric_lte(a: &V, b: &V) -> bool {
+    jwc_numeric_ord(a, b).map_or_else(|| jwc_lte(a, b), |o| o.is_le())
+}
+
+fn jwc_numeric_gt(a: &V, b: &V) -> bool {
+    jwc_numeric_ord(a, b).map_or_else(|| jwc_gt(a, b), |o| o.is_gt())
+}
+
+fn jwc_numeric_gte(a: &V, b: &V) -> bool {
+    jwc_numeric_ord(a, b).map_or_else(|| jwc_gte(a, b), |o| o.is_ge())
+}
+
 /// The interpreter faults on these; a panic here is caught at the route
 /// and answered 500 the same way.
 #[cold]

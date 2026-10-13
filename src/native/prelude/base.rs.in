@@ -451,7 +451,7 @@ async fn jwc_b_file_move(src: V, dst: V) -> V {
 async fn jwc_b_file_size(path: V) -> V {
     let p = jwc_io_path(path, "file.size");
     match tokio::fs::metadata(p.as_ref()).await {
-        Ok(md) => V::Int(md.len() as i64),
+        Ok(md) => jwc_big(md.len() as i64),
         Err(e) => jwc_io_panic("file.size", p.as_ref(), e),
     }
 }
@@ -876,6 +876,35 @@ fn jwc_i_neg(a: i64) -> i64 {
     a.checked_neg().unwrap_or_else(|| jwc_int_refused("-", 0, a))
 }
 
+/// A `bigint`, held in its wire form (types.md §2.3).
+///
+/// The interpreter has `Value::Bigint`, which is a number to arithmetic and
+/// a string on the JSON wire. `V` has no variant that is both, and a column
+/// read already hands a `bigint` back as `V::Str`, so that is what every
+/// `bigint` is here: a path parameter, `bigint(x)`, a body field, and the
+/// result of arithmetic with one. Before 1.1 those built `V::Int`, and a
+/// native binary answered `{"id":1}` where `jwc serve` answers
+/// `{"id":"1"}` — and a JavaScript client rounds an id above 2^53.
+/// Arithmetic and comparison read it back through `jwc_int_of`.
+fn jwc_big(n: i64) -> V {
+    v_str(n.to_string())
+}
+
+/// An integer meeting a `bigint` in an operator the checker could not
+/// type: the pair, read as numbers, or `None` for anything else. The
+/// typed case is `jwc_int_op`. `+` passes `both_str = false`, because two
+/// strings there are a concatenation.
+fn jwc_big_pair(a: &V, b: &V, both_str: bool) -> Option<(i64, i64)> {
+    match (a, b) {
+        (V::Str(x), V::Int(y)) => Some((x.trim().parse().ok()?, *y)),
+        (V::Int(x), V::Str(y)) => Some((*x, y.trim().parse().ok()?)),
+        (V::Str(x), V::Str(y)) if both_str => {
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        }
+        _ => None,
+    }
+}
+
 /// An integer operand as the checker typed it. A `bigint` read from a
 /// column is a `V::Str` — its wire form, because JavaScript loses digits
 /// above 2^53 — so `row.id + 1` met `jwc_add`'s string arm and came back
@@ -890,24 +919,60 @@ fn jwc_int_of(v: &V) -> Option<i64> {
     }
 }
 
+/// The result is a `bigint` when either operand is one — the
+/// interpreter's rule (`exec.rs::numeric_op`), read off the representation.
 fn jwc_int_op(op: char, a: V, b: V) -> V {
     let (Some(x), Some(y)) = (jwc_int_of(&a), jwc_int_of(&b)) else {
         panic!("`{}` is not defined here: {:?} {} {:?}", op, a, op, b);
     };
-    V::Int(match op {
+    let r = match op {
         '+' => jwc_i_add(x, y),
         '-' => jwc_i_sub(x, y),
         '*' => jwc_i_mul(x, y),
         '/' => jwc_i_div(x, y),
         _ => jwc_i_rem(x, y),
-    })
+    };
+    if matches!(a, V::Str(_)) || matches!(b, V::Str(_)) {
+        jwc_big(r)
+    } else {
+        V::Int(r)
+    }
 }
 
 fn jwc_int_neg(v: V) -> V {
-    match jwc_int_of(&v) {
-        Some(n) => V::Int(jwc_i_neg(n)),
-        None => panic!("unsupported unary `-` on {:?}", v),
+    match (jwc_int_of(&v), &v) {
+        (Some(n), V::Str(_)) => jwc_big(jwc_i_neg(n)),
+        (Some(n), _) => V::Int(jwc_i_neg(n)),
+        (None, _) => panic!("unsupported unary `-` on {:?}", v),
     }
+}
+
+/// Comparisons the checker typed as integer: both sides read as numbers,
+/// so two `bigint`s — two strings here — order as numbers rather than as
+/// text, where `"10" < "9"`. A side that is not one (a null) falls back to
+/// the untyped comparison, which handles it.
+fn jwc_int_ord(a: &V, b: &V) -> Option<std::cmp::Ordering> {
+    Some(jwc_int_of(a)?.cmp(&jwc_int_of(b)?))
+}
+
+fn jwc_int_eq(a: &V, b: &V) -> bool {
+    jwc_int_ord(a, b).map_or_else(|| jwc_eq(a, b), |o| o.is_eq())
+}
+
+fn jwc_int_lt(a: &V, b: &V) -> bool {
+    jwc_int_ord(a, b).map_or_else(|| jwc_lt(a, b), |o| o.is_lt())
+}
+
+fn jwc_int_lte(a: &V, b: &V) -> bool {
+    jwc_int_ord(a, b).map_or_else(|| jwc_lte(a, b), |o| o.is_le())
+}
+
+fn jwc_int_gt(a: &V, b: &V) -> bool {
+    jwc_int_ord(a, b).map_or_else(|| jwc_gt(a, b), |o| o.is_gt())
+}
+
+fn jwc_int_gte(a: &V, b: &V) -> bool {
+    jwc_int_ord(a, b).map_or_else(|| jwc_gte(a, b), |o| o.is_ge())
 }
 
 /// `timestamptz ± interval`, when that is what the pair is.
@@ -939,6 +1004,9 @@ fn jwc_add(a: V, b: V) -> V {
     // end of a timestamp and call it an answer.
     if let Some(v) = jwc_ts_shift(&a, &b, 1) {
         return v;
+    }
+    if let Some((x, y)) = jwc_big_pair(&a, &b, false) {
+        return jwc_big(jwc_i_add(x, y));
     }
     match (a, b) {
         (V::Int(x), V::Int(y)) => V::Int(jwc_i_add(x, y)),
@@ -972,6 +1040,9 @@ fn jwc_sub(a: V, b: V) -> V {
             return v_str(jwc_render_duration(micros));
         }
     }
+    if let Some((x, y)) = jwc_big_pair(&a, &b, true) {
+        return jwc_big(jwc_i_sub(x, y));
+    }
     match (a, b) {
         (V::Int(x), V::Int(y)) => V::Int(jwc_i_sub(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x - y),
@@ -982,6 +1053,9 @@ fn jwc_sub(a: V, b: V) -> V {
 }
 
 fn jwc_mul(a: V, b: V) -> V {
+    if let Some((x, y)) = jwc_big_pair(&a, &b, true) {
+        return jwc_big(jwc_i_mul(x, y));
+    }
     match (a, b) {
         (V::Int(x), V::Int(y)) => V::Int(jwc_i_mul(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x * y),
@@ -992,6 +1066,9 @@ fn jwc_mul(a: V, b: V) -> V {
 }
 
 fn jwc_div(a: V, b: V) -> V {
+    if let Some((x, y)) = jwc_big_pair(&a, &b, true) {
+        return jwc_big(jwc_i_div(x, y));
+    }
     match (a, b) {
         (V::Int(x), V::Int(y)) => V::Int(jwc_i_div(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x / y),
@@ -1002,6 +1079,9 @@ fn jwc_div(a: V, b: V) -> V {
 }
 
 fn jwc_mod(a: V, b: V) -> V {
+    if let Some((x, y)) = jwc_big_pair(&a, &b, true) {
+        return jwc_big(jwc_i_rem(x, y));
+    }
     match (a, b) {
         (V::Int(x), V::Int(y)) => V::Int(jwc_i_rem(x, y)),
         (V::Float(x), V::Float(y)) => V::Float(x % y),
@@ -1058,11 +1138,11 @@ fn jwc_eq(a: &V, b: &V) -> bool {
 }
 
 /// The two sides of a comparison share a declared type — the checker proved
-/// it — but not necessarily a runtime representation. A `bigint` read out of
-/// a column arrives as `V::Str`, because the wire form is a string
-/// (JavaScript loses digits above 2^53), while `bigint(x)`, a path parameter
-/// and a request body all build `V::Int`. Nothing in the language separates
-/// them: `string.of` prints both the same.
+/// it — but not necessarily a runtime representation. A `bigint` is `V::Str`,
+/// its wire form (`jwc_big`), and an `int` is `V::Int`. Nothing in the
+/// language separates them: `string.of` prints both the same. Where the
+/// checker typed the comparison, codegen calls `jwc_int_lt` and the rest,
+/// which read both sides as numbers; this is the untyped path.
 ///
 /// So when either side is numeric, both are read as numbers. When neither
 /// is, they stay text — `"10" < "9"` is lexicographic and has to remain so,
@@ -1522,36 +1602,69 @@ impl<'a> JsonParser<'a> {
 
     fn parse_string(&mut self) -> Result<String, String> {
         self.expect(b'"')?;
-        let mut out = String::new();
+        // Bytes, not chars. The source is UTF-8, and pushing each byte as a
+        // `char` read it as Latin-1: `dushanba–juma` came back
+        // `dushanbaâ\u{80}\u{93}juma`, and every Cyrillic letter in a request
+        // body was stored as two wrong ones. `jwc serve` parses with
+        // serde_json, which never did this; found by running e-school's own
+        // seed script against both backends.
+        let mut out: Vec<u8> = Vec::new();
         loop {
             match self.bump() {
                 None => return Err("unterminated string".into()),
-                Some(b'"') => return Ok(out),
-                Some(b'\\') => match self.bump() {
-                    Some(b'"') => out.push('"'),
-                    Some(b'\\') => out.push('\\'),
-                    Some(b'/') => out.push('/'),
-                    Some(b'n') => out.push('\n'),
-                    Some(b'r') => out.push('\r'),
-                    Some(b't') => out.push('\t'),
-                    Some(b'b') => out.push('\x08'),
-                    Some(b'f') => out.push('\x0c'),
-                    Some(b'u') => {
-                        if self.pos + 4 > self.src.len() {
-                            return Err("truncated \\u escape".into());
-                        }
-                        let hex = std::str::from_utf8(&self.src[self.pos..self.pos + 4])
-                            .map_err(|_| "invalid \\u".to_string())?;
-                        let code = u32::from_str_radix(hex, 16).map_err(|e| e.to_string())?;
-                        self.pos += 4;
-                        if let Some(c) = char::from_u32(code) { out.push(c); }
-                    }
-                    Some(b) => return Err(format!("bad escape \\{}", b as char)),
-                    None => return Err("eof after backslash".into()),
-                },
-                Some(b) => out.push(b as char),
+                Some(b'"') => {
+                    return String::from_utf8(out).map_err(|_| "invalid UTF-8 in a string".into())
+                }
+                Some(b'\\') => {
+                    let c = match self.bump() {
+                        Some(b'"') => '"',
+                        Some(b'\\') => '\\',
+                        Some(b'/') => '/',
+                        Some(b'n') => '\n',
+                        Some(b'r') => '\r',
+                        Some(b't') => '\t',
+                        Some(b'b') => '\x08',
+                        Some(b'f') => '\x0c',
+                        Some(b'u') => self.parse_unicode_escape()?,
+                        Some(b) => return Err(format!("bad escape \\{}", b as char)),
+                        None => return Err("eof after backslash".into()),
+                    };
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                }
+                Some(b) => out.push(b),
             }
         }
+    }
+
+    fn parse_hex4(&mut self) -> Result<u32, String> {
+        let hex = self
+            .src
+            .get(self.pos..self.pos + 4)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .ok_or_else(|| "truncated \\u escape".to_string())?;
+        let code = u32::from_str_radix(hex, 16).map_err(|e| e.to_string())?;
+        self.pos += 4;
+        Ok(code)
+    }
+
+    /// `\uXXXX`, and a surrogate pair `\ud83d\ude00` as the one character it
+    /// encodes. A lone surrogate is refused, as serde_json refuses it under
+    /// `jwc serve`; it used to be dropped without a word.
+    fn parse_unicode_escape(&mut self) -> Result<char, String> {
+        let hi = self.parse_hex4()?;
+        if (0xD800..0xDC00).contains(&hi) {
+            if self.src.get(self.pos..self.pos + 2) == Some(b"\\u") {
+                self.pos += 2;
+                let lo = self.parse_hex4()?;
+                if (0xDC00..0xE000).contains(&lo) {
+                    let code = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
+                    return char::from_u32(code).ok_or_else(|| "invalid \\u escape".to_string());
+                }
+            }
+            return Err("lone leading surrogate in a \\u escape".into());
+        }
+        char::from_u32(hi).ok_or_else(|| "lone trailing surrogate in a \\u escape".to_string())
     }
 
     fn parse_number(&mut self) -> Result<V, String> {
@@ -1815,7 +1928,7 @@ fn jwc_b_unix_timestamp() -> V {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    V::Int(secs)
+    jwc_big(secs)
 }
 
 /// `random_int(end)` → [0, end); `random_int(start, end)` → [start, end).
@@ -2250,7 +2363,7 @@ fn jwc_parse_path_params(
             .map(|(_, t)| t.as_str())
             .unwrap_or("text");
         let v = match ty {
-            "bigint" => text.parse::<i64>().ok().map(V::Int),
+            "bigint" => text.parse::<i64>().ok().map(jwc_big),
             "int" | "smallint" => text.parse::<i64>().ok().map(V::Int),
             // Kept as text: `numeric` is exact, and routing it through f64
             // to validate then discarding the float is exactly what the
@@ -2343,14 +2456,14 @@ fn jwc_b_header(name: V) -> V {
 // as the interpreter shape: V::Null when called outside a request,
 // V::Int(milliseconds) inside one.
 fn jwc_b_response_duration_ms() -> V {
-    with_current_request(|req| V::Int(req.started_at.elapsed().as_millis() as i64))
+    with_current_request(|req| jwc_big(req.started_at.elapsed().as_millis() as i64))
 }
 
 // Microseconds, for handlers that finish inside one millisecond — where
 // `response_duration_ms` reports 0 and every percentile derived from it is
 // also 0.
 fn jwc_b_response_duration_us() -> V {
-    with_current_request(|req| V::Int(req.started_at.elapsed().as_micros() as i64))
+    with_current_request(|req| jwc_big(req.started_at.elapsed().as_micros() as i64))
 }
 
 // `response_status()` — HTTP status the handler emitted. The
@@ -4108,7 +4221,7 @@ fn jwc_b_v1_unix_timestamp() -> V {
         .duration_since(::std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    V::Int(secs)
+    jwc_big(secs)
 }
 
 /// Inclusive low, exclusive high, so `random_int(0, len)` is an index. A
@@ -4185,7 +4298,7 @@ fn jwc_b_v1_file_read(path: V) -> V {
 
 fn jwc_b_v1_file_size(path: V) -> V {
     match ::std::fs::metadata(jwc_to_text(&path)) {
-        Ok(m) => V::Int(m.len() as i64),
+        Ok(m) => jwc_big(m.len() as i64),
         Err(_) => V::Null,
     }
 }
@@ -4647,15 +4760,11 @@ fn jwc_coerce(f: &JwcClassField, v: &serde_json::Value) -> Option<V> {
     match (f.ty, v) {
         (_, J::Null) => Some(V::Null),
         (JwcTy::Boolean, J::Bool(b)) => Some(V::Bool(*b)),
-        // types.md §2.3 — a bigint arrives as a JSON string *or* a number.
-        //
-        // The interpreter's `Value::Bigint` is numeric in arithmetic and a
-        // string on the JSON wire; `V` has no variant that is both, so this
-        // keeps it numeric. A validated `bigint` field echoed straight back
-        // into a response therefore serialises as a number here and as a
-        // string under `jwc serve`.
-        (JwcTy::Bigint, J::String(s)) => s.parse::<i64>().ok().map(V::Int),
-        (JwcTy::Bigint, J::Number(n)) => n.as_i64().map(V::Int),
+        // types.md §2.3 — a bigint arrives as a JSON string *or* a number,
+        // and is held in its wire form (`jwc_big`), so a validated field
+        // echoed straight back is a string here as it is under `jwc serve`.
+        (JwcTy::Bigint, J::String(s)) => s.parse::<i64>().ok().map(jwc_big),
+        (JwcTy::Bigint, J::Number(n)) => n.as_i64().map(jwc_big),
         (JwcTy::Int, J::Number(n)) => n.as_i64().map(V::Int),
         (JwcTy::Numeric, J::String(s)) => s.parse::<f64>().ok().map(|_| v_str(s.clone())),
         (JwcTy::Numeric, J::Number(n)) => Some(v_str(n.to_string())),

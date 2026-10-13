@@ -637,6 +637,11 @@ answered by the builtin, not by the call site. Full list: builtins §5.
 Comparing `T?` with `<` is `E0320`. Comparing with `==` against `null` is
 how you test nullity and is always allowed.
 
+Two numerics compare as numbers, whatever their runtime representation: a
+`bigint` and a `numeric` come back from a column as their wire form, a
+string (§2.3), and `"10" < "9"` as text is exactly the wrong answer for two
+ids.
+
 ---
 
 ## 13. Diagnostics introduced here

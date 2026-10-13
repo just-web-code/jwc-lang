@@ -1552,7 +1552,7 @@ impl<'a> Checker<'a> {
             }
 
             ExprKind::Binary { op, lhs, rhs } => {
-                let t = self.binary(*op, lhs, rhs, e.span);
+                let t = self.binary(*op, lhs, rhs, e);
                 if matches!(
                     op,
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
@@ -2296,9 +2296,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr, span: Span) -> Ty {
+    fn binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr, whole: &Expr) -> Ty {
+        let span = whole.span;
         let a = self.expr(lhs);
         let b = self.expr(rhs);
+        if matches!(
+            op,
+            BinOp::Eq | BinOp::Ne | BinOp::EqOpt | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        ) {
+            note_comparison(whole, &a, &b);
+        }
         match op {
             BinOp::And | BinOp::Or => {
                 self.require_boolean(&a, lhs.span);
@@ -5498,4 +5505,24 @@ fn non_const_expr(e: &Expr) -> Option<Span> {
         }),
         _ => Some(e.span),
     }
+}
+
+/// Marks a comparison between two numeric types as numeric (see
+/// `ast::ArithMark`), so both sides are read as numbers at run time. Two
+/// `bigint` columns are two strings there, and compared as text `"10"` sorts
+/// before `"9"`. Optional sides count — a null still compares as a null.
+fn note_comparison(e: &Expr, a: &Ty, b: &Ty) {
+    use crate::ast::Arith;
+    let (Some(x), Some(y)) = (a.strip_opt().scalar(), b.strip_opt().scalar()) else {
+        return;
+    };
+    if !x.is_numeric() || !y.is_numeric() {
+        return;
+    }
+    e.arith
+        .set(if x == Scalar::Numeric || y == Scalar::Numeric {
+            Arith::Numeric
+        } else {
+            Arith::Int
+        });
 }

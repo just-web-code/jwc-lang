@@ -10,9 +10,10 @@
 //!
 //! This pass covers the tier that needs no database: routes, control flow,
 //! expressions, and the built-ins the prelude already implements. Anything
-//! outside it is refused by [`reject_unsupported`] with the construct
-//! named, because a native build that silently dropped a query would be far
-//! worse than one that will not start.
+//! outside it is refused where it is reached, with the construct named,
+//! because a native build that silently dropped a query would be far worse
+//! than one that will not start. There used to be a whole-program gate as
+//! well, for views; a view is lowered like a table now (V1.1-PLAN 11).
 //!
 //! Queries are the next tier and they are cheap here, which is the reason
 //! this backend is worth rebuilding at all: `query_sql` already lowers a
@@ -307,35 +308,6 @@ const PRELUDE_GAPS: &[&str] = &[
     "raw",
 ];
 
-/// Refuse a program this pass cannot lower, naming the construct.
-///
-/// The old backend had the same gate and the same reason: a native binary
-/// that quietly dropped a route, a query or a middleware would be a worse
-/// outcome than one that refuses to build. `jwc serve` runs everything.
-pub fn reject_unsupported(ws: &Workspace) -> Result<()> {
-    let mut blocked: Vec<String> = Vec::new();
-    for file in &ws.files {
-        for decl in &file.program.decls {
-            // A view is a named query the model resolves like a table;
-            // `query_sql` lowers reads through it, but the DDL that creates
-            // it is `jwc migrate`'s job, not the binary's.
-            if let Decl::View(d) = decl {
-                blocked.push(format!("view `{}`", d.name.name));
-            }
-        }
-    }
-    blocked.sort();
-    blocked.dedup();
-    if !blocked.is_empty() {
-        bail!(
-            "native build does not cover this program yet:\n  {}\n\n\
-             `jwc serve` runs the whole language today.",
-            blocked.join("\n  ")
-        );
-    }
-    Ok(())
-}
-
 /// What kind of body is being emitted. Only `return` differs, and it
 /// differs the way `Flow` does in the interpreter: a middleware that
 /// returns is short-circuiting the chain, which is not the same event as a
@@ -500,8 +472,6 @@ pub struct Generated {
 
 /// Lower a checked workspace to a Rust source file.
 pub fn generate(ws: &Workspace) -> Result<Generated> {
-    reject_unsupported(ws)?;
-
     let built = crate::model::build(ws);
     let symbols = crate::symbols::build(ws, &built.model);
     // The routing table, the middleware chain per route and the `after`
@@ -2144,17 +2114,35 @@ fn emit_cond(e: &Expr, ctx: &mut Ctx) -> Result<String> {
             }
             let l = emit_expr(lhs, ctx)?;
             let r = emit_expr(rhs, ctx)?;
-            return Ok(match op {
-                BinOp::Lt => format!("jwc_lt(&{l}, &{r})"),
-                BinOp::Le => format!("jwc_lte(&{l}, &{r})"),
-                BinOp::Gt => format!("jwc_gt(&{l}, &{r})"),
-                BinOp::Ge => format!("jwc_gte(&{l}, &{r})"),
-                BinOp::Eq => format!("jwc_eq(&{l}, &{r})"),
-                _ => format!("!jwc_eq(&{l}, &{r})"),
-            });
+            return Ok(compare_code(*op, &l, &r, e, ctx));
         }
     }
     Ok(format!("jwc_truthy(&{})", emit_expr(e, ctx)?))
+}
+
+/// A comparison of two emitted `V`s, as a Rust `bool`.
+///
+/// Where the checker typed the comparison numeric (`ast::ArithMark`), both
+/// sides are read as numbers: a `bigint` is a string here (`jwc_big`), and
+/// two of them compared as text put `"10"` before `"9"`.
+fn compare_code(op: BinOp, l: &str, r: &str, e: &Expr, ctx: &mut Ctx) -> String {
+    let (f, not) = match op {
+        BinOp::Lt => ("lt", ""),
+        BinOp::Le => ("lte", ""),
+        BinOp::Gt => ("gt", ""),
+        BinOp::Ge => ("gte", ""),
+        BinOp::Ne => ("eq", "!"),
+        _ => ("eq", ""),
+    };
+    let family = match e.arith.get() {
+        Some(crate::ast::Arith::Numeric) => {
+            ctx.used.insert("jwc_numeric_op".to_string());
+            "jwc_numeric_"
+        }
+        Some(crate::ast::Arith::Int) => "jwc_int_",
+        None => "jwc_",
+    };
+    format!("{not}{family}{f}(&{l}, &{r})")
 }
 
 /// How a `return` leaves the body being emitted.
@@ -2171,6 +2159,34 @@ fn emit_return(out: &mut String, pad: &str, value: &str, ctx: &Ctx) {
             Mode::Value => out.push_str(&format!("{pad}return Ok({value});\n")),
             Mode::Middleware => out.push_str(&format!("{pad}return Ok(Some({value}));\n")),
         }
+    }
+}
+
+/// The class of an element of `iterable`, when it is a class-typed local's
+/// field declared as an array of a class: `@req.entries` where `req` is a
+/// `MarkRegister` and `entries` is `RegisterEntry[]`.
+fn element_class(iterable: &Expr, ctx: &Ctx) -> Option<String> {
+    use crate::types::Ty;
+    let ExprKind::Field { base, field } = &*iterable.kind else {
+        return None;
+    };
+    let (ExprKind::Local(owner) | ExprKind::Name(owner)) = &*base.kind else {
+        return None;
+    };
+    let class = ctx.class_of_local(&owner.name)?;
+    let f = ctx
+        .symbols
+        .classes
+        .get(&class)?
+        .fields
+        .iter()
+        .find(|f| f.name == field.name)?;
+    match f.ty.strip_opt() {
+        Ty::Array(inner) => match inner.strip_opt() {
+            Ty::Class(c) if ctx.symbols.classes.contains_key(&c) => Some(c),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -2286,7 +2302,20 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
             ));
             ctx.push_scope();
             ctx.bind_local(&binder.name);
+            // `for (let entry in @req.entries)` over a class's array field:
+            // the binder is an element of that field's declared class, so a
+            // `...@entry` in the body has a shape to spread. e-school
+            // writes a register row per entry exactly this way, and it was
+            // the last thing keeping it out of `jwc build` (V1.1-PLAN 11).
+            let shadowed = ctx.classes_in_scope.remove(&binder.name);
+            if let Some(class) = element_class(iterable, ctx) {
+                ctx.classes_in_scope.insert(binder.name.clone(), class);
+            }
             emit_block(out, body, indent + 2, ctx)?;
+            ctx.classes_in_scope.remove(&binder.name);
+            if let Some(c) = shadowed {
+                ctx.classes_in_scope.insert(binder.name.clone(), c);
+            }
             ctx.pop_scope();
             out.push_str(&format!("{pad}    }}\n{pad}}}\n"));
         }
@@ -2456,6 +2485,14 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                         rust_str_literal(&field.name)
                     ));
                 }
+                // An enum member is its own name on the wire (types.md
+                // §3.4) — the interpreter answers `Value::Text(member)`.
+                // Emitting the enum as a value instead made `@role ==
+                // UserRole.admin` fail the native build, which is how every
+                // role gate is written (V1.1-PLAN entry 11).
+                if !ctx.is_local(&n.name) && ctx.symbols.enums.contains_key(&n.name) {
+                    return Ok(format!("v_str({})", rust_str_literal(&field.name)));
+                }
             }
             let b = emit_expr(base, ctx)?;
             format!("jwc_get_field(&{b}, {})", rust_str_literal(&field.name))
@@ -2532,12 +2569,9 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                 // Comparison: the prelude's helpers take references and
                 // answer a Rust `bool`, so the result is lifted back into a
                 // `V` here rather than pretending they compose.
-                BinOp::Eq | BinOp::EqOpt => format!("V::Bool(jwc_eq(&{l}, &{r}))"),
-                BinOp::Ne => format!("V::Bool(!jwc_eq(&{l}, &{r}))"),
-                BinOp::Lt => format!("V::Bool(jwc_lt(&{l}, &{r}))"),
-                BinOp::Le => format!("V::Bool(jwc_lte(&{l}, &{r}))"),
-                BinOp::Gt => format!("V::Bool(jwc_gt(&{l}, &{r}))"),
-                BinOp::Ge => format!("V::Bool(jwc_gte(&{l}, &{r}))"),
+                BinOp::Eq | BinOp::EqOpt | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                    format!("V::Bool({})", compare_code(*op, &l, &r, e, ctx))
+                }
 
                 // `and` / `or` must short-circuit, so they are emitted
                 // inline: a call would evaluate both sides.
@@ -3445,23 +3479,7 @@ fn emit_built_with(
 /// True when an expression reads a column of the table being written —
 /// `exec::reads_a_column`.
 fn reads_a_column(table: &crate::ast::QualifiedTable, e: &Expr, ctx: &Ctx) -> bool {
-    let object = ctx
-        .symbols
-        .by_path
-        .get(&table.text())
-        .cloned()
-        .unwrap_or_else(|| table.object.name.clone());
-    let Some(t) = ctx.model.tables.iter().find(|t| t.declared == object) else {
-        return false;
-    };
-    match &*e.kind {
-        ExprKind::Name(n) => t.column(&n.name).is_some(),
-        ExprKind::Binary { lhs, rhs, .. } => {
-            reads_a_column(table, lhs, ctx) || reads_a_column(table, rhs, ctx)
-        }
-        ExprKind::Unary { rhs, .. } => reads_a_column(table, rhs, ctx),
-        _ => false,
-    }
+    crate::sql::reads_a_column(ctx.model, &ctx.symbols.by_path, table, e)
 }
 
 /// The builder wants an `Expr` per bound value but never looks at it — the

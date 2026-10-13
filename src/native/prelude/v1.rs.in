@@ -89,8 +89,12 @@ fn jwc_b_v1_int(v: V) -> JwcResult {
     jwc_v1_parse_int(v)
 }
 
+/// Held in its wire form, as every `bigint` is (`jwc_big`).
 fn jwc_b_v1_bigint(v: V) -> JwcResult {
-    jwc_v1_parse_int(v)
+    jwc_v1_parse_int(v).map(|n| match n {
+        V::Int(n) => jwc_big(n),
+        other => other,
+    })
 }
 
 fn jwc_b_v1_numeric(v: V) -> V {
@@ -237,14 +241,14 @@ fn jwc_b_v1_date_total_seconds(v: V) -> JwcResult {
 fn jwc_b_v1_date_total_millis(v: V) -> JwcResult {
     Ok(match jwc_v1_interval_micros(&v, "date.total_millis")? {
         None => V::Null,
-        Some(us) => V::Int(us / 1_000),
+        Some(us) => jwc_big(us / 1_000),
     })
 }
 
 fn jwc_b_v1_date_total_micros(v: V) -> JwcResult {
     Ok(match jwc_v1_interval_micros(&v, "date.total_micros")? {
         None => V::Null,
-        Some(us) => V::Int(us),
+        Some(us) => jwc_big(us),
     })
 }
 

@@ -104,10 +104,13 @@ The binary listens when `main` calls `serve()`. A program that never does
 is a console program — declaring routes is not asking to listen — and the
 binary returns when `main` does rather than binding a port behind it.
 
-The two backends are held to the same answers: the release check builds
-each real application both ways, runs the same requests against both, and
-compares the responses byte for byte — status, content-type, body and
-headers.
+The two backends are held to the same answers. `tools/parity/run.sh
+<app> <scenario>` builds an application both ways, puts each on a fresh
+database, drives both through the same requests and diffs every response —
+status, content type, body and redirect target — after normalising what
+legitimately differs between two runs (timestamps, tokens, values the
+application generates at random). On 1.1 that is e-school's own seed
+script, 813 requests; MyWallet, 34; and jwc-shortener, 11 — all identical.
 
 Anything `jwc build` cannot lower it **refuses**, naming the construct.
 A binary that quietly dropped a query would be a far worse outcome than

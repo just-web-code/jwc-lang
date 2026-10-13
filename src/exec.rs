@@ -1941,35 +1941,7 @@ impl<'a> Vm<'a> {
 
     /// True when an expression reads a column of the table being written.
     fn reads_a_column(&self, table: &QualifiedTable, e: &Expr) -> bool {
-        let object = self
-            .program
-            .symbols
-            .by_path
-            .get(&table.text())
-            .cloned()
-            .unwrap_or_else(|| table.object.name.clone());
-        let Some(t) = self
-            .program
-            .model
-            .tables
-            .iter()
-            .find(|t| t.declared == object)
-        else {
-            return false;
-        };
-        match &*e.kind {
-            ExprKind::Name(n) => t.column(&n.name).is_some(),
-            // `T.value` — the binding qualifying the column, which is how a
-            // column is written everywhere else in a query (queries.md §2.4).
-            ExprKind::Field { base, field } => {
-                matches!(&*base.kind, ExprKind::Name(_)) && t.column(&field.name).is_some()
-            }
-            ExprKind::Binary { lhs, rhs, .. } => {
-                self.reads_a_column(table, lhs) || self.reads_a_column(table, rhs)
-            }
-            ExprKind::Unary { rhs, .. } => self.reads_a_column(table, rhs),
-            _ => false,
-        }
+        crate::sql::reads_a_column(&self.program.model, &self.program.symbols.by_path, table, e)
     }
 
     /// queries.md §9.3 — `{items, next, has_more}`.
