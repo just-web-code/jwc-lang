@@ -3,7 +3,18 @@
 All notable changes to JWC are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] — 2026-10-13
+
+A minor release (SEMVER.md): no program 1.0.1 ran changes meaning, and the
+ones that ran into a defect get the answer the language always promised.
+The `date` builtins do what they declare; `numeric` is exact and a column
+is the type it declares on both backends; `jwc check` sees through a
+function's return; and `jwc build` builds e-school, MyWallet and
+jwc-shortener, whose responses match `jwc serve` one for one — 858 of 858.
+A billion-iteration loop runs 8.2× faster natively, and a new project's
+first build reuses the dependencies the last one compiled.
+
+The entries, with what was run and measured, are in `V1.1-PLAN.md`.
 
 ### `server { swagger }` serves Swagger UI
 
