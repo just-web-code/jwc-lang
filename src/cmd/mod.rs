@@ -1475,12 +1475,9 @@ pub fn openapi_document(path: &Path, title: Option<String>) -> Result<serde_json
     }
     let built = crate::model::build(&ws);
     let symbols = crate::symbols::build(&ws, &built.model);
-    // Two passes: the first infers the return type of every unannotated
-    // function, the second hands each call site the shape its callee
-    // actually produces. One pass cannot know the type of a function it has
-    // not reached yet, and reordering would only move the problem.
-    let first = crate::check::check(&ws, &symbols, &built.model);
-    let checked = crate::check::check_with(&ws, &symbols, &built.model, &first.function_returns);
+    // `check` runs as many passes as the program needs, so every call site
+    // has the shape its callee actually produces.
+    let checked = crate::check::check(&ws, &symbols, &built.model);
     let wired = crate::wiring::wire(&ws, &symbols);
 
     let errors = built

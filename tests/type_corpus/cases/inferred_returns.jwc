@@ -1,0 +1,33 @@
+namespace inferred_returns;
+
+// An unannotated function's result is typed at every call site, however
+// far down the chain the type comes from (V1.1-PLAN entry 10). On one
+// checker pass every call to one was `Unknown`, so none of these were
+// reported.
+service Notes {
+    function one(id: bigint) {
+        return select N from App.s.Notes
+            where N.id == @id
+            as { N.id, N.amount }
+            first or throw NotFound("no note");
+    }
+
+    // Two links: `wrapped` returns what `one` returns.
+    function wrapped(id: bigint) {
+        return Notes.one(@id);
+    }
+
+    // Three: declared after the code that calls it.
+    function twice_wrapped(id: bigint) {
+        return Notes.wrapped(@id);
+    }
+
+    function misuse(id: bigint) {
+        let n = Notes.one(@id);
+        let a: boolean = n.amount;              // expect: E0352
+        let w = Notes.twice_wrapped(@id);
+        let b: boolean = w.amount;              // expect: E0352
+        let ok: numeric = w.amount;
+        return @ok;
+    }
+}

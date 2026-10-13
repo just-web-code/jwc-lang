@@ -509,14 +509,9 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // reads. Rebuilding any of it here is how the two backends would come
     // to disagree about which middleware ran first.
     let wired = crate::wiring::wire(ws, &symbols);
-    // Twice, as `jwc check` runs it: one pass cannot know the return type
-    // of a function it has not reached yet, and an operator over such a
-    // call would otherwise be untyped — and fall back to deciding at run
-    // time what the checker could have said.
-    let checked = {
-        let first = crate::check::check(ws, &symbols, &built.model);
-        crate::check::check_with(ws, &symbols, &built.model, &first.function_returns)
-    };
+    // Its marks are what the arithmetic below is emitted from
+    // (`ast::ArithMark`).
+    let checked = crate::check::check(ws, &symbols, &built.model);
     // Again, now that the checker has marked the AST: `Symbols` holds
     // clones — a `const` is emitted from its copy there — and a clone
     // taken before the marks were written carries none (`ast::ArithMark`).

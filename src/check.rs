@@ -48,8 +48,28 @@ pub struct RouteResponse {
     pub media: Option<String>,
 }
 
+/// Every pass the program needs, and the diagnostics of the last.
+///
+/// One pass cannot know what a function it has not reached returns, and an
+/// unannotated function has no declared return — so on a single pass every
+/// call to one was `Unknown` at its call site, declared before it or not,
+/// and nothing about its result was checked: `let y: boolean =
+/// Shop.one(@id).price` was accepted (V1.1-PLAN entry 10). Each pass hands
+/// the next the return types it inferred; a chain `f` → `g` → `h` needs one
+/// pass per link, so this runs until the inferred returns stop changing.
+/// The bound is a guard, not a budget: real programs settle in two or three.
 pub fn check(ws: &Workspace, sym: &Symbols, model: &crate::model::SchemaModel) -> Checked {
-    check_with(ws, sym, model, &Default::default())
+    const MAX_PASSES: usize = 8;
+    let mut checked = check_with(ws, sym, model, &Default::default());
+    for _ in 1..MAX_PASSES {
+        let next = check_with(ws, sym, model, &checked.function_returns);
+        let settled = next.function_returns == checked.function_returns;
+        checked = next;
+        if settled {
+            break;
+        }
+    }
+    checked
 }
 
 /// The same pass, with the return types a previous run inferred.
