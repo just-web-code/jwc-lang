@@ -575,6 +575,44 @@ impl TableObj {
 }
 
 /// The Postgres type a bound parameter is cast to.
+/// True when a `set` value reads a column of the table being written, so it
+/// belongs in the statement — `set hits = Links.hits + 1` is an increment,
+/// and computing it before the write would need a read first, which is the
+/// race writes.md §2.3 is about.
+///
+/// One function for both backends. The native backend had its own copy,
+/// which knew the bare `hits` form and not `Links.hits`, so every program
+/// written the way the rest of a query is written — MyWallet and
+/// jwc-shortener both — was refused by `jwc build` (V1.1-PLAN entry 11).
+pub fn reads_a_column(
+    model: &SchemaModel,
+    by_path: &std::collections::BTreeMap<String, String>,
+    table: &QualifiedTable,
+    e: &Expr,
+) -> bool {
+    let object = by_path
+        .get(&table.text())
+        .cloned()
+        .unwrap_or_else(|| table.object.name.clone());
+    let Some(t) = model.tables.iter().find(|t| t.declared == object) else {
+        return false;
+    };
+    fn reads(t: &TableObj, e: &Expr) -> bool {
+        match &*e.kind {
+            ExprKind::Name(n) => t.column(&n.name).is_some(),
+            // `T.value` — the binding qualifying the column, which is how a
+            // column is written everywhere else in a query (queries.md §2.4).
+            ExprKind::Field { base, field } => {
+                matches!(&*base.kind, ExprKind::Name(_)) && t.column(&field.name).is_some()
+            }
+            ExprKind::Binary { lhs, rhs, .. } => reads(t, lhs) || reads(t, rhs),
+            ExprKind::Unary { rhs, .. } => reads(t, rhs),
+            _ => false,
+        }
+    }
+    reads(t, e)
+}
+
 pub fn pg_type(t: &SqlType) -> String {
     match t {
         SqlType::Scalar(s) => s.clone(),

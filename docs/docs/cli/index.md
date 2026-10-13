@@ -88,6 +88,14 @@ having routes.
 dependency on the compiler. It needs a Rust toolchain, because that is
 what it hands the generated crate to.
 
+The dependency tree under the generated crate — tokio, hyper, serde and the
+rest — is compiled into one cargo target directory that every project
+shares, `~/.jwc/cache/target`. It is compiled once per toolchain, not once
+per project, so a new project's first build is mostly its own crate.
+`JWC_BUILD_CACHE` names another directory, or `off` for one under the
+project's `.jwc-build/`; `CARGO_TARGET_DIR` wins over both, as it does for
+cargo.
+
 It runs `jwc check` first and builds nothing if that fails — testing only
 that the source parses would let a program with type errors, one
 `jwc check` exits 1 on, compile to a release binary and run.
@@ -96,10 +104,13 @@ The binary listens when `main` calls `serve()`. A program that never does
 is a console program — declaring routes is not asking to listen — and the
 binary returns when `main` does rather than binding a port behind it.
 
-The two backends are held to the same answers: the release check builds
-each real application both ways, runs the same requests against both, and
-compares the responses byte for byte — status, content-type, body and
-headers.
+The two backends are held to the same answers. `tools/parity/run.sh
+<app> <scenario>` builds an application both ways, puts each on a fresh
+database, drives both through the same requests and diffs every response —
+status, content type, body and redirect target — after normalising what
+legitimately differs between two runs (timestamps, tokens, values the
+application generates at random). On 1.1 that is e-school's own seed
+script, 813 requests; MyWallet, 34; and jwc-shortener, 11 — all identical.
 
 Anything `jwc build` cannot lower it **refuses**, naming the construct.
 A binary that quietly dropped a query would be a far worse outcome than
@@ -303,12 +314,12 @@ See [Editor setup](../getting-started/editor-setup.md).
 ## Which build is this?
 
 ```bash
-jwc --version              # jwc 1.0.1
+jwc --version              # jwc 1.1.0
 jwc --version --verbose    # ...plus the triple, profile, commit and rustc
 ```
 
 ```
-jwc 1.0.1
+jwc 1.1.0
 build target:  x86_64-unknown-linux-gnu
 build profile: release
 git commit:    629ee9d3eaa2

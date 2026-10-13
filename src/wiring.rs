@@ -1361,7 +1361,7 @@ fn walk_block(b: &Block, f: &mut impl FnMut(&Stmt)) {
     }
 }
 
-fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(&'a Expr)) {
     f(e);
     match &*e.kind {
         ExprKind::Field { base, .. } => walk_expr(base, f),

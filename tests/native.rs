@@ -208,34 +208,70 @@ fn a_class_reaches_the_binary_with_its_rules_intact() {
     assert!(rust.contains(r#"name: "minLength", limit: Some(2)"#));
 }
 
+/// V1.1-PLAN entry 11. A view used to refuse the whole program — e-school
+/// has eleven, so it could not be built at all — although nothing about one
+/// is the binary's to do: `query_sql` lowers a read through it to the same
+/// statement the interpreter sends, and creating it is `jwc migrate`'s job.
 #[test]
-fn a_program_the_pass_cannot_lower_is_refused_by_name() {
-    let dir = std::env::temp_dir().join("jwc_native_reject");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("tmp");
+fn a_view_is_read_like_a_table() {
+    let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
-        dir.join("a.jwc"),
+        dir.path().join("a.jwc"),
         "namespace a;\n\
          database App : Postgres;\n\
          schema s of App;\n\
          table Notes of App.s { id bigint primary key identity; title varchar(200); }\n\
          view Titles of App.s {\n\
-         \x20   select N from App.s.Notes as { id, title }\n\
-         }\n",
+         \x20   select N from App.s.Notes as { N.id, N.title }\n\
+         }\n\
+         routes \"/t\" {\n\
+         \x20   route GET \"\" { return json(select T from App.s.Titles as { T.title }); }\n\
+         }\n\
+         function main() { serve(); }\n",
     )
     .expect("write");
-
-    let ws = Workspace::load(&dir).expect("load");
-    let err = jwc::native::codegen_for_test(&ws).expect_err("a view is outside this pass");
-    let msg = err.to_string();
-    let _ = std::fs::remove_dir_all(&dir);
-
-    // Named, not a shrug: a native binary that quietly dropped a view would
-    // be a far worse outcome than one that will not build.
-    assert!(msg.contains("view `Titles`"), "{msg}");
+    let ws = Workspace::load(dir.path()).expect("load");
+    checked(&ws);
+    let rust = jwc::native::codegen_for_test(&ws).expect("a view lowers");
     assert!(
-        msg.contains("jwc serve"),
-        "the message should say what does work: {msg}"
+        rust.contains("FROM s.titles"),
+        "the read goes through the view:\n{rust}"
+    );
+}
+
+/// The other two constructs that kept the applications out of `jwc build`.
+/// `set hits = Links.hits + 1` reads the row's own column, so it belongs in
+/// the statement — the native copy of that test knew the bare `hits` form
+/// and not the qualified one. And `UserRole.admin` is the member's name on
+/// the wire, which is how every role gate is written.
+#[test]
+fn a_qualified_increment_and_an_enum_member_lower() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace a;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         enum Role of App.s { admin, member }\n\
+         table Links of App.s { code text primary key; hits int default 0; }\n\
+         routes \"/l/{code}\" {\n\
+         \x20   route POST \"\" {\n\
+         \x20       let r = enum(Role, request.query(\"role\"));\n\
+         \x20       if (@r != Role.admin) { throw Forbidden(\"no\"); }\n\
+         \x20       update Links of App.s.Links set hits = Links.hits + 1 where Links.code == @code;\n\
+         \x20       return json({ ok: true });\n\
+         \x20   }\n\
+         }\n\
+         function main() { serve(); }\n",
+    )
+    .expect("write");
+    let ws = Workspace::load(dir.path()).expect("load");
+    checked(&ws);
+    let rust = jwc::native::codegen_for_test(&ws).expect("both lower");
+    assert!(rust.contains("v_str(\"admin\")"), "{rust}");
+    assert!(
+        rust.contains("SET hits = (hits + "),
+        "the increment is SQL:\n{rust}"
     );
 }
 
@@ -863,5 +899,102 @@ fn a_boolean_coercion_propagates_like_int_and_date() {
     assert!(
         rust.contains("jwc_b_v1_boolean(") && rust.contains(")?"),
         "the coercion must reach the prelude and propagate:\n{rust}"
+    );
+}
+
+/// V1.1-PLAN entry 5. An integer local the checker typed, and that only
+/// ever receives integer arithmetic, is an `i64` in the binary — not a `V`
+/// cloned and dispatched on every turn of a loop.
+#[test]
+fn an_integer_local_is_a_native_i64() {
+    let rust = generate("tests/native_parity");
+    for decl in [
+        "let mut v_total: i64 = 0i64;",
+        "let mut v_k: i64 = 0i64;",
+        "let mut v_q: i64 = jwc_i_div(jwc_i_neg(7i64), 2i64);",
+    ] {
+        assert!(rust.contains(decl), "missing `{decl}`:\n{rust}");
+    }
+    // Arithmetic stays checked: the interpreter refuses an overflow, and a
+    // bare `+` would wrap in a release binary.
+    assert!(
+        rust.contains("v_total = jwc_i_add(v_total, v_k);"),
+        "{rust}"
+    );
+    // A condition over two of them is a Rust comparison, not a `V::Bool`
+    // built and unwrapped again.
+    assert!(rust.contains("if !(v_k < 100i64) { break; }"), "{rust}");
+    // Boxed once, where it meets something dynamic.
+    assert!(
+        rust.contains("jwc_b_v1_string_of(V::Int(v_total))"),
+        "{rust}"
+    );
+}
+
+/// The other half of the rule: a local is lowered only when every write to
+/// it is integer arithmetic. One written from a call, or declared optional,
+/// stays a value.
+#[test]
+fn a_local_written_from_anything_else_stays_a_value() {
+    let rust = generate("tests/native_parity");
+    assert!(rust.contains("let mut v_m = V::Int(1);"), "{rust}");
+    assert!(rust.contains("let mut v_o = V::Null;"), "{rust}");
+    assert!(!rust.contains("v_m: i64"), "{rust}");
+    assert!(!rust.contains("v_o: i64"), "{rust}");
+}
+
+/// V1.1-PLAN entry 9. A `bigint` is held in its wire form, a string, as the
+/// interpreter's `Value::Bigint` serialises — so `bigint(x)` builds one, and
+/// a comparison the checker typed as integer reads both sides as numbers
+/// rather than ordering two strings as text.
+#[test]
+fn a_bigint_is_its_wire_form_and_compares_as_a_number() {
+    let rust = generate("tests/native_parity");
+    assert!(
+        rust.contains("fn jwc_big(n: i64) -> V {\n    v_str(n.to_string())"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains(
+            "jwc_int_gt(&jwc_b_v1_bigint(v_str(\"10\"))?, &jwc_b_v1_bigint(v_str(\"9\"))?)"
+        ),
+        "the comparison must be the typed one:\n{rust}"
+    );
+}
+
+/// `for (let entry in @req.entries) { insert … { ...@entry } }` — the
+/// binder is an element of a class's array field, so its shape is that
+/// field's declared class. e-school writes a register row per entry this
+/// way, and it was refused as an untyped spread (V1.1-PLAN entry 11).
+#[test]
+fn a_spread_of_a_loop_element_takes_the_fields_class() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("a.jwc"),
+        "namespace a;\n\
+         database App : Postgres;\n\
+         schema s of App;\n\
+         table Marks of App.s { id bigint primary key identity; student_id bigint; value int; }\n\
+         class MarkIn { student_id bigint required; value int required; }\n\
+         class Register { entries MarkIn[] required; }\n\
+         routes \"/m\" {\n\
+         \x20   route POST \"\" {\n\
+         \x20       let req = request.body() as Register;\n\
+         \x20       for (let entry in @req.entries) {\n\
+         \x20           insert Marks into App.s.Marks { ...@entry };\n\
+         \x20       }\n\
+         \x20       return json({ ok: true });\n\
+         \x20   }\n\
+         }\n\
+         function main() { serve(); }\n",
+    )
+    .expect("write");
+    let ws = Workspace::load(dir.path()).expect("load");
+    checked(&ws);
+    let rust = jwc::native::codegen_for_test(&ws).expect("the spread lowers");
+    assert!(
+        rust.contains("jwc_get_field(&v_entry, \"student_id\")")
+            && rust.contains("jwc_get_field(&v_entry, \"value\")"),
+        "both of MarkIn's fields come from the element:\n{rust}"
     );
 }

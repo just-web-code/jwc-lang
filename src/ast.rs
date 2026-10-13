@@ -787,6 +787,8 @@ pub enum AssertKind {
 pub struct Expr {
     pub kind: Box<ExprKind>,
     pub span: Span,
+    /// Set by the checker on `+ - * / %` and unary `-`. See `ArithMark`.
+    pub arith: ArithMark,
 }
 
 impl Expr {
@@ -794,7 +796,67 @@ impl Expr {
         Self {
             kind: Box::new(kind),
             span,
+            arith: ArithMark::default(),
         }
+    }
+}
+
+/// Which arithmetic an operator is (types.md §12.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arith {
+    /// `smallint`, `int` or `bigint` operands.
+    Int,
+    /// At least one `numeric` operand.
+    Numeric,
+}
+
+/// What the checker proved about an operator, written onto the operator
+/// itself so both backends read it.
+///
+/// Needed because a value read from the database does not carry its type:
+/// a `bigint` and a `numeric` come back in their wire form, a string, the
+/// same as a `text`. Deciding at run time made `price + price` concatenate
+/// to `"19.9919.99"` and `id + id` to `"11"` — in the interpreter as well
+/// as in a native binary. The checker knows the declared types, so it says
+/// which arithmetic each operator is, and the runtime reads the operands
+/// as that.
+///
+/// On the node rather than in a side table because the interpreter runs a
+/// *clone* of the AST: a mark travels with the clone, an address does not.
+/// Atomic only so the AST stays `Sync`; it is written once, by the checker,
+/// before anything runs.
+#[derive(Default)]
+pub struct ArithMark(std::sync::atomic::AtomicU8);
+
+impl ArithMark {
+    pub fn get(&self) -> Option<Arith> {
+        match self.0.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => Some(Arith::Int),
+            2 => Some(Arith::Numeric),
+            _ => None,
+        }
+    }
+
+    pub fn set(&self, a: Arith) {
+        let v = match a {
+            Arith::Int => 1,
+            Arith::Numeric => 2,
+        };
+        self.0.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Clone for ArithMark {
+    fn clone(&self) -> Self {
+        Self(std::sync::atomic::AtomicU8::new(
+            self.0.load(std::sync::atomic::Ordering::Relaxed),
+        ))
+    }
+}
+
+impl std::fmt::Debug for ArithMark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.get().fmt(f)
     }
 }
 

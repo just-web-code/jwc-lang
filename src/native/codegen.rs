@@ -10,9 +10,10 @@
 //!
 //! This pass covers the tier that needs no database: routes, control flow,
 //! expressions, and the built-ins the prelude already implements. Anything
-//! outside it is refused by [`reject_unsupported`] with the construct
-//! named, because a native build that silently dropped a query would be far
-//! worse than one that will not start.
+//! outside it is refused where it is reached, with the construct named,
+//! because a native build that silently dropped a query would be far worse
+//! than one that will not start. There used to be a whole-program gate as
+//! well, for views; a view is lowered like a table now (V1.1-PLAN 11).
 //!
 //! Queries are the next tier and they are cheap here, which is the reason
 //! this backend is worth rebuilding at all: `query_sql` already lowers a
@@ -97,6 +98,9 @@ const RESULT_BUILTINS: &[&str] = &[
     "jwc_b_v1_http_json",
     "jwc_b_v1_http_status",
     "jwc_b_v1_json_parse",
+    "jwc_b_v1_date_total_seconds",
+    "jwc_b_v1_date_total_millis",
+    "jwc_b_v1_date_total_micros",
 ];
 
 /// The 1.0 built-in name on the left, the prelude function on the right.
@@ -189,6 +193,9 @@ fn prelude_fn(name: &str) -> Option<&'static str> {
         "date.seconds" => "jwc_b_v1_date_seconds",
         "date.parse" => "jwc_b_v1_date_parse",
         "date.format" => "jwc_b_v1_date_format",
+        "date.total_seconds" => "jwc_b_v1_date_total_seconds",
+        "date.total_millis" => "jwc_b_v1_date_total_millis",
+        "date.total_micros" => "jwc_b_v1_date_total_micros",
 
         // The rest of text — builtins.md §4.
         "string.of" => "jwc_b_v1_string_of",
@@ -301,35 +308,6 @@ const PRELUDE_GAPS: &[&str] = &[
     "raw",
 ];
 
-/// Refuse a program this pass cannot lower, naming the construct.
-///
-/// The old backend had the same gate and the same reason: a native binary
-/// that quietly dropped a route, a query or a middleware would be a worse
-/// outcome than one that refuses to build. `jwc serve` runs everything.
-pub fn reject_unsupported(ws: &Workspace) -> Result<()> {
-    let mut blocked: Vec<String> = Vec::new();
-    for file in &ws.files {
-        for decl in &file.program.decls {
-            // A view is a named query the model resolves like a table;
-            // `query_sql` lowers reads through it, but the DDL that creates
-            // it is `jwc migrate`'s job, not the binary's.
-            if let Decl::View(d) = decl {
-                blocked.push(format!("view `{}`", d.name.name));
-            }
-        }
-    }
-    blocked.sort();
-    blocked.dedup();
-    if !blocked.is_empty() {
-        bail!(
-            "native build does not cover this program yet:\n  {}\n\n\
-             `jwc serve` runs the whole language today.",
-            blocked.join("\n  ")
-        );
-    }
-    Ok(())
-}
-
 /// What kind of body is being emitted. Only `return` differs, and it
 /// differs the way `Flow` does in the interpreter: a middleware that
 /// returns is short-circuiting the chain, which is not the same event as a
@@ -395,6 +373,12 @@ struct Ctx<'a> {
     /// emitted. Each one is an `async` block, so a `return` inside it has
     /// to travel out through every layer rather than exiting the closest.
     tx_depth: usize,
+    /// Locals emitted as a native `i64` rather than a `V`, scoped like
+    /// `locals`. See `native_int_lets`.
+    native_ints: Vec<std::collections::BTreeSet<String>>,
+    /// The `let`s of the body being emitted that `native_int_lets` chose,
+    /// by `let_id`.
+    native_lets: std::collections::HashSet<usize>,
 }
 
 impl Ctx<'_> {
@@ -417,14 +401,29 @@ impl Ctx<'_> {
     fn open_handler(&mut self) {
         self.locals.clear();
         self.locals.push(std::collections::BTreeSet::new());
+        self.native_ints.clear();
+        self.native_ints.push(std::collections::BTreeSet::new());
+        self.native_lets.clear();
     }
 
     fn push_scope(&mut self) {
         self.locals.push(std::collections::BTreeSet::new());
+        self.native_ints.push(std::collections::BTreeSet::new());
     }
 
     fn pop_scope(&mut self) {
         self.locals.pop();
+        self.native_ints.pop();
+    }
+
+    fn is_native_int(&self, name: &str) -> bool {
+        self.native_ints.iter().any(|s| s.contains(name))
+    }
+
+    fn bind_native_int(&mut self, name: &str) {
+        if let Some(s) = self.native_ints.last_mut() {
+            s.insert(name.to_string());
+        }
     }
 
     fn bind_local(&mut self, name: &str) {
@@ -466,12 +465,13 @@ pub struct Generated {
     pub needs_redis: bool,
     pub needs_ws: bool,
     pub needs_regex: bool,
+    /// The program does `numeric` arithmetic, so the crate carries
+    /// `numeric_core.rs.in` and depends on `rust_decimal`.
+    pub needs_decimal: bool,
 }
 
 /// Lower a checked workspace to a Rust source file.
 pub fn generate(ws: &Workspace) -> Result<Generated> {
-    reject_unsupported(ws)?;
-
     let built = crate::model::build(ws);
     let symbols = crate::symbols::build(ws, &built.model);
     // The routing table, the middleware chain per route and the `after`
@@ -479,6 +479,13 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     // reads. Rebuilding any of it here is how the two backends would come
     // to disagree about which middleware ran first.
     let wired = crate::wiring::wire(ws, &symbols);
+    // Its marks are what the arithmetic below is emitted from
+    // (`ast::ArithMark`).
+    let checked = crate::check::check(ws, &symbols, &built.model);
+    // Again, now that the checker has marked the AST: `Symbols` holds
+    // clones — a `const` is emitted from its copy there — and a clone
+    // taken before the marks were written carries none (`ast::ArithMark`).
+    let symbols = crate::symbols::build(ws, &built.model);
     // `server { max_page_size }` bounds a `limit`, and the query compiler
     // needs it to lower one. Read from the same declaration `serve.rs`
     // reads so the two backends cap at the same number.
@@ -507,6 +514,8 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
         locals: vec![std::collections::BTreeSet::new()],
         mode: Mode::Value,
         tx_depth: 0,
+        native_ints: vec![std::collections::BTreeSet::new()],
+        native_lets: Default::default(),
         recursive: recursive_functions(ws),
     };
     let mut out = String::new();
@@ -569,7 +578,6 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     let (swagger_path, swagger_html, swagger_json) = {
         let path = server.swagger.clone().unwrap_or_default();
         {
-            let checked = crate::check::check(ws, &symbols, &built.model);
             let doc = crate::openapi::document_for(
                 ws,
                 built.model.database.as_deref(),
@@ -578,9 +586,10 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
                 &wired,
                 None,
             );
+            let html = crate::swagger::render(&doc, &path);
             (
                 path,
-                crate::swagger::render(&doc),
+                html,
                 serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()),
             )
         }
@@ -1137,6 +1146,11 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
     source.push_str(super::PRELUDE_ESCAPE_CORE);
     source.push_str(super::PRELUDE_REDIRECT_CORE);
     source.push_str(super::PRELUDE_V1);
+    let needs_decimal = ctx.used.contains("jwc_numeric_op") || ctx.used.contains("jwc_numeric_neg");
+    if needs_decimal {
+        source.push_str(super::PRELUDE_NUMERIC_CORE);
+        source.push_str(super::PRELUDE_NUMERIC);
+    }
     if needs_db {
         source.push_str(super::PRELUDE_DB);
     }
@@ -1193,6 +1207,7 @@ pub fn generate(ws: &Workspace) -> Result<Generated> {
         needs_crypto,
         needs_redis,
         needs_regex,
+        needs_decimal,
     })
 }
 
@@ -1764,12 +1779,370 @@ fn emit_dispatch(
 }
 
 fn emit_block(out: &mut String, body: &Block, indent: usize, ctx: &mut Ctx) -> Result<()> {
+    // The outermost block of a body: decide, once and with all of it in
+    // view, which of its locals are `i64`s. Whether one can be depends on
+    // every later write to it, and on whether the locals *those* read are.
+    if ctx.native_ints.len() == 1 {
+        ctx.native_lets = native_int_lets(body);
+    }
     ctx.push_scope();
     for stmt in body {
         emit_stmt(out, stmt, indent, ctx)?;
     }
     ctx.pop_scope();
     Ok(())
+}
+
+// ---- native integer locals ------------------------------------------------
+//
+// A `let` whose value is an integer and whose every later write is an
+// integer is emitted as a Rust `i64`, not a `V`. The checker has typed it
+// either way; what changes is that the backend stops throwing that away.
+// Before this, `count = count + 1` was two clones of an enum, a call that
+// first asked whether its operands were a timestamp and an interval, and a
+// match on the variant — for what is one `add`. A billion iterations took
+// 58 s, about CPython's 66 s.
+//
+// The rule is deliberately narrow, because a wrong answer here is a
+// generated crate that does not compile:
+//
+// - the declared type, if written, is `smallint`, `int` or `bigint`, and
+//   not optional;
+// - the initialiser, and every assignment to the local anywhere in its
+//   scope, is built only from integer literals, other locals this rule
+//   lowers, unary `-`, and `+ - * / %`;
+// - nothing writes a field through it.
+//
+// "Other locals this rule lowers" is circular on purpose — `total = total +
+// k` with `k` declared on the next line is fine when `k` is — so the answer
+// is the largest set that satisfies it: start from every candidate and drop
+// the ones that read a dropped one until nothing changes.
+//
+// Anything else stays a `V`, exactly as before. A read of an `i64` local
+// anywhere that wants a `V` is boxed on the spot (`V::Int(v_x)`), which is
+// the value the old code would have held.
+//
+// Arithmetic on these is checked, as the interpreter's is: overflow and
+// division by zero are refused, never wrapped. See `jwc_i_add` and the
+// rest in the base prelude.
+
+/// A `let`, by the address of its name in the AST: unique across every
+/// file of the workspace for as long as the AST lives, which is the whole
+/// of codegen.
+fn let_id(name: &crate::ast::Ident) -> usize {
+    std::ptr::from_ref(name) as usize
+}
+
+/// The `let`s of `body`, at any depth, that are emitted as `i64`.
+fn native_int_lets(body: &Block) -> std::collections::HashSet<usize> {
+    let mut pass = IntLets::default();
+    pass.block(body);
+    let mut native: std::collections::HashSet<usize> = pass
+        .reads
+        .keys()
+        .copied()
+        .filter(|id| !pass.ruled_out.contains(id))
+        .collect();
+    loop {
+        let before = native.len();
+        let keep: Vec<usize> = native
+            .iter()
+            .copied()
+            .filter(|id| pass.reads[id].iter().all(|d| native.contains(d)))
+            .collect();
+        native = keep.into_iter().collect();
+        if native.len() == before {
+            return native;
+        }
+    }
+}
+
+/// One walk over a body, resolving every name the way the emitter's scopes
+/// will. Shadowing is refused by the checker (E0214), so a name in scope
+/// means exactly one binding.
+#[derive(Default)]
+struct IntLets {
+    /// Each candidate, and the candidates its initialiser and its writes
+    /// read.
+    reads: std::collections::HashMap<usize, Vec<usize>>,
+    /// Candidates written with something that is not integer arithmetic.
+    ruled_out: std::collections::HashSet<usize>,
+    /// What each name in scope is bound to. A binding that is not a `let`
+    /// — a `for` or `catch` binder — is in scope too, as a non-candidate.
+    scopes: Vec<std::collections::HashMap<String, usize>>,
+}
+
+impl IntLets {
+    fn block(&mut self, body: &Block) {
+        self.scopes.push(Default::default());
+        for s in body {
+            self.stmt(s);
+        }
+        self.scopes.pop();
+    }
+
+    fn bind(&mut self, name: &crate::ast::Ident) {
+        if let Some(s) = self.scopes.last_mut() {
+            s.insert(name.name.clone(), let_id(name));
+        }
+    }
+
+    fn resolve(&self, name: &str) -> Option<usize> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).copied())
+    }
+
+    /// The candidates `e` reads, when it is integer arithmetic over
+    /// literals and candidates; `None` when it is anything else.
+    fn pure(&self, e: &Expr) -> Option<Vec<usize>> {
+        match &*e.kind {
+            ExprKind::Int(s) => s.replace('_', "").parse::<i64>().ok().map(|_| vec![]),
+            ExprKind::Local(i) | ExprKind::Name(i) => self
+                .resolve(&i.name)
+                .filter(|id| self.reads.contains_key(id))
+                .map(|id| vec![id]),
+            ExprKind::Unary {
+                op: UnaryOp::Neg,
+                rhs,
+            } => self.pure(rhs),
+            ExprKind::Binary {
+                op: BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem,
+                lhs,
+                rhs,
+            } => {
+                let mut l = self.pure(lhs)?;
+                l.extend(self.pure(rhs)?);
+                Some(l)
+            }
+            _ => None,
+        }
+    }
+
+    fn stmt(&mut self, s: &Stmt) {
+        use crate::ast::{AssertKind, AssignTarget};
+        // A postfix `catch` carries a block inside an *expression*. Its
+        // writes count, and its binder is a name in scope.
+        for e in stmt_exprs(s) {
+            let mut catches = Vec::new();
+            crate::wiring::walk_expr(e, &mut |x| {
+                if let ExprKind::CatchPostfix { binder, body, .. } = &*x.kind {
+                    catches.push((binder, body));
+                }
+            });
+            for (binder, body) in catches {
+                self.scopes.push(Default::default());
+                self.bind(binder);
+                self.block(body);
+                self.scopes.pop();
+            }
+        }
+        match s {
+            Stmt::Let {
+                name, ty, value, ..
+            } => {
+                let declared = ty.as_ref().is_none_or(|t| {
+                    !t.optional
+                        && t.array_depth == 0
+                        && matches!(
+                            &t.kind,
+                            crate::ast::TypeKind::Scalar { name, .. }
+                                if matches!(name.as_str(), "smallint" | "int" | "bigint")
+                        )
+                });
+                // Resolved before the name is bound: an initialiser cannot
+                // read the local it declares.
+                if let Some(reads) = declared.then(|| self.pure(value)).flatten() {
+                    self.reads.insert(let_id(name), reads);
+                }
+                self.bind(name);
+            }
+            Stmt::Assign {
+                target: AssignTarget::Local { name, .. },
+                value,
+                ..
+            } => {
+                if let Some(id) = self.resolve(&name.name) {
+                    if self.reads.contains_key(&id) {
+                        match self.pure(value) {
+                            Some(r) => self.reads.entry(id).or_default().extend(r),
+                            None => {
+                                self.ruled_out.insert(id);
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::Assign {
+                target: AssignTarget::Field { base, .. },
+                ..
+            } => {
+                if let Some(id) = self.resolve(&base.name) {
+                    self.ruled_out.insert(id);
+                }
+            }
+            Stmt::If {
+                then, otherwise, ..
+            } => {
+                self.block(then);
+                if let Some(o) = otherwise {
+                    self.block(o);
+                }
+            }
+            Stmt::For { binder, body, .. } => {
+                self.scopes.push(Default::default());
+                self.bind(binder);
+                self.block(body);
+                self.scopes.pop();
+            }
+            Stmt::While { body, .. } | Stmt::Transaction { body, .. } => self.block(body),
+            Stmt::Assert {
+                kind: AssertKind::Fails { body, .. },
+                ..
+            } => self.block(body),
+            _ => {}
+        }
+    }
+}
+
+/// The expressions a statement holds directly, not those of nested blocks.
+fn stmt_exprs(s: &Stmt) -> Vec<&Expr> {
+    use crate::ast::AssertKind;
+    match s {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Expr { expr: value, .. } => {
+            vec![value]
+        }
+        Stmt::If { cond, .. } | Stmt::While { cond, .. } => vec![cond],
+        Stmt::For { iterable, .. } => vec![iterable],
+        Stmt::Return { value: Some(v), .. } => vec![v],
+        Stmt::Throw { args, .. } => args.iter().collect(),
+        Stmt::Dispatch { args, .. } => args.iter().map(|(_, e)| e).collect(),
+        Stmt::Assert {
+            kind: AssertKind::Expr(e),
+            ..
+        } => vec![e],
+        _ => vec![],
+    }
+}
+
+/// An expression whose value is an `i64` without ever being a `V`: what
+/// `IntLets::pure` accepts, judged against the locals lowered so far.
+fn pure_int(e: &Expr, native: &dyn Fn(&str) -> bool) -> bool {
+    match &*e.kind {
+        ExprKind::Int(s) => s.replace('_', "").parse::<i64>().is_ok(),
+        ExprKind::Local(i) | ExprKind::Name(i) => native(&i.name),
+        ExprKind::Unary {
+            op: UnaryOp::Neg,
+            rhs,
+        } => pure_int(rhs, native),
+        ExprKind::Binary { op, lhs, rhs } => {
+            matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+            ) && pure_int(lhs, native)
+                && pure_int(rhs, native)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a pure integer expression reads at least one `i64` local. One
+/// built only from literals is left to the ordinary path, so its emitted
+/// form — and every golden that pins it — does not change.
+fn expr_reads_native(e: &Expr, ctx: &Ctx) -> bool {
+    let mut found = false;
+    crate::wiring::walk_expr(e, &mut |x| {
+        if let ExprKind::Local(i) | ExprKind::Name(i) = &*x.kind {
+            if ctx.is_native_int(&i.name) {
+                found = true;
+            }
+        }
+    });
+    found
+}
+
+/// An `i64` expression for something `pure_int` accepted.
+fn emit_int(e: &Expr, ctx: &mut Ctx) -> Result<String> {
+    Ok(match &*e.kind {
+        ExprKind::Int(s) => format!("{}i64", s.replace('_', "")),
+        ExprKind::Local(i) | ExprKind::Name(i) if ctx.is_native_int(&i.name) => local(&i.name),
+        ExprKind::Unary {
+            op: UnaryOp::Neg,
+            rhs,
+        } => format!("jwc_i_neg({})", emit_int(rhs, ctx)?),
+        ExprKind::Binary { op, lhs, rhs } => {
+            let f = match op {
+                BinOp::Add => "jwc_i_add",
+                BinOp::Sub => "jwc_i_sub",
+                BinOp::Mul => "jwc_i_mul",
+                BinOp::Div => "jwc_i_div",
+                BinOp::Rem => "jwc_i_rem",
+                _ => bail!("`emit_int` reached a non-arithmetic operator"),
+            };
+            format!("{f}({}, {})", emit_int(lhs, ctx)?, emit_int(rhs, ctx)?)
+        }
+        _ => bail!("`emit_int` reached an expression `pure_int` refuses"),
+    })
+}
+
+/// A Rust `bool` for an `if` or `while` condition.
+///
+/// A comparison is emitted as one directly. It used to be wrapped in
+/// `V::Bool(…)` and unwrapped again by `jwc_truthy`, in the condition of
+/// every loop in every program — `jwc_lt` already answers a `bool`. When
+/// both sides are integer locals the comparison is native as well.
+fn emit_cond(e: &Expr, ctx: &mut Ctx) -> Result<String> {
+    if let ExprKind::Binary { op, lhs, rhs } = &*e.kind {
+        let sym = match op {
+            BinOp::Lt => Some("<"),
+            BinOp::Le => Some("<="),
+            BinOp::Gt => Some(">"),
+            BinOp::Ge => Some(">="),
+            BinOp::Eq => Some("=="),
+            BinOp::Ne => Some("!="),
+            _ => None,
+        };
+        if let Some(sym) = sym {
+            let native = {
+                let n = |x: &str| ctx.is_native_int(x);
+                pure_int(lhs, &n) && pure_int(rhs, &n)
+            };
+            if native {
+                return Ok(format!(
+                    "({} {sym} {})",
+                    emit_int(lhs, ctx)?,
+                    emit_int(rhs, ctx)?
+                ));
+            }
+            let l = emit_expr(lhs, ctx)?;
+            let r = emit_expr(rhs, ctx)?;
+            return Ok(compare_code(*op, &l, &r, e, ctx));
+        }
+    }
+    Ok(format!("jwc_truthy(&{})", emit_expr(e, ctx)?))
+}
+
+/// A comparison of two emitted `V`s, as a Rust `bool`.
+///
+/// Where the checker typed the comparison numeric (`ast::ArithMark`), both
+/// sides are read as numbers: a `bigint` is a string here (`jwc_big`), and
+/// two of them compared as text put `"10"` before `"9"`.
+fn compare_code(op: BinOp, l: &str, r: &str, e: &Expr, ctx: &mut Ctx) -> String {
+    let (f, not) = match op {
+        BinOp::Lt => ("lt", ""),
+        BinOp::Le => ("lte", ""),
+        BinOp::Gt => ("gt", ""),
+        BinOp::Ge => ("gte", ""),
+        BinOp::Ne => ("eq", "!"),
+        _ => ("eq", ""),
+    };
+    let family = match e.arith.get() {
+        Some(crate::ast::Arith::Numeric) => {
+            ctx.used.insert("jwc_numeric_op".to_string());
+            "jwc_numeric_"
+        }
+        Some(crate::ast::Arith::Int) => "jwc_int_",
+        None => "jwc_",
+    };
+    format!("{not}{family}{f}(&{l}, &{r})")
 }
 
 /// How a `return` leaves the body being emitted.
@@ -1789,6 +2162,34 @@ fn emit_return(out: &mut String, pad: &str, value: &str, ctx: &Ctx) {
     }
 }
 
+/// The class of an element of `iterable`, when it is a class-typed local's
+/// field declared as an array of a class: `@req.entries` where `req` is a
+/// `MarkRegister` and `entries` is `RegisterEntry[]`.
+fn element_class(iterable: &Expr, ctx: &Ctx) -> Option<String> {
+    use crate::types::Ty;
+    let ExprKind::Field { base, field } = &*iterable.kind else {
+        return None;
+    };
+    let (ExprKind::Local(owner) | ExprKind::Name(owner)) = &*base.kind else {
+        return None;
+    };
+    let class = ctx.class_of_local(&owner.name)?;
+    let f = ctx
+        .symbols
+        .classes
+        .get(&class)?
+        .fields
+        .iter()
+        .find(|f| f.name == field.name)?;
+    match f.ty.strip_opt() {
+        Ty::Array(inner) => match inner.strip_opt() {
+            Ty::Class(c) if ctx.symbols.classes.contains_key(&c) => Some(c),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The value a bare `return;` carries out of the current body.
 fn void_return_value(ctx: &Ctx) -> &'static str {
     match ctx.mode {
@@ -1802,6 +2203,14 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
     let pad = "    ".repeat(indent);
     match stmt {
         Stmt::Let { name, value, .. } => {
+            // `emit_block` decided, with the whole body in view.
+            if ctx.native_lets.contains(&let_id(name)) {
+                let v = emit_int(value, ctx)?;
+                ctx.bind_local(&name.name);
+                ctx.bind_native_int(&name.name);
+                out.push_str(&format!("{pad}let mut {}: i64 = {v};\n", local(&name.name)));
+                return Ok(());
+            }
             // The other place the AST names a local's class outright.
             if let ExprKind::Cast { ty, .. } = &*value.kind {
                 ctx.classes_in_scope
@@ -1825,6 +2234,15 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
                         ));
                         return Ok(());
                     }
+                }
+            }
+            if let crate::ast::AssignTarget::Local { name: i, .. } = target {
+                if ctx.is_native_int(&i.name) {
+                    // `native_int_lets` checked every write before the
+                    // `let` was lowered, so this one is integral.
+                    let v = emit_int(value, ctx)?;
+                    out.push_str(&format!("{pad}{} = {v};\n", local(&i.name)));
+                    return Ok(());
                 }
             }
             let v = emit_expr(value, ctx)?;
@@ -1856,8 +2274,8 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
             otherwise,
             ..
         } => {
-            let c = emit_expr(cond, ctx)?;
-            out.push_str(&format!("{pad}if jwc_truthy(&{c}) {{\n"));
+            let c = emit_cond(cond, ctx)?;
+            out.push_str(&format!("{pad}if {c} {{\n"));
             emit_block(out, then, indent + 1, ctx)?;
             if let Some(alt) = otherwise {
                 out.push_str(&format!("{pad}}} else {{\n"));
@@ -1884,7 +2302,20 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
             ));
             ctx.push_scope();
             ctx.bind_local(&binder.name);
+            // `for (let entry in @req.entries)` over a class's array field:
+            // the binder is an element of that field's declared class, so a
+            // `...@entry` in the body has a shape to spread. e-school
+            // writes a register row per entry exactly this way, and it was
+            // the last thing keeping it out of `jwc build` (V1.1-PLAN 11).
+            let shadowed = ctx.classes_in_scope.remove(&binder.name);
+            if let Some(class) = element_class(iterable, ctx) {
+                ctx.classes_in_scope.insert(binder.name.clone(), class);
+            }
             emit_block(out, body, indent + 2, ctx)?;
+            ctx.classes_in_scope.remove(&binder.name);
+            if let Some(c) = shadowed {
+                ctx.classes_in_scope.insert(binder.name.clone(), c);
+            }
             ctx.pop_scope();
             out.push_str(&format!("{pad}    }}\n{pad}}}\n"));
         }
@@ -1897,9 +2328,9 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Res
         Stmt::While { cond, body, .. } => {
             out.push_str(&format!("{pad}{{\n{pad}    let mut __turns: u64 = 0;\n"));
             out.push_str(&format!("{pad}    loop {{\n"));
-            let c = emit_expr(cond, ctx)?;
+            let c = emit_cond(cond, ctx)?;
             out.push_str(&format!(
-                "{pad}        if !jwc_truthy(&{c}) {{ break; }}\n\
+                "{pad}        if !{c} {{ break; }}\n\
                  {pad}        __turns += 1;\n\
                  {pad}        if __turns > {} {{\n\
                  {pad}            return Err(JwcThrown::new(\"internal_error\", 500, v_str(\"`while` ran {} times without its condition going false\".to_string())));\n\
@@ -2021,6 +2452,11 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
         // `@x` is a local when one is bound and a path parameter otherwise —
         // the same order the checker resolved it in, and the reason a `let`
         // may not shadow a path parameter (names.md §5.5).
+        // An `i64` local read where a `V` is wanted: boxed here, to the
+        // value the un-lowered code would have held.
+        ExprKind::Local(i) | ExprKind::Name(i) if ctx.is_native_int(&i.name) => {
+            format!("V::Int({})", local(&i.name))
+        }
         ExprKind::Local(i) if ctx.is_local(&i.name) => format!("{}.clone()", local(&i.name)),
         ExprKind::Local(i) => {
             format!("jwc_b_path_param(v_str({}))", rust_str_literal(&i.name))
@@ -2049,6 +2485,14 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                         rust_str_literal(&field.name)
                     ));
                 }
+                // An enum member is its own name on the wire (types.md
+                // §3.4) — the interpreter answers `Value::Text(member)`.
+                // Emitting the enum as a value instead made `@role ==
+                // UserRole.admin` fail the native build, which is how every
+                // role gate is written (V1.1-PLAN entry 11).
+                if !ctx.is_local(&n.name) && ctx.symbols.enums.contains_key(&n.name) {
+                    return Ok(format!("v_str({})", rust_str_literal(&field.name)));
+                }
             }
             let b = emit_expr(base, ctx)?;
             format!("jwc_get_field(&{b}, {})", rust_str_literal(&field.name))
@@ -2064,13 +2508,56 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
             let r = emit_expr(rhs, ctx)?;
             match op {
                 UnaryOp::Not => format!("V::Bool(!jwc_truthy(&{r}))"),
-                UnaryOp::Neg => format!("jwc_neg({r})"),
+                UnaryOp::Neg => match e.arith.get() {
+                    Some(crate::ast::Arith::Numeric) => {
+                        ctx.used.insert("jwc_numeric_neg".to_string());
+                        format!("jwc_numeric_neg({r})")
+                    }
+                    Some(crate::ast::Arith::Int) => format!("jwc_int_neg({r})"),
+                    None => format!("jwc_neg({r})"),
+                },
             }
         }
 
+        // `string.of(count + 1)` with `count` an `i64`: compute natively and
+        // box the result once, rather than box each operand and dispatch.
+        ExprKind::Binary { op, .. }
+            if matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+            ) && {
+                let n = |x: &str| ctx.is_native_int(x);
+                pure_int(e, &n) && !matches!(&*e.kind, ExprKind::Int(_))
+            } && expr_reads_native(e, ctx) =>
+        {
+            format!("V::Int({})", emit_int(e, ctx)?)
+        }
         ExprKind::Binary { op, lhs, rhs } => {
             let l = emit_expr(lhs, ctx)?;
             let r = emit_expr(rhs, ctx)?;
+            // The checker said which arithmetic this is. A `numeric` and a
+            // `bigint` read from a column are both strings here, so without
+            // it `"1.5" + "2.25"` is a concatenation.
+            let sym = match op {
+                BinOp::Add => Some('+'),
+                BinOp::Sub => Some('-'),
+                BinOp::Mul => Some('*'),
+                BinOp::Div => Some('/'),
+                BinOp::Rem => Some('%'),
+                _ => None,
+            };
+            if let Some(sym) = sym {
+                match e.arith.get() {
+                    Some(crate::ast::Arith::Numeric) => {
+                        ctx.used.insert("jwc_numeric_op".to_string());
+                        return Ok(format!("jwc_numeric_op('{sym}', {l}, {r})"));
+                    }
+                    Some(crate::ast::Arith::Int) => {
+                        return Ok(format!("jwc_int_op('{sym}', {l}, {r})"));
+                    }
+                    None => {}
+                }
+            }
             match op {
                 // Arithmetic and concatenation: `V` in, `V` out.
                 BinOp::Add => format!("jwc_add({l}, {r})"),
@@ -2082,12 +2569,9 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String> {
                 // Comparison: the prelude's helpers take references and
                 // answer a Rust `bool`, so the result is lifted back into a
                 // `V` here rather than pretending they compose.
-                BinOp::Eq | BinOp::EqOpt => format!("V::Bool(jwc_eq(&{l}, &{r}))"),
-                BinOp::Ne => format!("V::Bool(!jwc_eq(&{l}, &{r}))"),
-                BinOp::Lt => format!("V::Bool(jwc_lt(&{l}, &{r}))"),
-                BinOp::Le => format!("V::Bool(jwc_lte(&{l}, &{r}))"),
-                BinOp::Gt => format!("V::Bool(jwc_gt(&{l}, &{r}))"),
-                BinOp::Ge => format!("V::Bool(jwc_gte(&{l}, &{r}))"),
+                BinOp::Eq | BinOp::EqOpt | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                    format!("V::Bool({})", compare_code(*op, &l, &r, e, ctx))
+                }
 
                 // `and` / `or` must short-circuit, so they are emitted
                 // inline: a call would evaluate both sides.
@@ -2995,23 +3479,7 @@ fn emit_built_with(
 /// True when an expression reads a column of the table being written —
 /// `exec::reads_a_column`.
 fn reads_a_column(table: &crate::ast::QualifiedTable, e: &Expr, ctx: &Ctx) -> bool {
-    let object = ctx
-        .symbols
-        .by_path
-        .get(&table.text())
-        .cloned()
-        .unwrap_or_else(|| table.object.name.clone());
-    let Some(t) = ctx.model.tables.iter().find(|t| t.declared == object) else {
-        return false;
-    };
-    match &*e.kind {
-        ExprKind::Name(n) => t.column(&n.name).is_some(),
-        ExprKind::Binary { lhs, rhs, .. } => {
-            reads_a_column(table, lhs, ctx) || reads_a_column(table, rhs, ctx)
-        }
-        ExprKind::Unary { rhs, .. } => reads_a_column(table, rhs, ctx),
-        _ => false,
-    }
+    crate::sql::reads_a_column(ctx.model, &ctx.symbols.by_path, table, e)
 }
 
 /// The builder wants an `Expr` per bound value but never looks at it — the

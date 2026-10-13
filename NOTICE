@@ -1,0 +1,44 @@
+# NOTICE
+
+Third-party material compiled into the `jwc` binary, and where its licence
+text lives. Distributed with every release beside the binary and the
+`.sha256` files.
+
+## Vendored, in this repository
+
+| | Version | Licence | Text |
+|---|---|---|---|
+| [Swagger UI](https://github.com/swagger-api/swagger-ui) | 5.33.1 | Apache-2.0 | [`vendor/swagger-ui/LICENSE`](vendor/swagger-ui/LICENSE) |
+
+Three files — `swagger-ui-bundle.js`, `swagger-ui-standalone-preset.js` and
+`swagger-ui.css` — stored gzipped under `vendor/swagger-ui/` and served
+unmodified by `server { swagger }` and `jwc swagger`. The two
+`*.LICENSE.txt` files beside them are the dependency notices webpack
+emitted into the bundles; they are kept because the bundles reference them.
+
+Not modified. `vendor/swagger-ui/README.md` has the refresh procedure.
+
+## Rust dependencies
+
+Compiled in from crates.io, resolved by `Cargo.lock`. Their licences are
+Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BSL-1.0, CC0-1.0,
+CDLA-Permissive-2.0, Unicode-3.0, Unlicense, Zlib, LGPL-2.1-or-later, and
+Apache-2.0 WITH LLVM-exception — the set `deny.toml` admits, which
+`cargo deny` enforces on every push.
+
+The per-crate list is not copied here because it would be a second copy of
+`Cargo.lock` that drifts from it. To produce it for a given build:
+
+```
+cargo deny --features redis list            # grouped by licence
+cargo deny --features redis list -f tsv     # one row per crate
+```
+
+Only `jwc` and `jwc-runtime` appear as unlicensed, and both are this
+workspace's own crates: `publish = false`, and the project's licence is
+the decision `Cargo.toml` records as still open.
+
+## This project
+
+No licence has been chosen yet. Nothing here grants rights to JWC itself;
+it records the rights that come with what JWC was built from.

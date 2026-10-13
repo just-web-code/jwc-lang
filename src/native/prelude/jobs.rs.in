@@ -416,7 +416,12 @@ fn jwc_job_arg(payload: &serde_json::Value, name: &str, ty: &str) -> V {
     }
     match ty {
         "boolean" => V::Bool(raw.as_bool().unwrap_or(false)),
-        "int" | "bigint" | "smallint" => match &raw {
+        "bigint" => match &raw {
+            serde_json::Value::Number(n) => jwc_big(n.as_i64().unwrap_or(0)),
+            serde_json::Value::String(s) => jwc_big(s.parse().unwrap_or(0)),
+            _ => V::Null,
+        },
+        "int" | "smallint" => match &raw {
             serde_json::Value::Number(n) => V::Int(n.as_i64().unwrap_or(0)),
             serde_json::Value::String(s) => V::Int(s.parse().unwrap_or(0)),
             _ => V::Null,

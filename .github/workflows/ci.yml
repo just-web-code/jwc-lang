@@ -53,7 +53,7 @@ jobs:
           --test registry --test snapshot_sample --test static_assets
           --test templates --test tooling --test socket_limits
           --test editor_assets --test language_version --test append_in_place
-          --test coercions
+          --test coercions --test arithmetic
 
       - name: Cargo test (redis feature, no server)
         run: cargo test --features redis --lib
@@ -176,6 +176,26 @@ jobs:
           echo
           curl -fsS http://127.0.0.1:8080/healthz | grep -q '"status":"ok"'
           kill $pid
+
+      # Answering is not computing the same thing. `tests/native_parity` is
+      # a `main()` that prints what both backends once disagreed on —
+      # integer locals lowered to `i64`, `numeric` arithmetic — and the two
+      # outputs have to be identical.
+      - name: The binary computes what the interpreter computes
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/np && cp -r tests/native_parity /tmp/np
+          ./target/release/jwc run /tmp/np > /tmp/np.interp
+          ./target/release/jwc build /tmp/np --release
+          /tmp/np/bin/release/native_parity > /tmp/np.native
+          diff /tmp/np.interp /tmp/np.native
+          # One past `i64::MAX` is refused on both, never wrapped.
+          mkdir -p /tmp/ovf
+          printf '{ "name": "ovf", "version": "0.1.0", "entry": "app.jwc" }\n' > /tmp/ovf/jwcproj.json
+          printf 'namespace app;\n\nfunction main() {\n    let big = 9223372036854775807;\n    big = big + 1;\n    console.writeln(string.of(big));\n}\n' > /tmp/ovf/app.jwc
+          if ./target/release/jwc run /tmp/ovf; then echo "interpreter wrapped"; exit 1; fi
+          ./target/release/jwc build /tmp/ovf --release
+          if /tmp/ovf/bin/release/ovf; then echo "native binary wrapped"; exit 1; fi
 
   postgres:
     name: against a real Postgres

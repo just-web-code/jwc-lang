@@ -48,8 +48,28 @@ pub struct RouteResponse {
     pub media: Option<String>,
 }
 
+/// Every pass the program needs, and the diagnostics of the last.
+///
+/// One pass cannot know what a function it has not reached returns, and an
+/// unannotated function has no declared return — so on a single pass every
+/// call to one was `Unknown` at its call site, declared before it or not,
+/// and nothing about its result was checked: `let y: boolean =
+/// Shop.one(@id).price` was accepted (V1.1-PLAN entry 10). Each pass hands
+/// the next the return types it inferred; a chain `f` → `g` → `h` needs one
+/// pass per link, so this runs until the inferred returns stop changing.
+/// The bound is a guard, not a budget: real programs settle in two or three.
 pub fn check(ws: &Workspace, sym: &Symbols, model: &crate::model::SchemaModel) -> Checked {
-    check_with(ws, sym, model, &Default::default())
+    const MAX_PASSES: usize = 8;
+    let mut checked = check_with(ws, sym, model, &Default::default());
+    for _ in 1..MAX_PASSES {
+        let next = check_with(ws, sym, model, &checked.function_returns);
+        let settled = next.function_returns == checked.function_returns;
+        checked = next;
+        if settled {
+            break;
+        }
+    }
+    checked
 }
 
 /// The same pass, with the return types a previous run inferred.
@@ -186,6 +206,31 @@ struct Checker<'a> {
     body: BodyKind,
     current_fn: Option<String>,
     returns: Vec<(Ty, Span)>,
+}
+
+/// The first specifier `chrono` cannot read, if there is one.
+///
+/// `StrftimeItems` reports a bad `%x` as `Item::Error` rather than
+/// refusing the whole string, so this walks for the first one and names
+/// it — the author wrote one character wrong and wants to know which.
+fn bad_strftime(fmt: &str) -> Option<String> {
+    use chrono::format::{Item, StrftimeItems};
+    if !StrftimeItems::new(fmt).any(|i| matches!(i, Item::Error)) {
+        return None;
+    }
+    // Which one. A `%` run is the only thing that can be in error, so the
+    // first that does not parse on its own is the one to name.
+    let bytes: Vec<char> = fmt.chars().collect();
+    for (i, c) in bytes.iter().enumerate() {
+        if *c != '%' {
+            continue;
+        }
+        let spec: String = bytes[i..(i + 2).min(bytes.len())].iter().collect();
+        if StrftimeItems::new(&spec).any(|it| matches!(it, Item::Error)) {
+            return Some(spec);
+        }
+    }
+    Some(fmt.to_string())
 }
 
 impl<'a> Checker<'a> {
@@ -389,10 +434,13 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------ driver
 
     fn run(&mut self) {
-        for fi in 0..self.ws.files.len() {
+        // Walked in place, not cloned: `note_arith` marks the expressions
+        // themselves, and the marks have to land on the AST the backends
+        // run rather than on a copy that is dropped here.
+        let ws = self.ws;
+        for (fi, file) in ws.files.iter().enumerate() {
             self.file = fi;
-            let decls = self.ws.files[fi].program.decls.clone();
-            for d in &decls {
+            for d in &file.program.decls {
                 self.decl(d);
             }
         }
@@ -1374,6 +1422,18 @@ impl<'a> Checker<'a> {
 
     // ------------------------------------------------------------ expressions
 
+    /// Marks what arithmetic `e` is, from the type it produced (see
+    /// `ast::ArithMark`). Text concatenation and date arithmetic are not
+    /// marked: the runtime tells those apart by the values themselves.
+    fn note_arith(&mut self, e: &Expr, t: &Ty) {
+        use crate::ast::Arith;
+        match t.scalar() {
+            Some(Scalar::Numeric) => e.arith.set(Arith::Numeric),
+            Some(Scalar::Smallint | Scalar::Int | Scalar::Bigint) => e.arith.set(Arith::Int),
+            _ => {}
+        }
+    }
+
     fn expr(&mut self, e: &Expr) -> Ty {
         match &*e.kind {
             // types.md §2.2 — `int` if it fits, else `bigint`. Past
@@ -1485,12 +1545,22 @@ impl<'a> Checker<'a> {
                                 "types.md §12.2",
                             );
                         }
+                        self.note_arith(e, &t);
                         t
                     }
                 }
             }
 
-            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.span),
+            ExprKind::Binary { op, lhs, rhs } => {
+                let t = self.binary(*op, lhs, rhs, e);
+                if matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                ) {
+                    self.note_arith(e, &t);
+                }
+                t
+            }
 
             ExprKind::Ternary {
                 cond,
@@ -2226,9 +2296,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr, span: Span) -> Ty {
+    fn binary(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr, whole: &Expr) -> Ty {
+        let span = whole.span;
         let a = self.expr(lhs);
         let b = self.expr(rhs);
+        if matches!(
+            op,
+            BinOp::Eq | BinOp::Ne | BinOp::EqOpt | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        ) {
+            note_comparison(whole, &a, &b);
+        }
         match op {
             BinOp::And | BinOp::Or => {
                 self.require_boolean(&a, lhs.span);
@@ -2902,6 +2979,24 @@ impl<'a> Checker<'a> {
                 arity(self, 1);
                 Ty::interval()
             }
+            // The inverses. `interval` has no fields (`E0312`) and nothing
+            // read a number back out of one, so a program that subtracted
+            // two timestamps could print the difference and do nothing
+            // else with it — not divide a count by it, not compare it to
+            // a budget, not report it in milliseconds.
+            //
+            // Seconds as `numeric` because it is exact and carries the
+            // whole microsecond fraction; the other two as `bigint`,
+            // truncated toward zero, which is what an elapsed-time
+            // counter is.
+            "date.total_seconds" => {
+                arity(self, 1);
+                Ty::numeric()
+            }
+            "date.total_millis" | "date.total_micros" => {
+                arity(self, 1);
+                Ty::bigint()
+            }
             "date.add" => {
                 arity(self, 2);
                 Ty::timestamptz()
@@ -2910,8 +3005,41 @@ impl<'a> Checker<'a> {
                 arity(self, 1);
                 Ty::timestamptz().opt()
             }
+            // `fmt` is a literal, checked here (builtins.md §3). Before
+            // this the argument was read by nobody: the checker ignored
+            // it and the runtime returned the timestamp whatever it said,
+            // so `"%Y-%m-%d"` and `"butunlay-buzuq-%Q"` answered the same
+            // string and neither was the one asked for.
             "date.format" => {
                 arity(self, 2);
+                if let Some(e) = exprs.get(1) {
+                    match &*e.kind {
+                        ExprKind::Str(f) | ExprKind::RawStr(f) => {
+                            if let Some(bad) = bad_strftime(f) {
+                                self.err_note(
+                                    e.span,
+                                    "E0306",
+                                    format!("`{bad}` is not a strftime specifier"),
+                                    "the format is strftime, as `date(1)` is and Postgres `to_char` is \
+                                     not: `%Y-%m-%d %H:%M:%S`",
+                                    "builtins.md §3",
+                                );
+                            }
+                        }
+                        // A computed format cannot be checked, and a
+                        // format the program assembles at runtime is a
+                        // format nobody reviewed.
+                        _ => self.err_note(
+                            e.span,
+                            "E0306",
+                            "`date.format`'s format must be a literal",
+                            "write the format at the call site; one assembled at runtime \
+                             cannot be checked, and an unchecked format \
+                             answers the wrong string rather than an error",
+                            "builtins.md §3",
+                        ),
+                    }
+                }
                 Ty::text()
             }
 
@@ -5377,4 +5505,24 @@ fn non_const_expr(e: &Expr) -> Option<Span> {
         }),
         _ => Some(e.span),
     }
+}
+
+/// Marks a comparison between two numeric types as numeric (see
+/// `ast::ArithMark`), so both sides are read as numbers at run time. Two
+/// `bigint` columns are two strings there, and compared as text `"10"` sorts
+/// before `"9"`. Optional sides count — a null still compares as a null.
+fn note_comparison(e: &Expr, a: &Ty, b: &Ty) {
+    use crate::ast::Arith;
+    let (Some(x), Some(y)) = (a.strip_opt().scalar(), b.strip_opt().scalar()) else {
+        return;
+    };
+    if !x.is_numeric() || !y.is_numeric() {
+        return;
+    }
+    e.arith
+        .set(if x == Scalar::Numeric || y == Scalar::Numeric {
+            Arith::Numeric
+        } else {
+            Arith::Int
+        });
 }

@@ -2602,9 +2602,9 @@ async fn a_main_that_serves_is_distinguishable_from_one_that_does_not() {
 fn both_backends_do_the_same_timestamp_arithmetic() {
     let core = include_str!("../src/interval_core.rs.in");
     for f in [
-        "fn jwc_parse_iso_duration(",
-        "fn jwc_shift_secs(",
-        "fn jwc_ts_diff_secs(",
+        "fn jwc_duration_micros(",
+        "fn jwc_shift_micros(",
+        "fn jwc_ts_diff_micros(",
     ] {
         assert!(core.contains(f), "the shared file must hold `{f}`");
     }
@@ -2627,12 +2627,12 @@ fn both_backends_do_the_same_timestamp_arithmetic() {
         "the native prelude must implement `timestamptz ± interval`"
     );
     assert!(
-        base.contains("jwc_ts_diff_secs(x, y)"),
+        base.contains("jwc_ts_diff_micros(x, y)"),
         "the native prelude must implement `timestamptz - timestamptz`"
     );
     for (name, hay) in [("interpreter", exec), ("native", base)] {
         assert!(
-            hay.contains("jwc_shift_secs") && hay.contains("jwc_ts_diff_secs"),
+            hay.contains("jwc_shift_micros") && hay.contains("jwc_ts_diff_micros"),
             "the {name} backend must reach the shared arithmetic"
         );
     }

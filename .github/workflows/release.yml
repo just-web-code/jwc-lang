@@ -184,7 +184,10 @@ jobs:
         run: |
           mkdir -p stage
           cp target/${{ matrix.target }}/release/jwc stage/
-          cp README.md ROADMAP.md stage/
+          # NOTICE travels with the binary, not only with the source: the
+          # vendored Swagger UI is Apache-2.0 and §4 is about what
+          # accompanies the distribution.
+          cp README.md ROADMAP.md NOTICE stage/
           asset="jwc-${{ steps.ver.outputs.label }}-${{ matrix.short }}.tar.gz"
           tar -czf "$asset" -C stage .
           if command -v sha256sum >/dev/null 2>&1; then
@@ -200,7 +203,7 @@ jobs:
         run: |
           $stage = New-Item -ItemType Directory -Path stage -Force
           Copy-Item "target/${{ matrix.target }}/release/jwc.exe"    "$stage/"
-          Copy-Item README.md, ROADMAP.md "$stage/"
+          Copy-Item README.md, ROADMAP.md, NOTICE "$stage/"
           $asset = "jwc-${{ steps.ver.outputs.label }}-${{ matrix.short }}.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $asset -Force
           $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
