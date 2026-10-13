@@ -126,11 +126,9 @@ numeric(12,2) = 19.99`, `qty int = 3`, on `1.0.1`:
 The checker knows the declared types, so it now marks each `+ - * / %` and
 unary `-` with the arithmetic it is (`ast::ArithMark`), and both backends
 read the operands as that. The mark sits on the AST node rather than in a
-side table because the interpreter runs a clone of the tree. `jwc serve`
-runs a second checker pass at load for the marks, so that an operator over
-the result of a function — `Shop.one(@id).price * 2` — is typed too; its
-diagnostics are not reported, and a program `jwc check` accepts still
-starts.
+side table because the interpreter runs a clone of the tree. An operator
+over the result of a function — `Shop.one(@id).price * 2` — is typed too,
+now that the checker sees through a function's return (below).
 
 Two smaller things on the way:
 
@@ -200,6 +198,68 @@ per-project one; `CARGO_TARGET_DIR` wins over both, as it does for cargo.
 A lock beside the cache is held from the cargo run until the binary is
 copied out, so two projects with the same name cannot take each other's.
 An existing `.jwc-build/target` is no longer read and can be deleted.
+
+### `jwc build` builds the three applications, and they answer what `jwc serve` answers
+
+`jwc build` refused e-school, MyWallet and jwc-shortener — all three — on
+1.0.1. It now builds them, and `tools/parity/run.sh` runs each under both
+backends on fresh databases and diffs every response:
+
+| | requests | identical |
+|---|---:|---:|
+| e-school (its own `scripts/seed_demo.py`, then reads) | 813 | 813 |
+| MyWallet | 34 | 34 |
+| jwc-shortener | 11 | 11 |
+
+What was in the way, and what running them turned up:
+
+- **Views refused the whole program.** e-school has eleven. Nothing about
+  a view is the binary's to do — `query_sql` lowers a read through one to
+  the statement the interpreter sends, and creating it is `jwc migrate`'s —
+  so the gate is gone.
+- **`set hits = Links.hits + 1`** reads the row's own column and belongs in
+  the statement. The interpreter knew the qualified form; the native backend
+  had its own copy of the test that only knew bare `hits`. There is one
+  function now (`sql::reads_a_column`), used by both.
+- **`UserRole.admin`** in an expression — how every role gate is written —
+  was emitted as a value read of `UserRole` and refused. It is the member's
+  name, as the interpreter answers.
+- **`for (let entry in @req.entries) { insert … { ...@entry } }`**: the
+  binder is an element of a class's array field, so its shape is known; it
+  was refused as an untyped spread.
+- **The native JSON parser read every request body as Latin-1.** Each byte
+  of a string was pushed as a `char`, so `dushanba–juma` came back
+  `dushanbaâ…juma` and every Cyrillic letter became two wrong ones —
+  stored, and answered. It now keeps UTF-8, joins a `\ud83d\ude00`
+  surrogate pair into the one character it encodes, and refuses a lone
+  surrogate as serde_json does under `jwc serve`. Found by e-school's
+  seed script, the one request out of 813 that differed.
+
+### A `bigint` is a string on the wire from a native binary too
+
+types.md §2.3: a `bigint` serialises as a JSON string, so a JavaScript
+client does not round an id above 2^53. `jwc serve` did; a native binary
+wrote `{"id":1}` for a `bigint` path parameter, `bigint(x)`, a body field
+and anything computed from them, because `V` had only `V::Int`. A `bigint`
+is now held in its wire form (`jwc_big`) wherever the interpreter builds a
+`Value::Bigint`, and arithmetic with one is a `bigint`, as there.
+
+Two `bigint`s are then two strings, and so were two `bigint` columns on
+**both** backends already — `other.id > it.id` compared `"10"` with `"9"` as
+text. The checker now marks a comparison between two numeric types too, and
+both backends compare the operands as numbers.
+
+### `jwc check` sees through a function's return
+
+An unannotated function has no declared return type, and on the checker's
+single pass every call to one was `Unknown` at its call site — declared
+before it or not. Nothing about its result was checked:
+`let y: boolean = Shop.one(@id).price` was accepted. The checker now runs
+until the inferred return types stop changing — two passes for most
+programs, one more per link in a chain of unannotated calls — and every
+command that reports diagnostics uses it. e-school, MyWallet and
+jwc-shortener check clean under it; a program that does not had a real type
+error the old pass let through.
 
 ### `NOTICE`
 
